@@ -1,0 +1,65 @@
+variables:
+  UV_VERSION: "0.9.18"
+  PYTHON_VERSION: "3.10"
+  BASE_LAYER: bookworm-slim
+  # GitLab CI creates a separate mountpoint for the build directory,
+  # so we need to copy instead of using hard links.
+  UV_LINK_MODE: copy
+
+  # Settings for the proxy
+  http_proxy: http://www-proxy.helmholtz-berlin.de:3128
+  https_proxy: http://www-proxy.helmholtz-berlin.de:3128
+  no_proxy: gitlab.helmholtz-berlin.de
+
+image: ghcr.io/astral-sh/uv:$UV_VERSION-python$PYTHON_VERSION-$BASE_LAYER
+
+ # Install git so dynamic versioning can run
+before_script:
+  - apt-get update -y
+  - apt-get install -y git ca-certificates
+
+stages:
+ # - test
+  - build
+  - deploy
+
+#test:
+#  stage: test
+#  tags:
+#    - docker
+#  script:
+#    - poetry run pytest
+
+build:
+  stage: build
+  image: ghcr.io/astral-sh/uv:$UV_VERSION-python$PYTHON_VERSION-$BASE_LAYER
+  script:
+    - uv build
+  #rules:
+  #  - if: '$CI_COMMIT_TAG' # Run for tag push
+  artifacts:
+    paths:
+      - dist/*.whl
+      - dist/*.tar.gz
+
+# Publish to HZB gitlab package registry. It has the project ID 2312.
+deploy_hzb_gitlab:
+ stage: deploy
+ needs:
+   - job: build
+     artifacts: true
+ script:
+    - uv publish --publish-url ${CI_API_V4_URL}/projects/2312/packages/pypi -u gitlab-ci-token -p ${CI_JOB_TOKEN} 
+ rules:
+   - if: $CI_COMMIT_TAG
+
+ # Publish to codebase package registry.
+deploy_codebase:
+ stage: deploy
+ needs:
+   - job: build
+     artifacts: true
+ script:
+    - uv publish --publish-url "https://codebase.helmholtz.cloud/api/v4/projects/19837/packages/pypi" -u ${PUBLISH_USER} -p ${PUBLISH_TOKEN} 
+ rules:
+   - if: $CI_COMMIT_TAG

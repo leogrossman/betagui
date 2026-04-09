@@ -1,0 +1,21 @@
+[project]
+name = "mlsreflat"
+dynamic = ["version"]
+description = "MLS reference lattice."
+readme = "README.md"
+authors = [
+    { name = "Teresia Olsson", email = "teresia.olsson@helmholtz-berlin.de" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "accelerator-toolbox>=0.7.1",
+    "matplotlib",
+    "reflat-tools"
+    ]
+    
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
