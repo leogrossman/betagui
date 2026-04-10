@@ -51,6 +51,7 @@ want to push back from the control-room machine.
 Before first machine use, read:
 
 - [CONTROL_ROOM.md](CONTROL_ROOM.md)
+- [docs/control_room_git_setup.md](docs/control_room_git_setup.md)
 - [docs/control_room_test_plan.md](docs/control_room_test_plan.md)
 - [docs/runtime_checklist.md](docs/runtime_checklist.md)
 - [docs/write_paths.md](docs/write_paths.md)

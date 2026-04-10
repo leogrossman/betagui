@@ -20,6 +20,8 @@ packages installed.
   small step-by-step read-only runner
 - [runtime_checklist.md](docs/runtime_checklist.md)
   short pre-run validation checklist
+- [control_room_git_setup.md](docs/control_room_git_setup.md)
+  copy-paste Git and deploy-key setup for the control-room machine
 - [write_paths.md](docs/write_paths.md)
   explicit list of machine-writing code paths
 - [control_room_test_plan.md](docs/control_room_test_plan.md)
