@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence
 
 import numpy as np
-from scipy import constants
+
+SPEED_OF_LIGHT_M_PER_S = 299792458.0
+
 
 try:
     from .epics_adapter import BetaguiPVs
@@ -144,7 +146,7 @@ def measure_chromaticity(adapter, pvs: BetaguiPVs, inputs: MeasurementInputs, al
     # Porting fix: the legacy expression was written as `1.0/(48.0/constants.c)/1000`
     # and annotated with `frev = 6246 kHz`. The comment matches `c / 48 / 1000`,
     # so use that intended value here.
-    frev_khz = constants.c / 48.0 / 1000.0
+    frev_khz = SPEED_OF_LIGHT_M_PER_S / 48.0 / 1000.0
     slope_x = float(np.polyder(fit_x)(0.0))
     slope_y = float(np.polyder(fit_y)(0.0))
     slope_s = float(np.polyder(fit_s)(0.0))

@@ -14,8 +14,9 @@ python3 scripts/quick_diag.py
 Confirm:
 
 - the correct Python environment is active
-- `numpy`, `scipy`, `matplotlib`, `epics`, and `tkinter` import
+- `numpy`, `matplotlib`, `epics`, and `tkinter` import
 - EPICS CLI tools are present
+- the standalone control-room file can be run directly
 
 ## 2. PV Sanity Check
 
@@ -41,14 +42,14 @@ cainfo ERMPCGP:rdRmp
 Start the clean control-room GUI without writes:
 
 ```bash
-python3 control_room/betagui_safe.py
+python3 control_room/betagui.py --safe
 ```
 
 Confirm:
 
 - the GUI starts
 - status messages do not show missing critical PVs
-- matrix loads if the default legacy matrix file is present
+- the embedded default matrix loads
 
 Do not try write-capable actions yet.
 
@@ -57,7 +58,7 @@ Do not try write-capable actions yet.
 Run the safe CLI preflight:
 
 ```bash
-python3 control_room/betagui_cli_safe.py
+python3 control_room/betagui_cli.py --safe
 ```
 
 ## 5. First Write-Capable GUI Test

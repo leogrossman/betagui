@@ -23,8 +23,8 @@ jobs:
 
       - name: Run unit tests
         run: |
-          python -m unittest tests.test_matrix_io tests.test_mock_measurement tests.test_output_regression tests.test_measure_cli tests.smoke_test_import
+          python -m unittest tests.test_control_room_runtime tests.test_control_room_entrypoints tests.test_matrix_io tests.test_mock_measurement tests.test_output_regression tests.test_measure_cli tests.smoke_test_import
 
       - name: Check syntax
         run: |
-          python -m py_compile control_room/betagui.py control_room/betagui_safe.py control_room/betagui_cli.py control_room/betagui_cli_safe.py development/betagui.py src/betagui_py3.py
+          python -m py_compile control_room/betagui.py control_room/betagui_cli.py development/betagui.py src/betagui_py3.py

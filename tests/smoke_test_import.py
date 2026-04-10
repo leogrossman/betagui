@@ -24,7 +24,7 @@ class SmokeImportTest(unittest.TestCase):
 
     def test_import_control_room_entrypoint(self):
         root = Path(__file__).resolve().parents[1]
-        module = load_module(root / "control_room" / "betagui_safe.py", "betagui_safe_entry")
+        module = load_module(root / "control_room" / "betagui.py", "betagui_entry")
         self.assertTrue(hasattr(module, "build_arg_parser"))
 
 

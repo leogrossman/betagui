@@ -12,13 +12,9 @@ Both are intended to let you test and review the port before touching a real mac
 There are now separate control-room and development entrypoints:
 
 - [control_room/betagui.py](https://github.com/leogrossman/betagui/blob/main/control_room/betagui.py)
-  for normal write-capable legacy-profile control-room GUI use
-- [control_room/betagui_safe.py](https://github.com/leogrossman/betagui/blob/main/control_room/betagui_safe.py)
-  for read-only control-room GUI preflight
+  for legacy-profile control-room GUI use, with `--safe` for read-only preflight
 - [control_room/betagui_cli.py](https://github.com/leogrossman/betagui/blob/main/control_room/betagui_cli.py)
-  for the most basic live legacy-profile chromaticity measurement from a terminal
-- [control_room/betagui_cli_safe.py](https://github.com/leogrossman/betagui/blob/main/control_room/betagui_cli_safe.py)
-  for read-only CLI preflight
+  for the most basic live legacy-profile chromaticity measurement from a terminal, with `--safe` for read-only preflight
 - [development/betagui.py](https://github.com/leogrossman/betagui/blob/main/development/betagui.py)
   for development, mock mode, and digital twin work
 
@@ -253,7 +249,7 @@ Practical consequence:
 3. Run `run_digital_twin_demo.py --check-legacy-pvs`.
 4. Start `development/betagui.py --live` and confirm the GUI imports and starts without crashing.
 5. Only after that, consider `--allow-writes`.
-6. After twin validation, use `control_room/betagui_safe.py` first, then the normal `control_room/` launchers for actual legacy-profile control-room trials.
+6. After twin validation, use `control_room/betagui.py --safe` first, then the normal `control_room/` launchers for actual legacy-profile control-room trials.
 
 For the current MLS twin, step 4 should use:
 

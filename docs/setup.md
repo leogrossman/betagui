@@ -37,14 +37,19 @@ This repo already includes [.python-version](../.python-version).
 
 ```bash
 python3 -m pip install --upgrade pip
-python3 -m pip install numpy scipy matplotlib pyepics
+python3 -m pip install numpy matplotlib pyepics
 ```
+
+`tkinter` must also be available for the GUI launchers.
+
+The standalone control-room files do not need other repo Python files at
+runtime, but they still require this Python environment.
 
 ## Verify
 
 ```bash
 python3 --version
-python3 -m py_compile control_room/betagui.py control_room/betagui_safe.py control_room/betagui_cli.py control_room/betagui_cli_safe.py development/betagui.py
+python3 -m py_compile control_room/betagui.py control_room/betagui_cli.py development/betagui.py
 python3 -m unittest tests.smoke_test_import tests.test_control_room_entrypoints tests.test_measure_cli tests.test_output_regression tests.test_mock_measurement tests.test_matrix_io
 ```
 
@@ -59,8 +64,8 @@ python3 development/betagui.py
 Control-room preflight:
 
 ```bash
-python3 control_room/betagui_safe.py
-python3 control_room/betagui_cli_safe.py
+python3 control_room/betagui.py --safe
+python3 control_room/betagui_cli.py --safe
 ```
 
 ## Digital Twin

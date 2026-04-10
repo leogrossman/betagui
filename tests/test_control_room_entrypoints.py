@@ -16,11 +16,27 @@ class ControlRoomEntrypointsTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         files = [
             root / "control_room" / "betagui.py",
-            root / "control_room" / "betagui_safe.py",
             root / "control_room" / "betagui_cli.py",
-            root / "control_room" / "betagui_cli_safe.py",
             root / "development" / "betagui.py",
         ]
         for index, path in enumerate(files):
             module = load_module(path, "entrypoint_%d" % index)
             self.assertTrue(hasattr(module, "__file__"))
+
+    def test_control_room_files_are_bundled(self):
+        root = Path(__file__).resolve().parents[1]
+        files = [
+            root / "control_room" / "betagui.py",
+            root / "control_room" / "betagui_cli.py",
+        ]
+        for path in files:
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("build_control_room_standalone", text, msg=str(path))
+            self.assertNotIn("sys.path.insert", text, msg=str(path))
+            self.assertNotIn("from src.", text, msg=str(path))
+            self.assertNotIn("_BUNDLED_MODULES", text, msg=str(path))
+            self.assertEqual(text.count('if __name__ == "__main__":'), 1, msg=str(path))
+        gui_text = (root / "control_room" / "betagui.py").read_text(encoding="utf-8")
+        self.assertIn("EMBEDDED_DEFAULT_MATRIX_3D", gui_text)
+        self.assertNotIn("twin-mls", gui_text)
+        self.assertNotIn("MockEpicsAdapter", gui_text)

@@ -6,9 +6,9 @@ This page is for maintenance, offline work, and digital-twin testing.
 
 - [betagui.py](development/betagui.py)
   development launcher with mock and twin support
-- [development_workflow.md](docs/development_workflow.md)
 - [testing_workflow.md](docs/testing_workflow.md)
-- [open_features.md](docs/open_features.md)
+- [porting_notes.md](docs/porting_notes.md)
+- [feature_parity.md](docs/feature_parity.md)
 
 ## Common Commands
 

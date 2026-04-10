@@ -7,15 +7,15 @@ Use this short checklist before any future real-machine deployment.
 - Confirm the project uses the intended pyenv environment:
   `python3 --version`
 - Confirm required imports:
-  `numpy`, `scipy`, `matplotlib`, `epics`, `tkinter`
+  `numpy`, `matplotlib`, `epics`, `tkinter`
 - Confirm EPICS CLI tools are available:
   `cainfo`, `caget`, `camonitor`, `caput`
+- Confirm the standalone control-room file to be deployed is the intended one.
 
 ## Read-Only Validation
 
 - Start with:
-  `python3 control_room/betagui_safe.py`
-- Do not use `--allow-writes` yet.
+  `python3 control_room/betagui.py --safe`
 - Confirm the GUI starts without import or display errors.
 - Confirm the status panel does not report missing critical PVs.
 - Confirm expected legacy PVs are reachable with `cainfo`.

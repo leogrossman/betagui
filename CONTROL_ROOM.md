@@ -2,16 +2,17 @@
 
 This is the shortest path for operators and testers.
 
+The files in [control_room/](control_room) are standalone plain Python source.
+The GUI file embeds the default response matrices, so it can be copied by
+itself into the control room. It still needs the normal runtime Python
+packages installed.
+
 ## Main Files
 
 - [betagui.py](control_room/betagui.py)
   main GUI entrypoint for the legacy machine profile, write-capable by default
-- [betagui_safe.py](control_room/betagui_safe.py)
-  read-only GUI preflight launcher
 - [betagui_cli.py](control_room/betagui_cli.py)
   minimal write-capable CLI for the core chromaticity measurement
-- [betagui_cli_safe.py](control_room/betagui_cli_safe.py)
-  read-only CLI preflight
 - [runtime_checklist.md](docs/runtime_checklist.md)
   short pre-run validation checklist
 - [write_paths.md](docs/write_paths.md)
@@ -24,7 +25,7 @@ This is the shortest path for operators and testers.
 GUI:
 
 ```bash
-python3 control_room/betagui_safe.py
+python3 control_room/betagui.py --safe
 ```
 
 Read-only means:
@@ -36,7 +37,7 @@ Read-only means:
 CLI fallback:
 
 ```bash
-python3 control_room/betagui_cli_safe.py
+python3 control_room/betagui_cli.py --safe
 ```
 
 ## Enable Live Writes Only When Intended

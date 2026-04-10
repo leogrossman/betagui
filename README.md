@@ -2,78 +2,50 @@
 
 Python 3.9 port of a legacy MLS control-room chromaticity tool.
 
-This repo is organized for two audiences:
+## Control Room
 
-- control-room users: run the legacy-profile tool
-- developers: work with tests, mock mode, and the digital twin
+Use the standalone files in [control_room/](control_room):
 
-## Control-Room Start
+- [control_room/betagui.py](control_room/betagui.py): main GUI
+- [control_room/betagui_cli.py](control_room/betagui_cli.py): minimal CLI fallback
 
-Main files:
+They are hand-maintained plain Python files, not generated packed blobs. The
+GUI file embeds the default legacy response matrices, so it can be copied on
+its own into the control room. It still needs the normal runtime Python
+packages installed.
 
-- [control_room/betagui.py](control_room/betagui.py)
-  normal control-room GUI, write-capable by default
-- [control_room/betagui_safe.py](control_room/betagui_safe.py)
-  read-only GUI preflight
-- [control_room/betagui_cli.py](control_room/betagui_cli.py)
-  normal control-room CLI fallback, write-capable by default
-- [control_room/betagui_cli_safe.py](control_room/betagui_cli_safe.py)
-  read-only CLI preflight
-
-Use these in order:
+Recommended first run:
 
 ```bash
-python3 control_room/betagui_safe.py
-python3 control_room/betagui_cli_safe.py
+python3 control_room/betagui.py --safe
+python3 control_room/betagui_cli.py --safe
 python3 control_room/betagui.py
-python3 control_room/betagui_cli.py
 ```
 
-Important:
+`--safe` means live EPICS reads are allowed but machine writes are suppressed.
+Without `--safe`, both files behave like the legacy script and are write-capable
+by default.
 
-- `*_safe.py` means live EPICS but no machine writes
-- `betagui.py` and `betagui_cli.py` are the normal legacy-style launchers
-- those normal launchers are write-capable by default, like the original script
-
-Before first machine use:
+Before first machine use, read:
 
 - [CONTROL_ROOM.md](CONTROL_ROOM.md)
 - [docs/control_room_test_plan.md](docs/control_room_test_plan.md)
+- [docs/runtime_checklist.md](docs/runtime_checklist.md)
 - [docs/write_paths.md](docs/write_paths.md)
 
-## Development Start
-
-Development launcher:
-
-- [development/betagui.py](development/betagui.py)
-
-Run:
-
-```bash
-python3 development/betagui.py
-```
-
-Useful docs:
-
-- [DEVELOPMENT.md](DEVELOPMENT.md)
-- [docs/index.md](docs/index.md)
-- [docs/testing_workflow.md](docs/testing_workflow.md)
-
-## What The Tool Does
-
-The tool:
+## What It Does
 
 - measures chromaticity by RF sweep and tune readback
 - measures sextupole response matrices
 - applies manual chromaticity corrections
 - resets saved machine settings
-- provides a secondary sextupole scan workflow
+- includes the legacy secondary sextupole scan workflow
 
-The original Python 2 source is preserved untouched in [original/](original).
+The untouched Python 2 original is kept in [original/](original).
 
-## Feature Comparison
+## Feature Parity
 
-| Feature | Legacy tool | Python 3 port |
+| Feature | Legacy tool | Python 3 control-room files |
 | --- | --- | --- |
 | RF-sweep chromaticity measurement | Yes | Yes |
 | Dynamic `alpha0` | Yes | Yes |
@@ -82,109 +54,80 @@ The original Python 2 source is preserved untouched in [original/](original).
 | Manual sextupole correction | Yes | Yes |
 | Reset to saved state | Yes | Yes |
 | Secondary sextupole scan window | Yes | Yes |
-| Mock offline mode | No | Yes |
-| Digital twin mode | No | Yes |
+| Standalone single-file control-room launchers | No | Yes |
+| Read-only preflight mode via `--safe` | No | Yes |
 | Barebones CLI fallback | No | Yes |
 
-Full parity notes:
+More detail: [docs/feature_parity.md](docs/feature_parity.md)
 
-- [docs/feature_parity.md](docs/feature_parity.md)
+## Development And Digital Twin
 
-## Read-Only Mode
+The development launcher is [development/betagui.py](development/betagui.py).
+Use it for mock mode, tests, and the digital twin.
 
-Read-only mode is for preflight checks:
+The digital twin is for integration testing, not for the final control-room
+launchers. It uses a separate PV profile because it does not expose the full
+legacy PV namespace.
 
-- live EPICS connection is allowed
-- write paths are suppressed
-- use it to confirm imports, PV visibility, and GUI startup before real runs
-
-Use:
-
-```bash
-python3 control_room/betagui_safe.py
-python3 control_room/betagui_cli_safe.py
-```
-
-## Digital Twin
-
-The digital twin is for development and integration testing, not for the final
-control-room launchers.
-
-⚠️ **Container not included (too large for GitHub). Download it first:**
+Download the Apptainer image locally:
 
 ```bash
 apptainer pull support/digital_twin/pyat-as-twin-softioc.sif oras://registry.hzdr.de/digital-twins-for-accelerators/containers/pyat-softioc-digital-twin:v0-1-3-mls.2469803
 ```
 
-Start the twin:
+`support/digital_twin/*.sif` is gitignored because the image is too large for
+GitHub, so other repo users need to download it locally.
+
+Run it:
 
 ```bash
 apptainer run support/digital_twin/pyat-as-twin-softioc.sif
 ```
 
-Check the twin:
+Then test against it:
 
 ```bash
 python3 scripts/run_digital_twin_demo.py
-```
-
-Run the development GUI against the twin:
-
-```bash
 python3 development/betagui.py --live --pv-profile twin-mls --pv-prefix leo
 ```
 
-Notes:
+For the current twin, set `alpha0` manually instead of using dynamic `alpha0`.
+More detail: [docs/testing_workflow.md](docs/testing_workflow.md)
 
-- the twin does not expose the full legacy PV namespace
-- it uses a separate PV profile on purpose
-- for the current twin, set `alpha0` manually instead of using dynamic `alpha0`
+## Setup
 
-More:
+Development environment setup, including `pyenv`, is in [docs/setup.md](docs/setup.md).
 
-- [docs/testing_workflow.md](docs/testing_workflow.md)
+Control-room runtime needs:
 
-## Output Parity
+- Python 3.9
+- `numpy`
+- `matplotlib`
+- `pyepics`
+- `tkinter` for the GUI variants
 
-Two output checks matter:
+## Output Checks
 
-- matrix-file compatibility with the legacy text files
-- stable chromaticity regression in mock mode
+What matters most operationally:
 
-The files in [original/](original) are matrix references, not saved
-chromaticity measurements.
+- matrix-file compatibility with the legacy reference files
+- stable chromaticity output in offline regression tests
 
-Matrix compare example:
+Reference files:
 
-```bash
-python3 scripts/compare_outputs.py original/SUwithoutorbitbumpResMat.txt original/SUwithoutorbitbumpResMat.txt --assert-max-abs 0
-```
-
-Chromaticity regression reference:
-
+- [original/SUwithoutorbitbumpResMat.txt](original/SUwithoutorbitbumpResMat.txt)
+- [original/SUwithoutorbitbumpResMat2D.txt](original/SUwithoutorbitbumpResMat2D.txt)
 - [tests/data/mock_chromaticity_expected.txt](tests/data/mock_chromaticity_expected.txt)
-
-## Repo Layout
-
-- [control_room/](control_room): operator-facing launchers
-- [development/](development): development launcher
-- [src/](src): shared library code
-- [original/](original): untouched legacy source and matrix files
-- [support/](support): digital twin container and bundled reference packages
-- [docs/](docs): operator, developer, and theory docs
-- [tests/](tests): `unittest` suite
-- [scripts/](scripts): helper scripts and diagnostics
 
 ## Docs
 
-<https://leogrossman.github.io/betagui/>
-
+Repository docs index: [docs/index.md](docs/index.md)  
+GitHub Pages: <https://leogrossman.github.io/betagui/>
 
 ## TODO
 
-- validate `control_room/betagui_safe.py` on the real machine
-- validate `control_room/betagui.py` on the real machine
-- validate the CLI fallback on the real machine
+- validate the standalone `--safe` preflight on the real machine
+- validate the standalone write-capable launchers on the real machine
+- confirm chromaticity values against control-room expectations
 - confirm the restored secondary scan workflow with operators
 - restore live BPM orbit plotting if a reliable PV source is available
-- update docs
