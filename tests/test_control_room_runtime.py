@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 
 def load_module(path: Path, name: str):
     spec = importlib.util.spec_from_file_location(name, path)
@@ -167,6 +169,171 @@ class ControlRoomRuntimeTest(unittest.TestCase):
             self.assertIn("machine_context", payload["result"]["point_records"][0])
             event_log_size = state.session_logger.event_log_path.stat().st_size
             self.assertLess(event_log_size, 30000)
+
+    def test_apply_sextupole_response_rejects_missing_current_readback(self):
+        module = self.module
+        adapter = FakeAdapter({})
+        with self.assertRaises(ValueError):
+            module.apply_sextupole_response(
+                adapter=adapter,
+                delta_chrom=[1.0, 0.0, 0.0],
+                response_matrix=np.eye(3),
+                mat_status=3,
+                pvs=module.BetaguiPVs.legacy(),
+            )
+
+    def test_apply_sextupole_response_p2_mode_only_touches_p2_families(self):
+        module = self.module
+        values = {
+            module.pvS1P2: 10.0,
+            module.pvS2P2K: 20.0,
+            module.pvS2P2L: 20.0,
+            module.pvS3P2: 30.0,
+            module.pvS1P1: 11.0,
+            module.pvS2P1: 21.0,
+            module.pvS3P1: 31.0,
+        }
+        adapter = FakeAdapter(values)
+        applied = module.apply_sextupole_response(
+            adapter=adapter,
+            delta_chrom=[1.0, 2.0, 3.0],
+            response_matrix=np.eye(3),
+            mat_status=4,
+            pvs=module.BetaguiPVs.legacy(),
+        )
+        self.assertIn(module.pvS1P2, applied)
+        self.assertIn(module.pvS2P2K, applied)
+        self.assertIn(module.pvS2P2L, applied)
+        self.assertIn(module.pvS3P2, applied)
+        self.assertNotIn(module.pvS1P1, applied)
+        self.assertNotIn(module.pvS2P1, applied)
+        self.assertNotIn(module.pvS3P1, applied)
+
+    def test_response_matrix_restores_axis_after_minus_failure(self):
+        module = self.module
+        values = {
+            module.pvS1P1: 11.0,
+            module.pvS1P2: 12.0,
+            module.pvS2P1: 21.0,
+            module.pvS2P2K: 22.0,
+            module.pvS2P2L: 23.0,
+            module.pvS3P1: 31.0,
+            module.pvS3P2: 32.0,
+        }
+        state = self.make_state(values, allow_writes=True)
+        state.bump_option = 3
+        original_mea = module.MeaChrom
+        module.MeaChrom = lambda _state, _entries: None
+        try:
+            result = module.measure_response_matrix(state, {"alpha0": "0.03"})
+        finally:
+            module.MeaChrom = original_mea
+        self.assertIsNone(result)
+        self.assertEqual(state.adapter.values[module.pvS1P1], 11.0)
+        self.assertEqual(state.adapter.values[module.pvS1P2], 12.0)
+
+    def test_response_matrix_computes_inverse_and_writes_payload(self):
+        module = self.module
+        values = {
+            module.pvS1P1: 11.0,
+            module.pvS1P2: 12.0,
+            module.pvS2P1: 21.0,
+            module.pvS2P2K: 22.0,
+            module.pvS2P2L: 23.0,
+            module.pvS3P1: 31.0,
+            module.pvS3P2: 32.0,
+            module.pvfrfSet: 499652.0,
+            module.pvfreqX: 1100.0,
+            module.pvfreqY: 1400.0,
+            module.pvfreqS: 11500.0,
+            module.pvOptTab: 2.0,
+            module.pvfdbsetX: 1.0,
+            module.pvfdbsetY: 1.0,
+            module.pvfdbsetS: 1.0,
+            module.pvorbitrdbk: 1.0,
+            module.pvUcavSet: 480.0,
+            module.pvE: 629.0,
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = module.RuntimeConfig(allow_machine_writes=True, auto_load_default_matrix=False, log_root=Path(tmpdir))
+            state = module.RuntimeState(config=config)
+            state.session_logger = module.SessionLogger.create(Path(tmpdir), "betagui_gui")
+            state.adapter = module.GuardedAdapter(FakeAdapter(values), True, state.log, event_recorder=state.record_event)
+            state.bump_option = 3
+            sequence = iter(
+                [
+                    [0.0, 0.0, 0.0], [2.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0], [0.0, 3.0, 0.0],
+                    [0.0, 0.0, 0.0], [0.0, 0.0, 4.0],
+                ]
+            )
+            original_mea = module.MeaChrom
+            module.MeaChrom = lambda _state, _entries: next(sequence)
+            try:
+                matrix = module.measure_response_matrix(state, {"alpha0": "0.03"})
+            finally:
+                module.MeaChrom = original_mea
+            self.assertTrue(np.allclose(matrix, np.diag([0.5, 1.0 / 3.0, 0.25])))
+            inner_adapter = state.adapter._adapter
+            self.assertIn((module.pvS1P1, 10.0), inner_adapter.put_calls)
+            self.assertIn((module.pvS1P2, 11.0), inner_adapter.put_calls)
+            self.assertEqual(inner_adapter.values[module.pvS1P1], 11.0)
+            self.assertEqual(inner_adapter.values[module.pvS1P2], 12.0)
+            payload_files = sorted((state.session_logger.session_dir / "measurements").glob("response_matrix_*.json"))
+            self.assertEqual(len(payload_files), 1)
+            payload = json.loads(payload_files[0].read_text(encoding="utf-8"))
+            self.assertEqual(payload["bump_dim"], 3)
+            self.assertEqual(len(payload["axis_records"]), 3)
+            self.assertEqual(payload["axis_records"][0]["baseline_currents"][module.pvS1P1], 11.0)
+            self.assertEqual(payload["axis_records"][0]["minus_targets"][module.pvS1P1], 10.0)
+            self.assertEqual(payload["axis_records"][0]["plus_targets"][module.pvS1P1], 11.0)
+
+    def test_export_measurement_result_writes_csv_and_json(self):
+        module = self.module
+        state = self.make_state({})
+        result = module.MeasurementResult(
+            rf_points_hz=np.asarray([1.0, 2.0]),
+            delta_hz=np.asarray([-0.5, 0.5]),
+            tune_x_khz=np.asarray([1100.0, 1101.0]),
+            tune_y_khz=np.asarray([1400.0, 1401.0]),
+            tune_s_khz=np.asarray([11.5, 11.6]),
+            fit_x=np.poly1d([1.0, 0.0]),
+            fit_y=np.poly1d([1.0, 0.0]),
+            fit_s=np.poly1d([1.0, 0.0]),
+            xi=[1.0, 2.0, 3.0],
+            alpha0=0.03,
+            point_records=[
+                {
+                    "rf_target_hz": 1.0,
+                    "rf_readback_hz": 1.0,
+                    "tune_x_mean_khz": 1100.0,
+                    "tune_y_mean_khz": 1400.0,
+                    "tune_s_mean_khz": 11.5,
+                    "tune_x_mean_unitless": 0.1,
+                    "tune_y_mean_unitless": 0.2,
+                    "tune_s_mean_unitless": 0.01,
+                },
+                {
+                    "rf_target_hz": 2.0,
+                    "rf_readback_hz": 2.0,
+                    "tune_x_mean_khz": 1101.0,
+                    "tune_y_mean_khz": 1401.0,
+                    "tune_s_mean_khz": 11.6,
+                    "tune_x_mean_unitless": 0.11,
+                    "tune_y_mean_unitless": 0.21,
+                    "tune_s_mean_unitless": 0.011,
+                },
+            ],
+            fit_x_coeffs=[1.0, 0.0],
+            fit_y_coeffs=[1.0, 0.0],
+            fit_s_coeffs=[1.0, 0.0],
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "result"
+            ok = module.export_measurement_result(state, result, {"alpha0": "0.03"}, target)
+            self.assertTrue(ok)
+            self.assertTrue((Path(tmpdir) / "result.csv").exists())
+            self.assertTrue((Path(tmpdir) / "result.json").exists())
 
 
 if __name__ == "__main__":

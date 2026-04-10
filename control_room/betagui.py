@@ -608,7 +608,13 @@ def apply_sextupole_response(adapter, delta_chrom: Sequence[float], response_mat
     def add_current(pv_name: str, increment: float):
         if not pv_name:
             return
-        current = float(adapter.get(pv_name, 0.0) or 0.0)
+        current = adapter.get(pv_name, None)
+        if current is None:
+            raise ValueError("Current readback is unavailable for %s." % pv_name)
+        try:
+            current = float(current)
+        except (TypeError, ValueError):
+            raise ValueError("Current readback is non-numeric for %s: %r" % (pv_name, current))
         new_value = current + float(increment)
         # WRITE PATH: on live hardware this changes sextupole current setpoints.
         adapter.put(pv_name, new_value)
@@ -847,6 +853,19 @@ def _get_float(state: RuntimeState, pv_name: str, default: float = 0.0) -> float
     except (TypeError, ValueError):
         state.log("Non-numeric value from %s: %r" % (pv_name, value))
         return default
+
+
+def _get_required_float(state: RuntimeState, pv_name: str, label: str) -> float:
+    """Read a numeric PV value or fail explicitly instead of silently using zero."""
+    if not pv_name:
+        raise ValueError("%s PV is not configured." % label)
+    value = state.adapter.get(pv_name, None)
+    if value is None:
+        raise ValueError("%s PV %s is unavailable." % (label, pv_name))
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise ValueError("%s PV %s returned non-numeric value %r." % (label, pv_name, value))
 
 
 def _sextupole_snapshot(state: RuntimeState) -> Dict[str, float]:
@@ -1855,6 +1874,7 @@ def measure_response_matrix(state: RuntimeState, entry_values: Dict[str, str]) -
     bump_dim = 2 if state.bump_option in (1, 2) else 3
     nsext = nsext_s if state.bump_option in (1, 3) else nsext_p2
     a_matrix = np.zeros((bump_dim, bump_dim))
+    axis_records = []
 
     for index in range(bump_dim):
         if state.stop_requested:
@@ -1863,17 +1883,57 @@ def measure_response_matrix(state: RuntimeState, entry_values: Dict[str, str]) -
             return None
         state.log("Measuring matrix axis %d/%d." % (index + 1, bump_dim))
         group = nsext[index]
-        for pv_name in group:
-            state.adapter.put(pv_name, _get_float(state, pv_name) - 1.0)
-        xi_1 = MeaChrom(state, entry_values)
-        for pv_name in group:
-            state.adapter.put(pv_name, _get_float(state, pv_name) + 1.0)
-        xi_2 = MeaChrom(state, entry_values)
-        if xi_1 is None or xi_2 is None:
-            state.log("Matrix measurement aborted during axis %d." % index)
-            state.record_event("response_matrix_failed", measurement=measurement_name, axis=index, error="chromaticity_measurement_failed")
-            return None
+        baseline_currents = {}
+        axis_record = {
+            "axis": index,
+            "pv_names": list(group),
+            "baseline_currents": {},
+            "minus_targets": {},
+            "plus_targets": {},
+        }
+        xi_1 = None
+        xi_2 = None
+        try:
+            for pv_name in group:
+                baseline = _get_required_float(state, pv_name, "Sextupole")
+                baseline_currents[pv_name] = baseline
+                axis_record["baseline_currents"][pv_name] = baseline
+                minus_target = baseline - 1.0
+                axis_record["minus_targets"][pv_name] = minus_target
+                state.adapter.put(pv_name, minus_target)
+            xi_1 = MeaChrom(state, entry_values)
+            if xi_1 is None:
+                state.log("Matrix measurement aborted during axis %d (minus step)." % index)
+                state.record_event(
+                    "response_matrix_failed",
+                    measurement=measurement_name,
+                    axis=index,
+                    error="chromaticity_measurement_failed",
+                    stage="minus",
+                )
+                return None
+            for pv_name, baseline in baseline_currents.items():
+                axis_record["plus_targets"][pv_name] = baseline
+                state.adapter.put(pv_name, baseline)
+            xi_2 = MeaChrom(state, entry_values)
+            if xi_2 is None:
+                state.log("Matrix measurement aborted during axis %d (plus step)." % index)
+                state.record_event(
+                    "response_matrix_failed",
+                    measurement=measurement_name,
+                    axis=index,
+                    error="chromaticity_measurement_failed",
+                    stage="plus",
+                )
+                return None
+        finally:
+            for pv_name, baseline in baseline_currents.items():
+                state.adapter.put(pv_name, baseline)
         a_matrix[index, :] = (np.asarray(xi_2) - np.asarray(xi_1))[0:bump_dim]
+        axis_record["xi_minus"] = list(xi_1)
+        axis_record["xi_plus"] = list(xi_2)
+        axis_record["row"] = a_matrix[index, :].tolist()
+        axis_records.append(axis_record)
         state.record_event(
             "response_matrix_axis",
             measurement=measurement_name,
@@ -1881,6 +1941,9 @@ def measure_response_matrix(state: RuntimeState, entry_values: Dict[str, str]) -
             xi_minus=xi_1,
             xi_plus=xi_2,
             row=a_matrix[index, :].tolist(),
+            baseline_currents=axis_record["baseline_currents"],
+            minus_targets=axis_record["minus_targets"],
+            plus_targets=axis_record["plus_targets"],
         )
 
     try:
@@ -1896,9 +1959,12 @@ def measure_response_matrix(state: RuntimeState, entry_values: Dict[str, str]) -
         "measurements/%s.json" % measurement_name,
         {
             "measurement": measurement_name,
+            "entry_values": entry_values,
             "bump_option": state.bump_option,
+            "bump_dim": bump_dim,
             "a_matrix": a_matrix.tolist(),
             "inverse_matrix": state.B.tolist(),
+            "axis_records": axis_records,
             "end_snapshot": _machine_snapshot(state),
         },
     )

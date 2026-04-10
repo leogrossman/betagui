@@ -114,16 +114,26 @@ python3 control_room/betagui_cli.py --output xi.txt
 
 Only after a successful small chromaticity test:
 
-1. measure the response matrix
-2. verify the displayed matrix is sensible
-3. try small manual `dXi` correction steps
-4. verify reset returns to the saved machine state
+1. save a fresh machine snapshot
+2. run `Preview RF sweep` and confirm the RF span is still sane
+3. measure the response matrix
+4. verify the displayed matrix is sensible and non-singular
+5. inspect the session log payload for per-axis sextupole baselines and `xi`
+   values if anything looks suspicious
+6. try only very small manual `dXi` correction steps first
+7. verify reset returns to the saved machine state
 
 After each live test block:
 
 ```bash
 python3 control_room/machine_check.py compare --snapshot SNAPSHOT_JSON
 ```
+
+If a matrix run aborts:
+
+- compare against the saved snapshot immediately
+- confirm the stepped sextupole families returned to baseline
+- do not use the correction buttons until the matrix is understood
 
 ## 8. Secondary Scan Workflow
 

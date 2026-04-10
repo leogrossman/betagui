@@ -118,6 +118,70 @@ The correction matrix displayed in the GUI is then:
 B = inverse(transpose(A))
 ```
 
+In the legacy algorithm, each active sextupole family group is stepped by
+`-1 A`, chromaticity is measured, then the family is returned to the saved
+baseline current and chromaticity is measured again. For a matrix row:
+
+```text
+A[i, :] = xi_baseline - xi_minus_step
+```
+
+because the second measurement is taken after restoring the family to its
+starting current. The Python 3 control-room port keeps that operational shape
+and now restores each family explicitly even if a measurement aborts part-way
+through an axis.
+
+The four matrix modes still match the legacy GUI grouping:
+
+- `2D`: `S1`, `S2`
+- `2D(P2)`: `S1P2`, `S2P2`
+- `3D`: `S1`, `S2`, `S3`
+- `3D(P2)`: `S1P2`, `S2P2`, `S3P2`
+
+where `B` is the inverse matrix used by the `dξ` correction buttons.
+
+## Correction Mapping
+
+When the operator requests a small chromaticity change `dξ`, the tool computes:
+
+```text
+dI = B * dξ
+```
+
+and then applies those current increments to the sextupole families selected by
+the loaded matrix mode.
+
+The family mapping is intentionally kept close to the legacy script:
+
+- `S1P2` always follows the first correction axis
+- `S2P2K` and `S2P2L` always follow the second correction axis
+- `S3P2` follows the third axis in 3D modes
+- the non-`P2` families `S1P1`, `S2P1`, and `S3P1` are only driven in the
+  non-`P2` matrix modes
+
+The control-room port now refuses to apply those corrections if the underlying
+sextupole current readback is missing or non-numeric, rather than silently
+assuming `0.0`.
+
+## Matrix Logging And Saved Data
+
+Each response-matrix run now saves a payload under the session log directory
+with:
+
+- input settings
+- selected bump mode
+- matrix dimension
+- per-axis baseline sextupole currents
+- per-axis `-1 A` targets
+- per-axis restored targets
+- `xi` values measured for each axis
+- the raw finite-difference matrix `A`
+- the inverse correction matrix `B`
+- end-of-run machine snapshot
+
+This is meant to make later debugging possible without repeating a machine
+measurement immediately.
+
 This is kept directly recognizable from the legacy code.
 
 ## Manual Sextupole Correction
