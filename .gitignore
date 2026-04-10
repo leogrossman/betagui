@@ -21,4 +21,5 @@ support/digital_twin/*.sif
 
 # runtime logs
 betagui_logs/
+.betagui_local/
 .git-local/

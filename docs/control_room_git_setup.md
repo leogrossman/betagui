@@ -123,7 +123,7 @@ git push
 ## Notes
 
 - `.git-local/` should stay uncommitted.
-- `betagui_logs/` is intentionally gitignored.
+- `.betagui_local/` is intentionally gitignored.
 - `control_room_outputs/` is intended to be commit-friendly.
 - If control-room policy does not allow GitHub write access, use a read-only
   deploy key and move `control_room_outputs/` back manually.

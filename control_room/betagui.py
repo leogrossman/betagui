@@ -47,7 +47,7 @@ except ImportError:  # pragma: no cover - depends on host packages
     MATPLOTLIB_AVAILABLE = False
 
 
-DEFAULT_LOG_DIRNAME = "betagui_logs"
+DEFAULT_LOG_DIRNAME = ".betagui_local/logs"
 
 
 def _json_ready(value):

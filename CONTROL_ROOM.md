@@ -50,7 +50,7 @@ Read-only means:
 - use this first to confirm startup and PV visibility
 - use `dev / PV window` if you want optional live PV readback and RF test controls
 - use `Preview RF sweep` before a measurement if you want to inspect the planned RF points in Hz
-- runtime logs are still written under `./betagui_logs/`
+- runtime logs are still written under `./.betagui_local/logs/`
 
 CLI fallback:
 
@@ -75,7 +75,7 @@ python3 control_room/betagui_cli.py
 ## Logs
 
 Both control-room entrypoints write a session log directory by default under
-`./betagui_logs/`.
+`./.betagui_local/logs/`.
 
 Each session contains:
 

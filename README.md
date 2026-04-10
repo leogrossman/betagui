@@ -36,7 +36,7 @@ The GUI also has a `Preview RF sweep` button and asks for confirmation before
 write-capable chromaticity, matrix, reset, correction, and RF-test actions.
 
 Both control-room entrypoints create a session log directory by default under
-`./betagui_logs/`. Each session stores a human-readable `session.log`, a
+`./.betagui_local/logs/`. Each session stores a human-readable `session.log`, a
 structured `events.jsonl`, and raw measurement payloads under
 `measurements/`.
 

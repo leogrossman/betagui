@@ -73,7 +73,7 @@ python3 control_room/betagui_cli.py --safe
 
 If you want to bring control-room outputs back by git push later, keep the run
 artifacts under `control_room_outputs/`. The transient runtime logs under
-`betagui_logs/` remain local by default.
+`.betagui_local/logs/` remain local by default.
 
 ## Digital Twin
 

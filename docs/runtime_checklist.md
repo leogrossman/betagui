@@ -23,7 +23,7 @@ Use this short checklist before any future real-machine deployment.
 - Confirm the GUI starts without import or display errors.
 - Confirm the status panel does not report missing critical PVs.
 - Confirm expected legacy PVs are reachable with `cainfo`.
-- Confirm a new session directory appears under `./betagui_logs/`.
+- Confirm a new session directory appears under `./.betagui_local/logs/`.
 - Confirm `session.log` and `events.jsonl` are being written.
 - Confirm the machine snapshot file path is saved somewhere convenient for later
   compare/restore.
@@ -51,7 +51,7 @@ Use this short checklist before any future real-machine deployment.
 
 - Measure `alpha0` only if the required PVs are confirmed.
 - Run a small chromaticity measurement with conservative inputs.
-- Confirm a raw measurement payload appears under `betagui_logs/.../measurements/`.
+- Confirm a raw measurement payload appears under `.betagui_local/logs/.../measurements/`.
 - Verify RF returns to the initial value afterward.
 - Verify feedback/orbit states are restored afterward.
 - Only then consider matrix measurement or manual correction buttons.
