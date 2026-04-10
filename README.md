@@ -32,6 +32,10 @@ The GUI has a `dev / PV window` button for optional live readback checks and
 small RF command tests. It is not open by default, so the normal GUI stays
 lighter during routine operation.
 
+The GUI also has an optional read-only `SSMB monitor` sidecar. It polls at a
+low rate, never writes PVs, and keeps all monitor thresholds in one editable
+block near the top of [control_room/ssmb_monitor.py](control_room/ssmb_monitor.py).
+
 The GUI also has a `Preview RF sweep` button and asks for confirmation before
 write-capable chromaticity, matrix, reset, correction, and RF-test actions.
 
@@ -51,6 +55,12 @@ python3 control_room/tools/step_test.py baseline
 Commit-friendly machine outputs are written under `./control_room_outputs/`.
 That directory is meant for snapshots, inventories, and test outputs you may
 want to push back from the control-room machine.
+
+A saved control-room inventory reference is kept under
+[support/reference/control_room_inventory_20260410/](support/reference/control_room_inventory_20260410/).
+Fresh inventories collected on the machine should stay under the local
+gitignored `control_room/inventory/` working directory unless you explicitly
+want to copy them into the repo as a new reference snapshot.
 
 Before first machine use, read:
 

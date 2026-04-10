@@ -31,12 +31,29 @@ except ImportError:  # pragma: no cover - depends on host packages
 
 E_REST_MEV = 0.51099895
 REVOLUTION_FREQUENCY_KHZ = 299792458.0 / 48.0 / 1000.0
+POLL_INTERVAL_SECONDS = 1.0
+ROLLING_HISTORY_LENGTH = 60
+PLOT_HISTORY_LENGTH = 300
 SEVERITY_COLORS = {
     "GREEN": "#c7efcf",
     "YELLOW": "#fff4b2",
     "RED": "#f6b0ae",
     "UNKNOWN": "#d9d9d9",
     "INFO": "#d7e7ff",
+}
+STATUS_THRESHOLDS = {
+    "eta": {"green": 2e-5, "yellow": 1e-4},
+    "alpha0_low": {"green_min": 1e-5, "green_max": 5e-2},
+    "tune_jitter_xy": {"green": 1e-4, "yellow": 5e-4},
+    "tune_jitter_s": {"green": 1e-5, "yellow": 5e-5},
+    "rf_jitter": {"green": 0.02, "yellow": 0.10},
+    "xi": {"green": 1.0, "yellow": 3.0},
+    "resonance_distance": {"green": 0.03, "yellow": 0.01},
+    "lifetime": {"green": 5.0, "yellow": 1.0},
+    "coupling_corr": {"green": 0.20, "yellow": 0.50},
+}
+OPTIONAL_READBACK_PVS = {
+    "u125_1": "U125IL2RP",
 }
 TREND_CHOICES = [
     ("eta", "η"),
@@ -50,11 +67,14 @@ TREND_CHOICES = [
     ("tune_x_jitter", "Qx jitter"),
     ("tune_y_jitter", "Qy jitter"),
     ("tune_s_jitter", "Qs jitter"),
+    ("coupling_xs", "corr(Qx,Qs)"),
+    ("coupling_ys", "corr(Qy,Qs)"),
     ("beam_current", "Beam current"),
     ("white_noise", "White noise"),
     ("xi_x", "ξx"),
     ("xi_y", "ξy"),
     ("xi_s", "ξs"),
+    ("u125_1", "U125/1"),
 ]
 
 
@@ -107,6 +127,7 @@ class MonitorSample:
     beam_current: Optional[float]
     white_noise: Optional[float]
     optics_mode: Optional[float]
+    u125_1: Optional[float] = None
     lifetime_10h: Optional[float] = None
     lifetime_100h: Optional[float] = None
     lifetime_calc: Optional[float] = None
@@ -120,6 +141,8 @@ class MonitorSample:
     tune_y_jitter: Optional[float] = None
     tune_s_jitter: Optional[float] = None
     rf_jitter: Optional[float] = None
+    coupling_xs: Optional[float] = None
+    coupling_ys: Optional[float] = None
     xi_x: Optional[float] = None
     xi_y: Optional[float] = None
     xi_s: Optional[float] = None
@@ -131,15 +154,15 @@ class _PollWorker(threading.Thread):
         self.state = state
         self.result_queue = result_queue
         self.stop_event = stop_event
-        self.rf_history = deque(maxlen=60)
-        self.tx_history = deque(maxlen=60)
-        self.ty_history = deque(maxlen=60)
-        self.ts_history = deque(maxlen=60)
+        self.rf_history = deque(maxlen=ROLLING_HISTORY_LENGTH)
+        self.tx_history = deque(maxlen=ROLLING_HISTORY_LENGTH)
+        self.ty_history = deque(maxlen=ROLLING_HISTORY_LENGTH)
+        self.ts_history = deque(maxlen=ROLLING_HISTORY_LENGTH)
 
     def run(self):
         while not self.stop_event.is_set():
             self.result_queue.put(self._collect_sample())
-            self.stop_event.wait(1.0)
+            self.stop_event.wait(POLL_INTERVAL_SECONDS)
 
     def _std(self, values):
         if len(values) < 2:
@@ -147,6 +170,21 @@ class _PollWorker(threading.Thread):
         mean = sum(values) / len(values)
         variance = sum((item - mean) ** 2 for item in values) / len(values)
         return math.sqrt(variance)
+
+    def _corr(self, xs, ys):
+        points = [(float(x), float(y)) for x, y in zip(xs, ys) if x is not None and y is not None]
+        if len(points) < 4:
+            return None
+        x_values = [point[0] for point in points]
+        y_values = [point[1] for point in points]
+        x_mean = sum(x_values) / len(x_values)
+        y_mean = sum(y_values) / len(y_values)
+        x_var = sum((value - x_mean) ** 2 for value in x_values) / len(x_values)
+        y_var = sum((value - y_mean) ** 2 for value in y_values) / len(y_values)
+        if x_var <= 0.0 or y_var <= 0.0:
+            return None
+        covariance = sum((x - x_mean) * (y - y_mean) for x, y in points) / len(points)
+        return covariance / math.sqrt(x_var * y_var)
 
     def _collect_sample(self):
         pvs = self.state.pvs
@@ -223,6 +261,7 @@ class _PollWorker(threading.Thread):
             beam_current=_safe_float(adapter.get(getattr(pvs, "beam_current", None), None), None),
             white_noise=_safe_float(adapter.get(getattr(pvs, "white_noise", None), None), None),
             optics_mode=_safe_float(adapter.get(pvs.optics_mode, None), None),
+            u125_1=_safe_float(adapter.get(OPTIONAL_READBACK_PVS["u125_1"], None), None),
             lifetime_10h=lifetime_10h,
             lifetime_100h=lifetime_100h,
             lifetime_calc=lifetime_calc,
@@ -236,6 +275,8 @@ class _PollWorker(threading.Thread):
             tune_y_jitter=self._std(self.ty_history),
             tune_s_jitter=self._std(self.ts_history),
             rf_jitter=self._std(self.rf_history),
+            coupling_xs=self._corr(self.tx_history, self.ts_history),
+            coupling_ys=self._corr(self.ty_history, self.ts_history),
             xi_x=xi_x,
             xi_y=xi_y,
             xi_s=xi_s,
@@ -256,7 +297,7 @@ class SSMBMonitorWindow:
         self.stop_event = threading.Event()
         self.worker = _PollWorker(state, self.result_queue, self.stop_event)
         self.current_sample = None
-        self.history = deque(maxlen=300)
+        self.history = deque(maxlen=PLOT_HISTORY_LENGTH)
         self.row_labels: Dict[str, Dict[str, tk.Label]] = {}
         self.summary_var = tk.StringVar(value="SSMB STATUS: UNKNOWN")
         self.trend_var_1 = tk.StringVar(value="eta")
@@ -299,15 +340,19 @@ class SSMBMonitorWindow:
         rows = [
             ("η", "eta"),
             ("α0", "alpha0"),
+            ("RF PV", "rf_pv"),
             ("Qs", "tune_s"),
             ("f_s [kHz]", "tune_s_khz"),
             ("Qx", "tune_x"),
             ("Qy", "tune_y"),
             ("dQx-res", "resonance_dx"),
             ("dQy-res", "resonance_dy"),
+            ("corr(Qx,Qs)", "coupling_xs"),
+            ("corr(Qy,Qs)", "coupling_ys"),
             ("ξx", "xi_x"),
             ("ξy", "xi_y"),
             ("ξs", "xi_s"),
+            ("U125/1", "u125_1"),
             ("τcalc", "lifetime_calc"),
             ("τ10h", "lifetime_10h"),
             ("τ100h", "lifetime_100h"),
@@ -403,9 +448,9 @@ class SSMBMonitorWindow:
         if value is None:
             return "UNKNOWN"
         absolute = abs(value)
-        if absolute < 1.0:
+        if absolute < STATUS_THRESHOLDS["xi"]["green"]:
             return "GREEN"
-        if absolute < 3.0:
+        if absolute < STATUS_THRESHOLDS["xi"]["yellow"]:
             return "YELLOW"
         return "RED"
 
@@ -419,34 +464,53 @@ class SSMBMonitorWindow:
     def _lifetime_state(self, value: Optional[float]) -> str:
         if value is None:
             return "UNKNOWN"
-        if value > 5.0:
+        if value > STATUS_THRESHOLDS["lifetime"]["green"]:
             return "GREEN"
-        if value > 1.0:
+        if value > STATUS_THRESHOLDS["lifetime"]["yellow"]:
             return "YELLOW"
         return "RED"
 
     def _resonance_state(self, distance: Optional[float]) -> str:
         if distance is None:
             return "UNKNOWN"
-        if distance > 0.03:
+        if distance > STATUS_THRESHOLDS["resonance_distance"]["green"]:
             return "GREEN"
-        if distance > 0.01:
+        if distance > STATUS_THRESHOLDS["resonance_distance"]["yellow"]:
             return "YELLOW"
         return "RED"
 
     def _render(self, sample: MonitorSample):
-        eta_state = _severity_from_thresholds(sample.eta, 2e-5, 1e-4)
-        alpha0_state = "GREEN" if sample.alpha0 is not None and 1e-5 < sample.alpha0 < 5e-2 else "YELLOW"
-        qx_state = _severity_from_thresholds(sample.tune_x_jitter, 1e-4, 5e-4)
-        qy_state = _severity_from_thresholds(sample.tune_y_jitter, 1e-4, 5e-4)
-        qs_state = _severity_from_thresholds(sample.tune_s_jitter, 1e-5, 5e-5)
-        rf_state = _severity_from_thresholds(sample.rf_jitter, 0.02, 0.10)
+        eta_state = _severity_from_thresholds(sample.eta, STATUS_THRESHOLDS["eta"]["green"], STATUS_THRESHOLDS["eta"]["yellow"])
+        alpha0_state = (
+            "GREEN"
+            if sample.alpha0 is not None
+            and STATUS_THRESHOLDS["alpha0_low"]["green_min"] < sample.alpha0 < STATUS_THRESHOLDS["alpha0_low"]["green_max"]
+            else "YELLOW"
+        )
+        qx_state = _severity_from_thresholds(sample.tune_x_jitter, STATUS_THRESHOLDS["tune_jitter_xy"]["green"], STATUS_THRESHOLDS["tune_jitter_xy"]["yellow"])
+        qy_state = _severity_from_thresholds(sample.tune_y_jitter, STATUS_THRESHOLDS["tune_jitter_xy"]["green"], STATUS_THRESHOLDS["tune_jitter_xy"]["yellow"])
+        qs_state = _severity_from_thresholds(sample.tune_s_jitter, STATUS_THRESHOLDS["tune_jitter_s"]["green"], STATUS_THRESHOLDS["tune_jitter_s"]["yellow"])
+        rf_state = _severity_from_thresholds(sample.rf_jitter, STATUS_THRESHOLDS["rf_jitter"]["green"], STATUS_THRESHOLDS["rf_jitter"]["yellow"])
         feedback_state = self._feedback_state(sample)
         resonance_x_state = self._resonance_state(sample.resonance_dx)
         resonance_y_state = self._resonance_state(sample.resonance_dy)
         lifetime_state = self._lifetime_state(sample.lifetime_calc)
+        coupling_x_state = _severity_from_thresholds(sample.coupling_xs, STATUS_THRESHOLDS["coupling_corr"]["green"], STATUS_THRESHOLDS["coupling_corr"]["yellow"])
+        coupling_y_state = _severity_from_thresholds(sample.coupling_ys, STATUS_THRESHOLDS["coupling_corr"]["green"], STATUS_THRESHOLDS["coupling_corr"]["yellow"])
 
-        severities = [eta_state, alpha0_state, qx_state, qy_state, qs_state, rf_state, resonance_x_state, resonance_y_state, lifetime_state]
+        severities = [
+            eta_state,
+            alpha0_state,
+            qx_state,
+            qy_state,
+            qs_state,
+            rf_state,
+            resonance_x_state,
+            resonance_y_state,
+            coupling_x_state,
+            coupling_y_state,
+            lifetime_state,
+        ]
         score = max(0, 100 - 20 * severities.count("RED") - 8 * severities.count("YELLOW"))
         if score >= 80:
             status = "OK"
@@ -458,15 +522,19 @@ class SSMBMonitorWindow:
 
         self._set_row("eta", "%.6e" % sample.eta if sample.eta is not None else "UNKNOWN", eta_state)
         self._set_row("alpha0", "%.8f" % sample.alpha0 if sample.alpha0 is not None else "UNKNOWN", alpha0_state)
+        self._set_row("rf_pv", "%.6f" % sample.rf_pv if sample.rf_pv is not None else "UNKNOWN", "INFO")
         self._set_row("tune_s", "%.6f" % sample.tune_s if sample.tune_s is not None else "UNKNOWN", qs_state)
         self._set_row("tune_s_khz", "%.6f" % sample.tune_s_khz if sample.tune_s_khz is not None else "UNKNOWN", qs_state)
         self._set_row("tune_x", "%.6f" % sample.tune_x if sample.tune_x is not None else "UNKNOWN", qx_state)
         self._set_row("tune_y", "%.6f" % sample.tune_y if sample.tune_y is not None else "UNKNOWN", qy_state)
         self._set_row("resonance_dx", "%.5f" % sample.resonance_dx if sample.resonance_dx is not None else "UNKNOWN", resonance_x_state)
         self._set_row("resonance_dy", "%.5f" % sample.resonance_dy if sample.resonance_dy is not None else "UNKNOWN", resonance_y_state)
+        self._set_row("coupling_xs", "%.3f" % sample.coupling_xs if sample.coupling_xs is not None else "UNKNOWN", coupling_x_state)
+        self._set_row("coupling_ys", "%.3f" % sample.coupling_ys if sample.coupling_ys is not None else "UNKNOWN", coupling_y_state)
         self._set_row("xi_x", "%.4f" % sample.xi_x if sample.xi_x is not None else "UNKNOWN", self._xi_state(sample.xi_x))
         self._set_row("xi_y", "%.4f" % sample.xi_y if sample.xi_y is not None else "UNKNOWN", self._xi_state(sample.xi_y))
         self._set_row("xi_s", "%.4f" % sample.xi_s if sample.xi_s is not None else "UNKNOWN", self._xi_state(sample.xi_s))
+        self._set_row("u125_1", "%.4f" % sample.u125_1 if sample.u125_1 is not None else "UNKNOWN", "INFO")
         self._set_row("lifetime_calc", "%.4f" % sample.lifetime_calc if sample.lifetime_calc is not None else "UNKNOWN", lifetime_state)
         self._set_row("lifetime_10h", "%.4f" % sample.lifetime_10h if sample.lifetime_10h is not None else "UNKNOWN", self._lifetime_state(sample.lifetime_10h))
         self._set_row("lifetime_100h", "%.4f" % sample.lifetime_100h if sample.lifetime_100h is not None else "UNKNOWN", self._lifetime_state(sample.lifetime_100h))
@@ -498,6 +566,7 @@ class SSMBMonitorWindow:
             "Beam current        %r" % sample.beam_current,
             "White noise         %r" % sample.white_noise,
             "Optics mode         %r" % sample.optics_mode,
+            "U125/1             %r" % sample.u125_1,
             "Lifetime 10h        %r" % sample.lifetime_10h,
             "Lifetime 100h       %r" % sample.lifetime_100h,
             "Lifetime calc       %r" % sample.lifetime_calc,
@@ -516,24 +585,28 @@ class SSMBMonitorWindow:
 
     def _inferred_faults(self, sample: MonitorSample) -> List[str]:
         issues = []
-        if sample.eta is not None and abs(sample.eta) > 1e-4:
+        if sample.eta is not None and abs(sample.eta) > STATUS_THRESHOLDS["eta"]["yellow"]:
             issues.append("- |η| is too large for comfortable SSMB operation")
         if sample.alpha0 is not None and sample.alpha0 > 1e-3:
             issues.append("- α0 is above the usual low-alpha SSMB regime")
-        if sample.tune_s_jitter is not None and sample.tune_s_jitter > 5e-5:
+        if sample.tune_s_jitter is not None and sample.tune_s_jitter > STATUS_THRESHOLDS["tune_jitter_s"]["yellow"]:
             issues.append("- synchrotron tune jitter is high")
-        if sample.resonance_dx is not None and sample.resonance_dx < 0.01:
+        if sample.resonance_dx is not None and sample.resonance_dx < STATUS_THRESHOLDS["resonance_distance"]["yellow"]:
             issues.append("- Qx is very close to an integer / half-integer resonance")
-        if sample.resonance_dy is not None and sample.resonance_dy < 0.01:
+        if sample.resonance_dy is not None and sample.resonance_dy < STATUS_THRESHOLDS["resonance_distance"]["yellow"]:
             issues.append("- Qy is very close to an integer / half-integer resonance")
-        if sample.rf_jitter is not None and sample.rf_jitter > 0.10:
+        if sample.rf_jitter is not None and sample.rf_jitter > STATUS_THRESHOLDS["rf_jitter"]["yellow"]:
             issues.append("- RF readback jitter is high")
-        if sample.xi_x is not None and abs(sample.xi_x) > 3.0:
+        if sample.xi_x is not None and abs(sample.xi_x) > STATUS_THRESHOLDS["xi"]["yellow"]:
             issues.append("- horizontal chromaticity is far from zero")
-        if sample.xi_y is not None and abs(sample.xi_y) > 3.0:
+        if sample.xi_y is not None and abs(sample.xi_y) > STATUS_THRESHOLDS["xi"]["yellow"]:
             issues.append("- vertical chromaticity is far from zero")
-        if sample.lifetime_calc is not None and sample.lifetime_calc < 1.0:
+        if sample.lifetime_calc is not None and sample.lifetime_calc < STATUS_THRESHOLDS["lifetime"]["yellow"]:
             issues.append("- calculated beam lifetime is low")
+        if sample.coupling_xs is not None and abs(sample.coupling_xs) > STATUS_THRESHOLDS["coupling_corr"]["yellow"]:
+            issues.append("- rolling Qx/Qs correlation is high; check transverse-longitudinal coupling or common RF drive")
+        if sample.coupling_ys is not None and abs(sample.coupling_ys) > STATUS_THRESHOLDS["coupling_corr"]["yellow"]:
+            issues.append("- rolling Qy/Qs correlation is high; check transverse-longitudinal coupling or common RF drive")
         if sample.feedback_x == 0.0 or sample.feedback_y == 0.0 or sample.feedback_s == 0.0:
             issues.append("- one or more feedback loops are disabled")
         if not issues:

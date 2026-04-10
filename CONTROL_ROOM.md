@@ -49,6 +49,8 @@ Read-only means:
 - write paths are suppressed
 - use this first to confirm startup and PV visibility
 - use `dev / PV window` if you want optional live PV readback and RF test controls
+- use `SSMB monitor` if you want an optional low-rate read-only sidecar for
+  RF/tune/chromaticity/lifetime/undulator-style monitoring
 - use `Preview RF sweep` before a measurement if you want to inspect the planned RF points in Hz
 - runtime logs are still written under `./.betagui_local/logs/`
 
@@ -87,6 +89,12 @@ Each session contains:
 Commit-friendly machine outputs are written under `./control_room_outputs/`.
 That directory is intended to be pushed back from the control-room machine so
 the results can be reviewed elsewhere.
+
+A saved inventory reference from the control-room machine is in
+[support/reference/control_room_inventory_20260410/](support/reference/control_room_inventory_20260410/).
+Fresh working inventories should stay under the local gitignored
+`control_room/inventory/` directory unless you want to promote one into the
+repo as a new reference snapshot.
 
 ## Read Before First Live Use
 

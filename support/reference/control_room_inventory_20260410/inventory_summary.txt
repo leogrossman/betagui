@@ -1,0 +1,4 @@
+Inventory directory: /net/nfs/srv/MachinePhysics/MachineDevelopment.UNUSED/li/leogrossman/betagui/control_room_outputs/inventory/inventory_20260410_155336_pid1876194
+Python: 3.9.2 (default, Jan 25 2026, 13:37:52) 
+pvlist available: True
+Legacy PV count in source: 34

@@ -1,0 +1,493 @@
+{
+  "commands": {
+    "apptainer": {
+      "exists": true,
+      "path": "/usr/bin/apptainer"
+    },
+    "caget": {
+      "exists": true,
+      "path": "/opt/OPI/EpicsCmdTools/links/bullseye/bin/linux-x86_64/caget"
+    },
+    "cainfo": {
+      "exists": true,
+      "path": "/opt/OPI/EpicsCmdTools/links/bullseye/bin/linux-x86_64/cainfo"
+    },
+    "camonitor": {
+      "exists": true,
+      "path": "/opt/OPI/EpicsCmdTools/links/bullseye/bin/linux-x86_64/camonitor"
+    },
+    "caput": {
+      "exists": true,
+      "path": "/opt/OPI/EpicsCmdTools/links/bullseye/bin/linux-x86_64/caput"
+    },
+    "pvlist": {
+      "exists": true,
+      "path": "/opt/OPI/EpicsCmdTools/links/bullseye/bin/linux-x86_64/pvlist"
+    },
+    "pyenv": {
+      "exists": false,
+      "path": null
+    },
+    "python3": {
+      "exists": true,
+      "path": "/usr/bin/python3"
+    }
+  },
+  "environment": {
+    "DISPLAY": ":1.0",
+    "EPICS_CA_ADDR_LIST": "cumz4x003gp.mlsdi.bessy.de",
+    "EPICS_CA_AUTO_ADDR_LIST": null,
+    "EPICS_PVA_ADDR_LIST": null,
+    "MPLBACKEND": null,
+    "PYENV_VERSION": null
+  },
+  "legacy_pv_count": 34,
+  "legacy_pv_probe_results": [
+    {
+      "pv": "BPMZ1X003GP:rdBufBpm",
+      "result": {
+        "args": [
+          "cainfo",
+          "BPMZ1X003GP:rdBufBpm"
+        ],
+        "returncode": 0,
+        "stdout": "BPMZ1X003GP:rdBufBpm\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:43441\n    Access:           read, write\n    Native data type: DBF_LONG\n    Request type:     DBR_LONG\n    Element count:    256\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "TUNEZRP:measX",
+      "result": {
+        "args": [
+          "cainfo",
+          "TUNEZRP:measX"
+        ],
+        "returncode": 0,
+        "stdout": "TUNEZRP:measX\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:44631\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "TUNEZRP:measY",
+      "result": {
+        "args": [
+          "cainfo",
+          "TUNEZRP:measY"
+        ],
+        "returncode": 0,
+        "stdout": "TUNEZRP:measY\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:44631\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "TUNEZRP:measZ",
+      "result": {
+        "args": [
+          "cainfo",
+          "TUNEZRP:measZ"
+        ],
+        "returncode": 0,
+        "stdout": "TUNEZRP:measZ\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:44631\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "cumz4x003gp:tuneSyn",
+      "result": {
+        "args": [
+          "cainfo",
+          "cumz4x003gp:tuneSyn"
+        ],
+        "returncode": 0,
+        "stdout": "cumz4x003gp:tuneSyn\n    State:            connected\n    Host:             cumz4x003gp.mlsdi.bessy.de:5064\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "JLC09VP",
+      "result": {
+        "args": [
+          "cainfo",
+          "JLC09VP"
+        ],
+        "returncode": 1,
+        "stdout": "Channel connect timed out: 'JLC09VP' not found.\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "MCLKHGP:setFrq",
+      "result": {
+        "args": [
+          "cainfo",
+          "MCLKHGP:setFrq"
+        ],
+        "returncode": 0,
+        "stdout": "MCLKHGP:setFrq\n    State:            connected\n    Host:             gwc3cp.mlscs.bessy.de:42091\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "S1P1RP:setCur",
+      "result": {
+        "args": [
+          "cainfo",
+          "S1P1RP:setCur"
+        ],
+        "returncode": 0,
+        "stdout": "S1P1RP:setCur\n    State:            connected\n    Host:             gwc3cp.mlscs.bessy.de:42091\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "S1P2RP:setCur",
+      "result": {
+        "args": [
+          "cainfo",
+          "S1P2RP:setCur"
+        ],
+        "returncode": 0,
+        "stdout": "S1P2RP:setCur\n    State:            connected\n    Host:             gwc3cp.mlscs.bessy.de:42091\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "S2P1RP:setCur",
+      "result": {
+        "args": [
+          "cainfo",
+          "S2P1RP:setCur"
+        ],
+        "returncode": 0,
+        "stdout": "S2P1RP:setCur\n    State:            connected\n    Host:             gwc3cp.mlscs.bessy.de:42091\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "S2P2RP:setCur",
+      "result": {
+        "args": [
+          "cainfo",
+          "S2P2RP:setCur"
+        ],
+        "returncode": 0,
+        "stdout": "S2P2RP:setCur\n    State:            connected\n    Host:             gwc3cp.mlscs.bessy.de:42091\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "S2P2KRP:setCur",
+      "result": {
+        "args": [
+          "cainfo",
+          "S2P2KRP:setCur"
+        ],
+        "returncode": 0,
+        "stdout": "S2P2KRP:setCur\n    State:            connected\n    Host:             gwc3cp.mlscs.bessy.de:42091\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "S2P2LRP:setCur",
+      "result": {
+        "args": [
+          "cainfo",
+          "S2P2LRP:setCur"
+        ],
+        "returncode": 0,
+        "stdout": "S2P2LRP:setCur\n    State:            connected\n    Host:             gwc3cp.mlscs.bessy.de:42091\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "S3P1RP:setCur",
+      "result": {
+        "args": [
+          "cainfo",
+          "S3P1RP:setCur"
+        ],
+        "returncode": 0,
+        "stdout": "S3P1RP:setCur\n    State:            connected\n    Host:             gwc3cp.mlscs.bessy.de:42091\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "S3P2RP:setCur",
+      "result": {
+        "args": [
+          "cainfo",
+          "S3P2RP:setCur"
+        ],
+        "returncode": 0,
+        "stdout": "S3P2RP:setCur\n    State:            connected\n    Host:             gwc3cp.mlscs.bessy.de:42091\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "ORBITCCP:selRunMode",
+      "result": {
+        "args": [
+          "cainfo",
+          "ORBITCCP:selRunMode"
+        ],
+        "returncode": 0,
+        "stdout": "ORBITCCP:selRunMode\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:37821\n    Access:           read, write\n    Native data type: DBF_LONG\n    Request type:     DBR_LONG\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "RMC00VP",
+      "result": {
+        "args": [
+          "cainfo",
+          "RMC00VP"
+        ],
+        "returncode": 0,
+        "stdout": "RMC00VP\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:34633\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "IGPF:Z:FBCTRL",
+      "result": {
+        "args": [
+          "cainfo",
+          "IGPF:Z:FBCTRL"
+        ],
+        "returncode": 1,
+        "stdout": "Channel connect timed out: 'IGPF:Z:FBCTRL' not found.\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "IGPF:X:FBCTRL",
+      "result": {
+        "args": [
+          "cainfo",
+          "IGPF:X:FBCTRL"
+        ],
+        "returncode": 1,
+        "stdout": "Channel connect timed out: 'IGPF:X:FBCTRL' not found.\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "IGPF:Y:FBCTRL",
+      "result": {
+        "args": [
+          "cainfo",
+          "IGPF:Y:FBCTRL"
+        ],
+        "returncode": 1,
+        "stdout": "Channel connect timed out: 'IGPF:Y:FBCTRL' not found.\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "PAHRP:cmdExtPhasMod",
+      "result": {
+        "args": [
+          "cainfo",
+          "PAHRP:cmdExtPhasMod"
+        ],
+        "returncode": 1,
+        "stdout": "Channel connect timed out: 'PAHRP:cmdExtPhasMod' not found.\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "MLSOPCCP:actOptRmpTblSet",
+      "result": {
+        "args": [
+          "cainfo",
+          "MLSOPCCP:actOptRmpTblSet"
+        ],
+        "returncode": 0,
+        "stdout": "MLSOPCCP:actOptRmpTblSet\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:37821\n    Access:           read, write\n    Native data type: DBF_ENUM\n    Request type:     DBR_ENUM\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "CUM1ZK3RP:rdLt10",
+      "result": {
+        "args": [
+          "cainfo",
+          "CUM1ZK3RP:rdLt10"
+        ],
+        "returncode": 0,
+        "stdout": "CUM1ZK3RP:rdLt10\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:33921\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "CUM1ZK3RP:rdLt100",
+      "result": {
+        "args": [
+          "cainfo",
+          "CUM1ZK3RP:rdLt100"
+        ],
+        "returncode": 0,
+        "stdout": "CUM1ZK3RP:rdLt100\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:33921\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "OPCHECKCCP:calcCurrLife",
+      "result": {
+        "args": [
+          "cainfo",
+          "OPCHECKCCP:calcCurrLife"
+        ],
+        "returncode": 0,
+        "stdout": "OPCHECKCCP:calcCurrLife\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:34857\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "QPD01ZL2RP:rdSigmaX",
+      "result": {
+        "args": [
+          "cainfo",
+          "QPD01ZL2RP:rdSigmaX"
+        ],
+        "returncode": 0,
+        "stdout": "QPD01ZL2RP:rdSigmaX\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:32801\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "QPD01ZL2RP:rdSigmaY",
+      "result": {
+        "args": [
+          "cainfo",
+          "QPD01ZL2RP:rdSigmaY"
+        ],
+        "returncode": 0,
+        "stdout": "QPD01ZL2RP:rdSigmaY\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:32801\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "QPD00ZL4RP:rdSigmaX",
+      "result": {
+        "args": [
+          "cainfo",
+          "QPD00ZL4RP:rdSigmaX"
+        ],
+        "returncode": 0,
+        "stdout": "QPD00ZL4RP:rdSigmaX\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:32801\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "QPD00ZL4RP:rdSigmaY",
+      "result": {
+        "args": [
+          "cainfo",
+          "QPD00ZL4RP:rdSigmaY"
+        ],
+        "returncode": 0,
+        "stdout": "QPD00ZL4RP:rdSigmaY\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:32801\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "SEKRRP:rdDose",
+      "result": {
+        "args": [
+          "cainfo",
+          "SEKRRP:rdDose"
+        ],
+        "returncode": 0,
+        "stdout": "SEKRRP:rdDose\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:44631\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "CUM1ZK3RP:measCur",
+      "result": {
+        "args": [
+          "cainfo",
+          "CUM1ZK3RP:measCur"
+        ],
+        "returncode": 0,
+        "stdout": "CUM1ZK3RP:measCur\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:33921\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "ERMPCGP:rdRmp",
+      "result": {
+        "args": [
+          "cainfo",
+          "ERMPCGP:rdRmp"
+        ],
+        "returncode": 0,
+        "stdout": "ERMPCGP:rdRmp\n    State:            connected\n    Host:             gwc3cp.mlscs.bessy.de:42091\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "WFGENC1CP:rdVolt",
+      "result": {
+        "args": [
+          "cainfo",
+          "WFGENC1CP:rdVolt"
+        ],
+        "returncode": 0,
+        "stdout": "WFGENC1CP:rdVolt\n    State:            connected\n    Host:             gwc3cp.mlscs.bessy.de:42091\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    },
+    {
+      "pv": "PAHRP:setVoltCav",
+      "result": {
+        "args": [
+          "cainfo",
+          "PAHRP:setVoltCav"
+        ],
+        "returncode": 0,
+        "stdout": "PAHRP:setVoltCav\n    State:            connected\n    Host:             iocsc1cp.mlscs.bessy.de:36735\n    Access:           read, write\n    Native data type: DBF_DOUBLE\n    Request type:     DBR_DOUBLE\n    Element count:    1\n"
+      },
+      "tool": "cainfo"
+    }
+  ],
+  "project_root": "/net/nfs/srv/MachinePhysics/MachineDevelopment.UNUSED/li/leogrossman/betagui",
+  "pvlist": {
+    "available": true,
+    "count": 2,
+    "returncode": 0,
+    "sample": [
+      "GUID 0x722A26467D4C993F77E45317 version 2: tcp@[ 192.168.48.19:5075 ]",
+      "GUID 0xBD7435A33ECD4FCD0BC3A96A version 2: tcp@[ 192.168.48.40:5075 ]"
+    ]
+  },
+  "python_versions": {
+    "executable": "/usr/bin/python3",
+    "packages": {
+      "epics": {
+        "ok": true,
+        "version": "3.5.1"
+      },
+      "matplotlib": {
+        "ok": true,
+        "version": "3.3.4"
+      },
+      "numpy": {
+        "ok": true,
+        "version": "1.19.5"
+      },
+      "scipy": {
+        "ok": true,
+        "version": "1.6.0"
+      },
+      "tkinter": {
+        "ok": true,
+        "version": "built-in"
+      }
+    },
+    "platform": "Linux-5.10.0-37-amd64-x86_64-with-glibc2.31",
+    "python": "3.9.2 (default, Jan 25 2026, 13:37:52) \n[GCC 10.2.1 20210110]"
+  },
+  "timestamp": 1775829216.6811335
+}
