@@ -11,6 +11,7 @@ Use ``--safe`` for read-only preflight.
 
 import argparse
 import csv
+import importlib
 import json
 import os
 import platform
@@ -1939,6 +1940,7 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         self.ax_s = None
         self.canvas = None
         self.dev_window = None
+        self.ssmb_window = None
         self._last_result_marker = None
         self._build_widgets()
         self._refresh_matrix_display()
@@ -2019,6 +2021,8 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         self.matrix_button.grid(row=0, column=0, sticky="ew", pady=(4, 2), padx=4)
         self.scan_button = tk.Button(advanced_frame, text="sext scan", command=self._on_open_scan_window)
         self.scan_button.grid(row=0, column=1, sticky="ew", pady=(4, 2), padx=4)
+        self.ssmb_button = tk.Button(advanced_frame, text="SSMB monitor", command=self._on_open_ssmb_monitor)
+        self.ssmb_button.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(2, 4), padx=4)
 
     def _build_matrix_panel(self, parent):
         top = tk.Frame(parent)
@@ -2107,6 +2111,12 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
             and self.dev_window.window.winfo_exists()
         ):
             self.dev_window.refresh()
+        if (
+            self.ssmb_window is not None
+            and getattr(self.ssmb_window, "window", None) is not None
+            and self.ssmb_window.window.winfo_exists()
+        ):
+            pass
         result = getattr(self.state, "last_result", None)
         marker = id(result) if result is not None else None
         if marker != self._last_result_marker:
@@ -2301,6 +2311,22 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
             return
         self.dev_window = DevToolsWindow(self.master, self.state)
         self.dev_window.refresh(force=True)
+
+    def _on_open_ssmb_monitor(self):
+        if (
+            self.ssmb_window is not None
+            and getattr(self.ssmb_window, "window", None) is not None
+            and self.ssmb_window.window.winfo_exists()
+        ):
+            self.ssmb_window.window.lift()
+            self.ssmb_window.window.focus_set()
+            return
+        try:
+            module = importlib.import_module("ssmb_monitor")
+            self.ssmb_window = module.open_window(self.master, self.state)
+            self.state.log("Opened read-only SSMB monitor window.")
+        except Exception as exc:
+            self.state.log("Could not open SSMB monitor window: %s" % exc)
 
     def _on_load_matrix(self):
         if filedialog is None:
