@@ -8,6 +8,9 @@ Use the standalone files in [control_room/](control_room):
 
 - [control_room/betagui.py](control_room/betagui.py): main GUI
 - [control_room/betagui_cli.py](control_room/betagui_cli.py): minimal CLI fallback
+- [control_room/machine_check.py](control_room/machine_check.py): snapshot, compare, and restore helper
+- [control_room/tools/collect_epics_inventory.py](control_room/tools/collect_epics_inventory.py): EPICS and environment inventory
+- [control_room/tools/step_test.py](control_room/tools/step_test.py): small read-only step runner
 
 The GUI file embeds the default legacy response matrices, so it can be copied
 on its own into the control room. It still needs the normal runtime Python
@@ -25,10 +28,25 @@ python3 control_room/betagui.py
 Without `--safe`, both files behave like the legacy script and are write-capable
 by default.
 
+The GUI also shows a live PV readback pane so you can confirm the main machine
+readbacks are alive before trusting any measurement result.
+
 Both control-room entrypoints create a session log directory by default under
 `./betagui_logs/`. Each session stores a human-readable `session.log`, a
 structured `events.jsonl`, and raw measurement payloads under
 `measurements/`.
+
+Before any live test, capture a baseline machine snapshot:
+
+```bash
+python3 control_room/machine_check.py snapshot
+python3 control_room/tools/collect_epics_inventory.py
+python3 control_room/tools/step_test.py baseline
+```
+
+Commit-friendly machine outputs are written under `./control_room_outputs/`.
+That directory is meant for snapshots, inventories, and test outputs you may
+want to push back from the control-room machine.
 
 Before first machine use, read:
 

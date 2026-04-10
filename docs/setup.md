@@ -64,9 +64,16 @@ python3 development/betagui.py
 Control-room preflight:
 
 ```bash
+python3 control_room/machine_check.py snapshot
+python3 control_room/tools/collect_epics_inventory.py
+python3 control_room/tools/step_test.py baseline
 python3 control_room/betagui.py --safe
 python3 control_room/betagui_cli.py --safe
 ```
+
+If you want to bring control-room outputs back by git push later, keep the run
+artifacts under `control_room_outputs/`. The transient runtime logs under
+`betagui_logs/` remain local by default.
 
 ## Digital Twin
 

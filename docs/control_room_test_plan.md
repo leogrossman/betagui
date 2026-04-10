@@ -9,6 +9,9 @@ From the repo root:
 ```bash
 python3 --version
 python3 scripts/quick_diag.py
+python3 control_room/machine_check.py snapshot
+python3 control_room/tools/collect_epics_inventory.py
+python3 control_room/tools/step_test.py baseline
 ```
 
 Confirm:
@@ -17,12 +20,15 @@ Confirm:
 - `numpy`, `matplotlib`, `epics`, and `tkinter` import
 - EPICS CLI tools are present
 - the standalone control-room file can be run directly
+- a baseline machine snapshot was saved before any test
+- inventory and baseline outputs were saved under `control_room_outputs/`
 
 ## 2. PV Sanity Check
 
 Check a few critical PVs before starting the GUI:
 
 ```bash
+python3 control_room/machine_check.py status
 cainfo MCLKHGP:setFrq
 cainfo TUNEZRP:measX
 cainfo TUNEZRP:measY
@@ -50,6 +56,7 @@ Confirm:
 - the GUI starts
 - status messages do not show missing critical PVs
 - the embedded default matrix loads
+- the live PV readback pane shows sensible values for RF, tune, feedback, and sextupoles
 
 Do not try write-capable actions yet.
 
@@ -59,6 +66,7 @@ Run the safe CLI preflight:
 
 ```bash
 python3 control_room/betagui_cli.py --safe
+python3 control_room/tools/step_test.py safe-cli
 ```
 
 ## 5. First Write-Capable GUI Test
@@ -111,6 +119,12 @@ Only after a successful small chromaticity test:
 3. try small manual `dXi` correction steps
 4. verify reset returns to the saved machine state
 
+After each live test block:
+
+```bash
+python3 control_room/machine_check.py compare --snapshot SNAPSHOT_JSON
+```
+
 ## 8. Secondary Scan Workflow
 
 Only after the main workflow is confirmed:
@@ -136,3 +150,12 @@ Then fall back to:
 - [runtime_checklist.md](runtime_checklist.md)
 - [testing_workflow.md](testing_workflow.md)
 - [feature_parity.md](feature_parity.md)
+
+If the machine state needs to be restored from the baseline snapshot:
+
+```bash
+python3 control_room/machine_check.py restore --snapshot SNAPSHOT_JSON
+python3 control_room/machine_check.py restore --snapshot SNAPSHOT_JSON --apply
+```
+
+Use the dry run first. Only then use `--apply`.

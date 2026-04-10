@@ -42,7 +42,7 @@ try:
 except ImportError:  # pragma: no cover - depends on host packages
     FigureCanvasTkAgg = None
     Figure = None
-MATPLOTLIB_AVAILABLE = False
+    MATPLOTLIB_AVAILABLE = False
 
 
 DEFAULT_LOG_DIRNAME = "betagui_logs"
@@ -1716,6 +1716,7 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         self.cor_step_vars: List[tk.StringVar] = []
         self.cor_readouts: List[tk.Text] = []
         self.correction_buttons: List[tk.Button] = []
+        self.pv_readout_text = None
         self.status_text = None
         self.fig = None
         self.ax_orbit = None
@@ -1830,6 +1831,16 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
             readout.insert("1.0", "0.0")
             self.cor_readouts.append(readout)
 
+        pv_frame = tk.LabelFrame(parent, text="live PV readback")
+        pv_frame.grid(row=4, column=0, sticky="nsew", pady=(6, 0))
+        pv_frame.columnconfigure(0, weight=1)
+        pv_frame.rowconfigure(0, weight=1)
+        self.pv_readout_text = tk.Text(pv_frame, height=16, width=40, wrap="none")
+        pv_scroll = tk.Scrollbar(pv_frame, command=self.pv_readout_text.yview)
+        self.pv_readout_text.configure(yscrollcommand=pv_scroll.set)
+        self.pv_readout_text.grid(row=0, column=0, sticky="nsew")
+        pv_scroll.grid(row=0, column=1, sticky="ns")
+
     def _build_status_panel(self, parent):
         parent.columnconfigure(0, weight=1)
         parent.rowconfigure(0, weight=1)
@@ -1867,6 +1878,7 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
     def _drain_log(self):
         self._set_status_text()
         self._refresh_matrix_display()
+        self._refresh_pv_readout()
         result = getattr(self.state, "last_result", None)
         marker = id(result) if result is not None else None
         if marker != self._last_result_marker:
@@ -1896,6 +1908,40 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
                     widget.insert("1.0", "%5.3f" % self.state.B[row, col])
                 else:
                     widget.insert("1.0", " ")
+
+    def _refresh_pv_readout(self):
+        if self.pv_readout_text is None:
+            return
+        snapshot = _machine_snapshot(self.state)
+        lines = [
+            "rf_setpoint_hz      %r" % snapshot["rf_hz"],
+            "tune_x_khz          %r" % snapshot["tune_x_khz"],
+            "tune_y_khz          %r" % snapshot["tune_y_khz"],
+            "tune_s_khz          %r" % snapshot["tune_s_khz"],
+            "optics_mode         %r" % snapshot["optics_mode"],
+            "orbit_mode_rb       %r" % snapshot["orbit_mode_readback"],
+            "feedback_x          %r" % snapshot["feedback_x"],
+            "feedback_y          %r" % snapshot["feedback_y"],
+            "feedback_s          %r" % snapshot["feedback_s"],
+            "cavity_voltage_kv   %r" % snapshot["cavity_voltage_kv"],
+            "beam_energy_mev     %r" % snapshot["beam_energy_mev"],
+            "beam_current        %r" % snapshot["beam_current"],
+            "lifetime_10h        %r" % snapshot["lifetime_10h"],
+            "lifetime_100h       %r" % snapshot["lifetime_100h"],
+            "calc_lifetime       %r" % snapshot["calculated_lifetime"],
+            "qpd1_sigma_x        %r" % snapshot["qpd1_sigma_x"],
+            "qpd1_sigma_y        %r" % snapshot["qpd1_sigma_y"],
+            "qpd0_sigma_x        %r" % snapshot["qpd0_sigma_x"],
+            "qpd0_sigma_y        %r" % snapshot["qpd0_sigma_y"],
+            "dose_rate           %r" % snapshot["dose_rate"],
+            "white_noise         %r" % snapshot["white_noise"],
+            "",
+            "sextupoles:",
+        ]
+        for label, value in sorted(snapshot["sextupoles"].items()):
+            lines.append("  %-16s %r" % (label, value))
+        self.pv_readout_text.delete("1.0", tk.END)
+        self.pv_readout_text.insert("1.0", "\n".join(lines))
 
     def _update_plot(self, result: Optional[MeasurementResult]):
         if result is None or self.fig is None:

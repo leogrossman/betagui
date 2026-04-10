@@ -14,6 +14,10 @@ Use this short checklist before any future real-machine deployment.
 
 ## Read-Only Validation
 
+- Capture a baseline snapshot first:
+  `python3 control_room/machine_check.py snapshot`
+- Capture a machine inventory:
+  `python3 control_room/tools/collect_epics_inventory.py`
 - Start with:
   `python3 control_room/betagui.py --safe`
 - Confirm the GUI starts without import or display errors.
@@ -21,6 +25,10 @@ Use this short checklist before any future real-machine deployment.
 - Confirm expected legacy PVs are reachable with `cainfo`.
 - Confirm a new session directory appears under `./betagui_logs/`.
 - Confirm `session.log` and `events.jsonl` are being written.
+- Confirm the machine snapshot file path is saved somewhere convenient for later
+  compare/restore.
+- Confirm `control_room_outputs/` is receiving snapshot/inventory/test files
+  that can be pushed back later.
 
 ## PV Sanity
 
