@@ -2,7 +2,6 @@
 
 This is the shortest path for operators and testers.
 
-The files in [control_room/](control_room) are standalone plain Python source.
 The GUI file embeds the default response matrices, so it can be copied by
 itself into the control room. It still needs the normal runtime Python
 packages installed.

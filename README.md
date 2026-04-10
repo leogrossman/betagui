@@ -9,9 +9,8 @@ Use the standalone files in [control_room/](control_room):
 - [control_room/betagui.py](control_room/betagui.py): main GUI
 - [control_room/betagui_cli.py](control_room/betagui_cli.py): minimal CLI fallback
 
-They are hand-maintained plain Python files, not generated packed blobs. The
-GUI file embeds the default legacy response matrices, so it can be copied on
-its own into the control room. It still needs the normal runtime Python
+The GUI file embeds the default legacy response matrices, so it can be copied
+on its own into the control room. It still needs the normal runtime Python
 packages installed.
 
 Recommended first run:

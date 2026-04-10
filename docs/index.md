@@ -23,11 +23,9 @@ This is the documentation landing page for the MLS `betagui` Python 3 port.
 - [pv_inventory.md](pv_inventory.md)
 - [reference_context.md](reference_context.md)
 
-## Recommended Start
+## Start Here
 
-For testers and operators, start with:
-
-1. [../README.md](../README.md)
-2. [../CONTROL_ROOM.md](../CONTROL_ROOM.md)
-3. [runtime_checklist.md](runtime_checklist.md)
-4. [control_room_test_plan.md](control_room_test_plan.md)
+- [../README.md](../README.md)
+- [../CONTROL_ROOM.md](../CONTROL_ROOM.md)
+- [runtime_checklist.md](runtime_checklist.md)
+- [control_room_test_plan.md](control_room_test_plan.md)
