@@ -177,13 +177,12 @@ Chromaticity regression reference:
 - [tests/](tests): `unittest` suite
 - [scripts/](scripts): helper scripts and diagnostics
 
-## Hosted Docs
+## Docs
 
-The docs can be published on GitHub Pages.
+<https://leogrossman.github.io/betagui/>
 
 - config: [mkdocs.yml](mkdocs.yml)
 - workflow: [.github/workflows/pages.yml](.github/workflows/pages.yml)
-- expected site: <https://leogrossman.github.io/betagui/>
 
 ## TODO
 
