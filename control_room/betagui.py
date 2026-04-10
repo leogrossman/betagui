@@ -264,6 +264,27 @@ class BetaguiPVs:
 # ------------------------------------------------------------------------------
 
 SPEED_OF_LIGHT_M_PER_S = 299792458.0
+REVOLUTION_FREQUENCY_KHZ = SPEED_OF_LIGHT_M_PER_S / 48.0 / 1000.0
+
+
+def _tune_x_khz_from_pv(raw_value: float) -> float:
+    return float(raw_value)
+
+
+def _tune_y_khz_from_pv(raw_value: float) -> float:
+    return float(raw_value)
+
+
+def _tune_s_khz_from_pv(raw_value: float) -> float:
+    # Control-room note:
+    # `cumz4x003gp:tuneSyn` appears to be delivered in Hz, while the transverse
+    # tune PVs behave like kHz tune frequencies. Convert the synchrotron signal
+    # to kHz before comparing or forming unitless tunes.
+    return float(raw_value) / 1000.0
+
+
+def _unitless_tune_from_khz(tune_khz: float) -> float:
+    return float(tune_khz) / REVOLUTION_FREQUENCY_KHZ
 
 
 @dataclass
@@ -310,21 +331,31 @@ def optics_mode_to_dmax(optics_mode) -> float:
 
 
 def calculate_alpha0_with_details(adapter, pvs: BetaguiPVs, harmonic_number: int = 80, samples: int = 10):
-    if not pvs.tune_s or not pvs.rf_setpoint or not pvs.cavity_voltage or not pvs.beam_energy:
-        raise ValueError("Dynamic alpha0 requires tune_s, RF, cavity voltage, and beam energy PVs.")
-    freq_samples = [float(adapter.get(pvs.tune_s, 0.0) or 0.0) for _ in range(samples)]
-    freq_s_khz = float(np.mean(freq_samples))
+    if not pvs.tune_s or not pvs.cavity_voltage or not pvs.beam_energy:
+        raise ValueError("Dynamic alpha0 requires synchrotron tune, cavity voltage, and beam energy PVs.")
+    tune_s_samples_raw = [float(adapter.get(pvs.tune_s, 0.0) or 0.0) for _ in range(samples)]
+    tune_s_samples_khz = [_tune_s_khz_from_pv(value) for value in tune_s_samples_raw]
+    tune_s_mean_khz = float(np.mean(tune_s_samples_khz))
+    tune_s_mean = _unitless_tune_from_khz(tune_s_mean_khz)
     rf_hz = float(adapter.get(pvs.rf_setpoint, 0.0) or 0.0)
     cavity_voltage_v = float(adapter.get(pvs.cavity_voltage, 0.0) or 0.0) * 1000.0
     energy_ev = float(adapter.get(pvs.beam_energy, 0.0) or 0.0) * 1e6
-    if rf_hz == 0.0 or cavity_voltage_v == 0.0:
-        raise ValueError("RF frequency and cavity voltage must be non-zero.")
-    alpha0 = (freq_s_khz * 1000.0) ** 2 / (rf_hz * 1000.0) ** 2 * 2.0 * np.pi * harmonic_number * energy_ev / cavity_voltage_v
+    if tune_s_mean == 0.0 or cavity_voltage_v == 0.0 or energy_ev == 0.0:
+        raise ValueError("Synchrotron tune, cavity voltage, and beam energy must be non-zero.")
+    # Porting note:
+    # `cumz4x003gp:tuneSyn` is a synchrotron tune, not a synchrotron frequency.
+    # Use the standard relation:
+    #   Qs^2 = alpha0 * h * V / (2*pi*E)
+    # so
+    #   alpha0 = Qs^2 * 2*pi*E / (h*V)
+    alpha0 = (tune_s_mean ** 2) * 2.0 * np.pi * energy_ev / (harmonic_number * cavity_voltage_v)
     details = {
         "mode": "dynamic",
         "harmonic_number": harmonic_number,
-        "tune_s_samples_khz": freq_samples,
-        "tune_s_mean_khz": freq_s_khz,
+        "tune_s_samples_raw": tune_s_samples_raw,
+        "tune_s_samples_khz": tune_s_samples_khz,
+        "tune_s_mean_khz": tune_s_mean_khz,
+        "tune_s_mean_unitless": tune_s_mean,
         "rf_hz": rf_hz,
         "cavity_voltage_v": cavity_voltage_v,
         "beam_energy_ev": energy_ev,
@@ -387,12 +418,18 @@ def sample_tunes(
     tune_x = []
     tune_y = []
     tune_s = []
+    tune_s_raw = []
     for sample_index in range(n_samples):
-        tune_x.append(float(adapter.get(pvs.tune_x, 0.0) or 0.0))
-        tune_y.append(float(adapter.get(pvs.tune_y, 0.0) or 0.0))
+        tune_x_raw = float(adapter.get(pvs.tune_x, 0.0) or 0.0)
+        tune_y_raw = float(adapter.get(pvs.tune_y, 0.0) or 0.0)
+        tune_x.append(_tune_x_khz_from_pv(tune_x_raw))
+        tune_y.append(_tune_y_khz_from_pv(tune_y_raw))
         if pvs.tune_s:
-            tune_s.append(float(adapter.get(pvs.tune_s, 0.0) or 0.0))
+            tune_s_raw_value = float(adapter.get(pvs.tune_s, 0.0) or 0.0)
+            tune_s_raw.append(tune_s_raw_value)
+            tune_s.append(_tune_s_khz_from_pv(tune_s_raw_value))
         else:
+            tune_s_raw.append(0.0)
             tune_s.append(0.0)
         if sample_index != n_samples - 1 and delay_between_reads_s > 0.0:
             time.sleep(delay_between_reads_s)
@@ -403,6 +440,7 @@ def sample_tunes(
         "raw_x": tune_x,
         "raw_y": tune_y,
         "raw_s": tune_s,
+        "raw_s_pv": tune_s_raw,
     }
 
 
@@ -448,10 +486,14 @@ def measure_chromaticity(adapter, pvs: BetaguiPVs, inputs: MeasurementInputs, al
                 "rf_readback_hz": float(adapter.get(pvs.rf_setpoint, rf_hz) or rf_hz),
                 "tune_x_samples_khz": sampled["raw_x"],
                 "tune_y_samples_khz": sampled["raw_y"],
+                "tune_s_samples_raw": sampled["raw_s_pv"],
                 "tune_s_samples_khz": sampled["raw_s"],
                 "tune_x_mean_khz": sampled["x"],
                 "tune_y_mean_khz": sampled["y"],
                 "tune_s_mean_khz": sampled["s"],
+                "tune_x_mean_unitless": _unitless_tune_from_khz(sampled["x"]),
+                "tune_y_mean_unitless": _unitless_tune_from_khz(sampled["y"]),
+                "tune_s_mean_unitless": _unitless_tune_from_khz(sampled["s"]),
                 "machine_context": _measurement_point_context_from_adapter(adapter, pvs),
             }
         )
@@ -792,12 +834,24 @@ def _sextupole_snapshot(state: RuntimeState) -> Dict[str, float]:
 
 
 def _machine_snapshot(state: RuntimeState) -> Dict[str, object]:
+    tune_x_raw = _get_float(state, state.pvs.tune_x, 0.0)
+    tune_y_raw = _get_float(state, state.pvs.tune_y, 0.0)
+    tune_s_raw = _get_float(state, state.pvs.tune_s, 0.0)
+    tune_x_khz = _tune_x_khz_from_pv(tune_x_raw)
+    tune_y_khz = _tune_y_khz_from_pv(tune_y_raw)
+    tune_s_khz = _tune_s_khz_from_pv(tune_s_raw)
     return {
         "timestamp": time.time(),
         "rf_hz": _get_float(state, state.pvs.rf_setpoint, 0.0),
-        "tune_x_khz": _get_float(state, state.pvs.tune_x, 0.0),
-        "tune_y_khz": _get_float(state, state.pvs.tune_y, 0.0),
-        "tune_s_khz": _get_float(state, state.pvs.tune_s, 0.0),
+        "tune_x_raw": tune_x_raw,
+        "tune_y_raw": tune_y_raw,
+        "tune_s_raw": tune_s_raw,
+        "tune_x_khz": tune_x_khz,
+        "tune_y_khz": tune_y_khz,
+        "tune_s_khz": tune_s_khz,
+        "tune_x_unitless": _unitless_tune_from_khz(tune_x_khz),
+        "tune_y_unitless": _unitless_tune_from_khz(tune_y_khz),
+        "tune_s_unitless": _unitless_tune_from_khz(tune_s_khz),
         "optics_mode": _get_float(state, state.pvs.optics_mode, 0.0),
         "orbit_mode_readback": _get_float(state, state.pvs.orbit_mode_readback, 0.0),
         "feedback_x": _get_float(state, state.pvs.feedback_x, 0.0),
@@ -848,11 +902,23 @@ def _measurement_point_context(state: RuntimeState) -> Dict[str, object]:
 
 
 def _measurement_point_context_from_adapter(adapter, pvs: BetaguiPVs) -> Dict[str, object]:
+    tune_x_raw = float(adapter.get(pvs.tune_x, 0.0) or 0.0)
+    tune_y_raw = float(adapter.get(pvs.tune_y, 0.0) or 0.0)
+    tune_s_raw = float(adapter.get(pvs.tune_s, 0.0) or 0.0)
+    tune_x_khz = _tune_x_khz_from_pv(tune_x_raw)
+    tune_y_khz = _tune_y_khz_from_pv(tune_y_raw)
+    tune_s_khz = _tune_s_khz_from_pv(tune_s_raw)
     snapshot = {
         "rf_hz": float(adapter.get(pvs.rf_setpoint, 0.0) or 0.0),
-        "tune_x_khz": float(adapter.get(pvs.tune_x, 0.0) or 0.0),
-        "tune_y_khz": float(adapter.get(pvs.tune_y, 0.0) or 0.0),
-        "tune_s_khz": float(adapter.get(pvs.tune_s, 0.0) or 0.0),
+        "tune_x_raw": tune_x_raw,
+        "tune_y_raw": tune_y_raw,
+        "tune_s_raw": tune_s_raw,
+        "tune_x_khz": tune_x_khz,
+        "tune_y_khz": tune_y_khz,
+        "tune_s_khz": tune_s_khz,
+        "tune_x_unitless": _unitless_tune_from_khz(tune_x_khz),
+        "tune_y_unitless": _unitless_tune_from_khz(tune_y_khz),
+        "tune_s_unitless": _unitless_tune_from_khz(tune_s_khz),
         "optics_mode": float(adapter.get(pvs.optics_mode, 0.0) or 0.0),
         "orbit_mode_readback": float(adapter.get(pvs.orbit_mode_readback, 0.0) or 0.0),
         "feedback_x": float(adapter.get(pvs.feedback_x, 0.0) or 0.0),
@@ -944,7 +1010,7 @@ def set_frf_slowly(state: RuntimeState, target_frf_in_hz: float, n_steps: int = 
         state.adapter.put(state.pvs.rf_setpoint, float(value))
         if state.can_write_machine and delay_s > 0.0:
             time.sleep(delay_s)
-    state.log("RF now at %.6f Hz" % float(rf_steps[-1]))
+    state.log("RF now at PV value %.6f" % float(rf_steps[-1]))
 
 
 def set_Isextupole_slowly(state: RuntimeState, sname: str, target_current: float, n_steps: int = 10, delay_s: float = 0.2):
@@ -1993,14 +2059,14 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         alpha0 = float(preview["alpha0"])
         source = preview["alpha0_source"]
         lines = [
-            "Current RF: %.6f Hz" % float(preview["frf0_hz"]),
+            "Current RF PV value: %.6f" % float(preview["frf0_hz"]),
             "alpha0: %.8f (%s)" % (alpha0, source),
             "Optics mode: %s" % preview["optics_mode"],
             "dmax: %.6f m" % float(preview["dmax"]),
             "RF sweep points: %d" % len(rf_points_hz),
-            "RF min: %.6f Hz" % float(rf_points_hz[0]),
-            "RF max: %.6f Hz" % float(rf_points_hz[-1]),
-            "RF step: %.6f .. %.6f Hz" % (step_min, step_max),
+            "RF min PV value: %.6f" % float(rf_points_hz[0]),
+            "RF max PV value: %.6f" % float(rf_points_hz[-1]),
+            "RF step PV value: %.6f .. %.6f" % (step_min, step_max),
             "",
             "This action will write:",
             "- feedback X/Y/S -> 0",
@@ -2011,7 +2077,7 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         ]
         if len(rf_points_hz) <= 12:
             lines.append("")
-            lines.append("RF points [Hz]:")
+            lines.append("RF points [PV units]:")
             lines.extend(["- %.6f" % float(value) for value in rf_points_hz])
         return lines
 
@@ -2359,7 +2425,7 @@ class DevToolsWindow:
 
     def _refresh_rf_status(self):
         current_rf = _get_float(self.state, self.state.pvs.rf_setpoint, 0.0)
-        self.current_rf_var.set("RF: %.6f Hz" % current_rf)
+        self.current_rf_var.set("RF PV value: %.6f" % current_rf)
         self.rf_status_var.set("RF readback refreshed.")
 
     def _shift_rf(self, sign: float):
@@ -2376,9 +2442,9 @@ class DevToolsWindow:
                 "Confirm RF test shift",
                 "\n".join(
                     [
-                        "Current RF: %.6f Hz" % current_rf,
-                        "Delta RF: %.6f Hz" % delta_hz,
-                        "Target RF: %.6f Hz" % target_rf,
+                        "Current RF PV value: %.6f" % current_rf,
+                        "Delta RF PV value: %.6f" % delta_hz,
+                        "Target RF PV value: %.6f" % target_rf,
                     ]
                 ),
                 parent=self.window,
@@ -2407,7 +2473,7 @@ class DevToolsWindow:
         if self.state.can_write_machine and messagebox is not None:
             confirmed = messagebox.askokcancel(
                 "Confirm RF restore",
-                "Restore RF to %.6f Hz?" % self.state.frf0,
+                "Restore RF to PV value %.6f?" % self.state.frf0,
                 parent=self.window,
             )
             if not confirmed:
@@ -2434,9 +2500,15 @@ class DevToolsWindow:
         snapshot = _machine_snapshot(self.state)
         lines = [
             "rf_setpoint_hz      %r" % snapshot["rf_hz"],
+            "tune_x_raw          %r" % snapshot["tune_x_raw"],
             "tune_x_khz          %r" % snapshot["tune_x_khz"],
+            "tune_x              %.6f" % float(snapshot["tune_x_unitless"]),
+            "tune_y_raw          %r" % snapshot["tune_y_raw"],
             "tune_y_khz          %r" % snapshot["tune_y_khz"],
+            "tune_y              %.6f" % float(snapshot["tune_y_unitless"]),
+            "tune_s_raw          %r" % snapshot["tune_s_raw"],
             "tune_s_khz          %r" % snapshot["tune_s_khz"],
+            "tune_s              %.6f" % float(snapshot["tune_s_unitless"]),
             "optics_mode         %r" % snapshot["optics_mode"],
             "orbit_mode_rb       %r" % snapshot["orbit_mode_readback"],
             "feedback_x          %r" % snapshot["feedback_x"],
@@ -2461,7 +2533,7 @@ class DevToolsWindow:
             lines.append("  %-16s %r" % (label, value))
         self.pv_readout_text.delete("1.0", tk.END)
         self.pv_readout_text.insert("1.0", "\n".join(lines))
-        self.current_rf_var.set("RF: %.6f Hz" % float(snapshot["rf_hz"]))
+        self.current_rf_var.set("RF PV value: %.6f" % float(snapshot["rf_hz"]))
 
     def _on_close(self):
         self._cancel_refresh()

@@ -94,6 +94,27 @@ class ControlRoomRuntimeTest(unittest.TestCase):
         self.assertAlmostEqual(result["x"], 0.2)
         self.assertEqual(delays, [0.25, 0.25])
 
+    def test_synchrotron_pv_is_scaled_from_hz_to_khz_and_unitless_qs(self):
+        module = self.module
+        adapter = FakeAdapter(
+            {
+                module.pvfreqX: 1099.0,
+                module.pvfreqY: 1408.0,
+                module.pvfreqS: 11605.0,
+                module.pvUcavSet: 150.0,
+                module.pvE: 630.0,
+                module.pvfrfSet: 499652.0,
+            }
+        )
+        sampled = module.sample_tunes(adapter, module.BetaguiPVs.legacy(), 3, delay_between_reads_s=0.0)
+        self.assertAlmostEqual(sampled["x"], 1099.0)
+        self.assertAlmostEqual(sampled["y"], 1408.0)
+        self.assertAlmostEqual(sampled["s"], 11.605)
+        alpha0, details = module.calculate_alpha0_with_details(adapter, module.BetaguiPVs.legacy(), samples=3)
+        self.assertLess(alpha0, 0.01)
+        self.assertAlmostEqual(details["tune_s_mean_khz"], 11.605)
+        self.assertAlmostEqual(details["tune_s_mean_unitless"], 11.605 / module.REVOLUTION_FREQUENCY_KHZ)
+
     def test_session_logger_writes_files_under_requested_root(self):
         module = self.module
         with tempfile.TemporaryDirectory() as tmpdir:

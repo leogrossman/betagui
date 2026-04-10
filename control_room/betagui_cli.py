@@ -22,6 +22,23 @@ import numpy as np
 SPEED_OF_LIGHT_M_PER_S = 299792458.0
 NHARMONIC = 80
 DEFAULT_LOG_DIRNAME = "betagui_logs"
+REVOLUTION_FREQUENCY_KHZ = SPEED_OF_LIGHT_M_PER_S / 48.0 / 1000.0
+
+
+def _tune_x_khz_from_pv(raw_value: float) -> float:
+    return float(raw_value)
+
+
+def _tune_y_khz_from_pv(raw_value: float) -> float:
+    return float(raw_value)
+
+
+def _tune_s_khz_from_pv(raw_value: float) -> float:
+    return float(raw_value) / 1000.0
+
+
+def _unitless_tune_from_khz(tune_khz: float) -> float:
+    return float(tune_khz) / REVOLUTION_FREQUENCY_KHZ
 
 
 def _json_ready(value):
@@ -193,19 +210,23 @@ def optics_mode_to_dmax(optics_mode) -> float:
 
 
 def calculate_alpha0_with_details(adapter, pvs: BetaguiPVs, harmonic_number: int = NHARMONIC, samples: int = 10):
-    freq_samples = [float(adapter.get(pvs.tune_s, 0.0) or 0.0) for _ in range(samples)]
-    freq_s_khz = float(np.mean(freq_samples))
+    tune_s_samples_raw = [float(adapter.get(pvs.tune_s, 0.0) or 0.0) for _ in range(samples)]
+    tune_s_samples_khz = [_tune_s_khz_from_pv(value) for value in tune_s_samples_raw]
+    tune_s_mean_khz = float(np.mean(tune_s_samples_khz))
+    tune_s_mean = _unitless_tune_from_khz(tune_s_mean_khz)
     rf_hz = float(adapter.get(pvs.rf_setpoint, 0.0) or 0.0)
     cavity_voltage_v = float(adapter.get(pvs.cavity_voltage, 0.0) or 0.0) * 1000.0
     energy_ev = float(adapter.get(pvs.beam_energy, 0.0) or 0.0) * 1e6
-    if rf_hz == 0.0 or cavity_voltage_v == 0.0:
-        raise ValueError("RF frequency and cavity voltage must be non-zero.")
-    alpha0 = (freq_s_khz * 1000.0) ** 2 / (rf_hz * 1000.0) ** 2 * 2.0 * np.pi * harmonic_number * energy_ev / cavity_voltage_v
+    if tune_s_mean == 0.0 or cavity_voltage_v == 0.0 or energy_ev == 0.0:
+        raise ValueError("Synchrotron tune, cavity voltage, and beam energy must be non-zero.")
+    alpha0 = (tune_s_mean ** 2) * 2.0 * np.pi * energy_ev / (harmonic_number * cavity_voltage_v)
     details = {
         "mode": "dynamic",
         "harmonic_number": harmonic_number,
-        "tune_s_samples_khz": freq_samples,
-        "tune_s_mean_khz": freq_s_khz,
+        "tune_s_samples_raw": tune_s_samples_raw,
+        "tune_s_samples_khz": tune_s_samples_khz,
+        "tune_s_mean_khz": tune_s_mean_khz,
+        "tune_s_mean_unitless": tune_s_mean,
         "rf_hz": rf_hz,
         "cavity_voltage_v": cavity_voltage_v,
         "beam_energy_ev": energy_ev,
@@ -256,10 +277,15 @@ def sample_tunes(
     tune_x = []
     tune_y = []
     tune_s = []
+    tune_s_raw = []
     for sample_index in range(n_samples):
-        tune_x.append(float(adapter.get(pvs.tune_x, 0.0) or 0.0))
-        tune_y.append(float(adapter.get(pvs.tune_y, 0.0) or 0.0))
-        tune_s.append(float(adapter.get(pvs.tune_s, 0.0) or 0.0))
+        tune_x_raw = float(adapter.get(pvs.tune_x, 0.0) or 0.0)
+        tune_y_raw = float(adapter.get(pvs.tune_y, 0.0) or 0.0)
+        tune_s_raw_value = float(adapter.get(pvs.tune_s, 0.0) or 0.0)
+        tune_x.append(_tune_x_khz_from_pv(tune_x_raw))
+        tune_y.append(_tune_y_khz_from_pv(tune_y_raw))
+        tune_s_raw.append(tune_s_raw_value)
+        tune_s.append(_tune_s_khz_from_pv(tune_s_raw_value))
         if sample_index != n_samples - 1 and delay_between_reads_s > 0.0:
             time.sleep(delay_between_reads_s)
     return {
@@ -269,6 +295,7 @@ def sample_tunes(
         "raw_x": tune_x,
         "raw_y": tune_y,
         "raw_s": tune_s,
+        "raw_s_pv": tune_s_raw,
     }
 
 
@@ -408,12 +435,24 @@ def _get_float(state: RuntimeState, pv_name: str, default: float = 0.0) -> float
 
 
 def _machine_snapshot(state: RuntimeState) -> Dict[str, object]:
+    tune_x_raw = _get_float(state, state.pvs.tune_x, 0.0)
+    tune_y_raw = _get_float(state, state.pvs.tune_y, 0.0)
+    tune_s_raw = _get_float(state, state.pvs.tune_s, 0.0)
+    tune_x_khz = _tune_x_khz_from_pv(tune_x_raw)
+    tune_y_khz = _tune_y_khz_from_pv(tune_y_raw)
+    tune_s_khz = _tune_s_khz_from_pv(tune_s_raw)
     return {
         "timestamp": time.time(),
         "rf_hz": _get_float(state, state.pvs.rf_setpoint, 0.0),
-        "tune_x_khz": _get_float(state, state.pvs.tune_x, 0.0),
-        "tune_y_khz": _get_float(state, state.pvs.tune_y, 0.0),
-        "tune_s_khz": _get_float(state, state.pvs.tune_s, 0.0),
+        "tune_x_raw": tune_x_raw,
+        "tune_y_raw": tune_y_raw,
+        "tune_s_raw": tune_s_raw,
+        "tune_x_khz": tune_x_khz,
+        "tune_y_khz": tune_y_khz,
+        "tune_s_khz": tune_s_khz,
+        "tune_x_unitless": _unitless_tune_from_khz(tune_x_khz),
+        "tune_y_unitless": _unitless_tune_from_khz(tune_y_khz),
+        "tune_s_unitless": _unitless_tune_from_khz(tune_s_khz),
         "optics_mode": _get_float(state, state.pvs.optics_mode, 0.0),
         "orbit_mode_readback": _get_float(state, state.pvs.orbit_mode_readback, 0.0),
         "feedback_x": _get_float(state, state.pvs.feedback_x, 0.0),
@@ -428,9 +467,15 @@ def _measurement_point_context(state: RuntimeState) -> Dict[str, object]:
     snapshot = _machine_snapshot(state)
     return {
         "rf_hz": snapshot["rf_hz"],
+        "tune_x_raw": snapshot["tune_x_raw"],
         "tune_x_khz": snapshot["tune_x_khz"],
+        "tune_x_unitless": snapshot["tune_x_unitless"],
+        "tune_y_raw": snapshot["tune_y_raw"],
         "tune_y_khz": snapshot["tune_y_khz"],
+        "tune_y_unitless": snapshot["tune_y_unitless"],
+        "tune_s_raw": snapshot["tune_s_raw"],
         "tune_s_khz": snapshot["tune_s_khz"],
+        "tune_s_unitless": snapshot["tune_s_unitless"],
         "optics_mode": snapshot["optics_mode"],
         "orbit_mode_readback": snapshot["orbit_mode_readback"],
         "feedback_x": snapshot["feedback_x"],
@@ -559,10 +604,14 @@ def measure_chromaticity(state: RuntimeState, inputs: MeasurementInputs, alpha0:
                     "rf_readback_hz": float(state.adapter.get(state.pvs.rf_setpoint, rf_hz) or rf_hz),
                     "tune_x_samples_khz": sampled["raw_x"],
                     "tune_y_samples_khz": sampled["raw_y"],
+                    "tune_s_samples_raw": sampled["raw_s_pv"],
                     "tune_s_samples_khz": sampled["raw_s"],
                     "tune_x_mean_khz": sampled["x"],
                     "tune_y_mean_khz": sampled["y"],
                     "tune_s_mean_khz": sampled["s"],
+                    "tune_x_mean_unitless": _unitless_tune_from_khz(sampled["x"]),
+                    "tune_y_mean_unitless": _unitless_tune_from_khz(sampled["y"]),
+                    "tune_s_mean_unitless": _unitless_tune_from_khz(sampled["s"]),
                     "machine_context": _measurement_point_context(state),
                 }
             )
