@@ -107,6 +107,15 @@ class MonitorSample:
     beam_current: Optional[float]
     white_noise: Optional[float]
     optics_mode: Optional[float]
+    lifetime_10h: Optional[float] = None
+    lifetime_100h: Optional[float] = None
+    lifetime_calc: Optional[float] = None
+    sigma_x_1: Optional[float] = None
+    sigma_y_1: Optional[float] = None
+    sigma_x_0: Optional[float] = None
+    sigma_y_0: Optional[float] = None
+    resonance_dx: Optional[float] = None
+    resonance_dy: Optional[float] = None
     tune_x_jitter: Optional[float] = None
     tune_y_jitter: Optional[float] = None
     tune_s_jitter: Optional[float] = None
@@ -157,6 +166,13 @@ class _PollWorker(threading.Thread):
 
         cavity_voltage_kv = _safe_float(adapter.get(pvs.cavity_voltage, None), None)
         beam_energy_mev = _safe_float(adapter.get(pvs.beam_energy, None), None)
+        lifetime_10h = _safe_float(adapter.get(getattr(pvs, "beam_lifetime_10h", None), None), None)
+        lifetime_100h = _safe_float(adapter.get(getattr(pvs, "beam_lifetime_100h", None), None), None)
+        lifetime_calc = _safe_float(adapter.get(getattr(pvs, "calculated_lifetime", None), None), None)
+        sigma_x_1 = _safe_float(adapter.get(getattr(pvs, "qpd1_sigma_x", None), None), None)
+        sigma_y_1 = _safe_float(adapter.get(getattr(pvs, "qpd1_sigma_y", None), None), None)
+        sigma_x_0 = _safe_float(adapter.get(getattr(pvs, "qpd0_sigma_x", None), None), None)
+        sigma_y_0 = _safe_float(adapter.get(getattr(pvs, "qpd0_sigma_y", None), None), None)
         alpha0 = None
         eta = None
         if tune_s is not None and tune_s > 0.0 and cavity_voltage_kv and beam_energy_mev:
@@ -177,6 +193,13 @@ class _PollWorker(threading.Thread):
         xi_x = float(last_result.xi[0]) if last_result is not None else None
         xi_y = float(last_result.xi[1]) if last_result is not None else None
         xi_s = float(last_result.xi[2]) if last_result is not None else None
+
+        def _nearest_resonance_distance(tune_value):
+            if tune_value is None:
+                return None
+            frac = tune_value % 1.0
+            candidates = [0.0, 0.5, 1.0]
+            return min(abs(frac - candidate) for candidate in candidates)
 
         return MonitorSample(
             timestamp=now,
@@ -200,6 +223,15 @@ class _PollWorker(threading.Thread):
             beam_current=_safe_float(adapter.get(getattr(pvs, "beam_current", None), None), None),
             white_noise=_safe_float(adapter.get(getattr(pvs, "white_noise", None), None), None),
             optics_mode=_safe_float(adapter.get(pvs.optics_mode, None), None),
+            lifetime_10h=lifetime_10h,
+            lifetime_100h=lifetime_100h,
+            lifetime_calc=lifetime_calc,
+            sigma_x_1=sigma_x_1,
+            sigma_y_1=sigma_y_1,
+            sigma_x_0=sigma_x_0,
+            sigma_y_0=sigma_y_0,
+            resonance_dx=_nearest_resonance_distance(tune_x),
+            resonance_dy=_nearest_resonance_distance(tune_y),
             tune_x_jitter=self._std(self.tx_history),
             tune_y_jitter=self._std(self.ty_history),
             tune_s_jitter=self._std(self.ts_history),
@@ -271,9 +303,16 @@ class SSMBMonitorWindow:
             ("f_s [kHz]", "tune_s_khz"),
             ("Qx", "tune_x"),
             ("Qy", "tune_y"),
+            ("dQx-res", "resonance_dx"),
+            ("dQy-res", "resonance_dy"),
             ("ξx", "xi_x"),
             ("ξy", "xi_y"),
             ("ξs", "xi_s"),
+            ("τcalc", "lifetime_calc"),
+            ("τ10h", "lifetime_10h"),
+            ("τ100h", "lifetime_100h"),
+            ("σx QPD1", "sigma_x_1"),
+            ("σy QPD1", "sigma_y_1"),
             ("RF jitter", "rf_jitter"),
             ("Qx jitter", "tune_x_jitter"),
             ("Qy jitter", "tune_y_jitter"),
@@ -377,6 +416,24 @@ class SSMBMonitorWindow:
             return "GREEN"
         return "YELLOW"
 
+    def _lifetime_state(self, value: Optional[float]) -> str:
+        if value is None:
+            return "UNKNOWN"
+        if value > 5.0:
+            return "GREEN"
+        if value > 1.0:
+            return "YELLOW"
+        return "RED"
+
+    def _resonance_state(self, distance: Optional[float]) -> str:
+        if distance is None:
+            return "UNKNOWN"
+        if distance > 0.03:
+            return "GREEN"
+        if distance > 0.01:
+            return "YELLOW"
+        return "RED"
+
     def _render(self, sample: MonitorSample):
         eta_state = _severity_from_thresholds(sample.eta, 2e-5, 1e-4)
         alpha0_state = "GREEN" if sample.alpha0 is not None and 1e-5 < sample.alpha0 < 5e-2 else "YELLOW"
@@ -385,8 +442,11 @@ class SSMBMonitorWindow:
         qs_state = _severity_from_thresholds(sample.tune_s_jitter, 1e-5, 5e-5)
         rf_state = _severity_from_thresholds(sample.rf_jitter, 0.02, 0.10)
         feedback_state = self._feedback_state(sample)
+        resonance_x_state = self._resonance_state(sample.resonance_dx)
+        resonance_y_state = self._resonance_state(sample.resonance_dy)
+        lifetime_state = self._lifetime_state(sample.lifetime_calc)
 
-        severities = [eta_state, alpha0_state, qx_state, qy_state, qs_state, rf_state]
+        severities = [eta_state, alpha0_state, qx_state, qy_state, qs_state, rf_state, resonance_x_state, resonance_y_state, lifetime_state]
         score = max(0, 100 - 20 * severities.count("RED") - 8 * severities.count("YELLOW"))
         if score >= 80:
             status = "OK"
@@ -402,9 +462,16 @@ class SSMBMonitorWindow:
         self._set_row("tune_s_khz", "%.6f" % sample.tune_s_khz if sample.tune_s_khz is not None else "UNKNOWN", qs_state)
         self._set_row("tune_x", "%.6f" % sample.tune_x if sample.tune_x is not None else "UNKNOWN", qx_state)
         self._set_row("tune_y", "%.6f" % sample.tune_y if sample.tune_y is not None else "UNKNOWN", qy_state)
+        self._set_row("resonance_dx", "%.5f" % sample.resonance_dx if sample.resonance_dx is not None else "UNKNOWN", resonance_x_state)
+        self._set_row("resonance_dy", "%.5f" % sample.resonance_dy if sample.resonance_dy is not None else "UNKNOWN", resonance_y_state)
         self._set_row("xi_x", "%.4f" % sample.xi_x if sample.xi_x is not None else "UNKNOWN", self._xi_state(sample.xi_x))
         self._set_row("xi_y", "%.4f" % sample.xi_y if sample.xi_y is not None else "UNKNOWN", self._xi_state(sample.xi_y))
         self._set_row("xi_s", "%.4f" % sample.xi_s if sample.xi_s is not None else "UNKNOWN", self._xi_state(sample.xi_s))
+        self._set_row("lifetime_calc", "%.4f" % sample.lifetime_calc if sample.lifetime_calc is not None else "UNKNOWN", lifetime_state)
+        self._set_row("lifetime_10h", "%.4f" % sample.lifetime_10h if sample.lifetime_10h is not None else "UNKNOWN", self._lifetime_state(sample.lifetime_10h))
+        self._set_row("lifetime_100h", "%.4f" % sample.lifetime_100h if sample.lifetime_100h is not None else "UNKNOWN", self._lifetime_state(sample.lifetime_100h))
+        self._set_row("sigma_x_1", "%.3f" % sample.sigma_x_1 if sample.sigma_x_1 is not None else "UNKNOWN", "INFO")
+        self._set_row("sigma_y_1", "%.3f" % sample.sigma_y_1 if sample.sigma_y_1 is not None else "UNKNOWN", "INFO")
         self._set_row("rf_jitter", "%.6f" % sample.rf_jitter if sample.rf_jitter is not None else "UNKNOWN", rf_state)
         self._set_row("tune_x_jitter", "%.6e" % sample.tune_x_jitter if sample.tune_x_jitter is not None else "UNKNOWN", qx_state)
         self._set_row("tune_y_jitter", "%.6e" % sample.tune_y_jitter if sample.tune_y_jitter is not None else "UNKNOWN", qy_state)
@@ -431,6 +498,13 @@ class SSMBMonitorWindow:
             "Beam current        %r" % sample.beam_current,
             "White noise         %r" % sample.white_noise,
             "Optics mode         %r" % sample.optics_mode,
+            "Lifetime 10h        %r" % sample.lifetime_10h,
+            "Lifetime 100h       %r" % sample.lifetime_100h,
+            "Lifetime calc       %r" % sample.lifetime_calc,
+            "QPD1 sigma x        %r" % sample.sigma_x_1,
+            "QPD1 sigma y        %r" % sample.sigma_y_1,
+            "QPD0 sigma x        %r" % sample.sigma_x_0,
+            "QPD0 sigma y        %r" % sample.sigma_y_0,
         ]
         self.raw_text.delete("1.0", tk.END)
         self.raw_text.insert("1.0", "\n".join(raw_lines))
@@ -448,12 +522,18 @@ class SSMBMonitorWindow:
             issues.append("- α0 is above the usual low-alpha SSMB regime")
         if sample.tune_s_jitter is not None and sample.tune_s_jitter > 5e-5:
             issues.append("- synchrotron tune jitter is high")
+        if sample.resonance_dx is not None and sample.resonance_dx < 0.01:
+            issues.append("- Qx is very close to an integer / half-integer resonance")
+        if sample.resonance_dy is not None and sample.resonance_dy < 0.01:
+            issues.append("- Qy is very close to an integer / half-integer resonance")
         if sample.rf_jitter is not None and sample.rf_jitter > 0.10:
             issues.append("- RF readback jitter is high")
         if sample.xi_x is not None and abs(sample.xi_x) > 3.0:
             issues.append("- horizontal chromaticity is far from zero")
         if sample.xi_y is not None and abs(sample.xi_y) > 3.0:
             issues.append("- vertical chromaticity is far from zero")
+        if sample.lifetime_calc is not None and sample.lifetime_calc < 1.0:
+            issues.append("- calculated beam lifetime is low")
         if sample.feedback_x == 0.0 or sample.feedback_y == 0.0 or sample.feedback_s == 0.0:
             issues.append("- one or more feedback loops are disabled")
         if not issues:
