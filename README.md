@@ -38,10 +38,8 @@ Important:
 Before first machine use:
 
 - [CONTROL_ROOM.md](CONTROL_ROOM.md)
-- [docs/runtime_checklist.md](docs/runtime_checklist.md)
 - [docs/control_room_test_plan.md](docs/control_room_test_plan.md)
 - [docs/write_paths.md](docs/write_paths.md)
-- [docs/setup.md](docs/setup.md)
 
 ## Development Start
 
@@ -181,8 +179,6 @@ Chromaticity regression reference:
 
 <https://leogrossman.github.io/betagui/>
 
-- config: [mkdocs.yml](mkdocs.yml)
-- workflow: [.github/workflows/pages.yml](.github/workflows/pages.yml)
 
 ## TODO
 
@@ -191,4 +187,4 @@ Chromaticity regression reference:
 - validate the CLI fallback on the real machine
 - confirm the restored secondary scan workflow with operators
 - restore live BPM orbit plotting if a reliable PV source is available
-- enable GitHub Pages after the first push
+- update docs
