@@ -10,6 +10,7 @@ Use ``--safe`` for read-only preflight.
 # ------------------------------------------------------------------------------
 
 import argparse
+import csv
 import json
 import os
 import platform
@@ -1566,6 +1567,71 @@ def save_matrix_file(state: RuntimeState, path: Path) -> bool:
     return True
 
 
+def export_measurement_result(state: RuntimeState, result: MeasurementResult, entry_values: Dict[str, str], target_path: Path) -> bool:
+    """Export the latest chromaticity result to CSV plus JSON sidecar."""
+    base = target_path.with_suffix("") if target_path.suffix else target_path
+    csv_path = base.with_suffix(".csv")
+    json_path = base.with_suffix(".json")
+    try:
+        with csv_path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(
+                [
+                    "point_index",
+                    "rf_target_pv",
+                    "rf_readback_pv",
+                    "delta_rf_pv",
+                    "tune_x_khz",
+                    "tune_y_khz",
+                    "tune_s_khz",
+                    "tune_x",
+                    "tune_y",
+                    "tune_s",
+                ]
+            )
+            for index, record in enumerate(result.point_records, start=1):
+                writer.writerow(
+                    [
+                        index,
+                        record["rf_target_hz"],
+                        record["rf_readback_hz"],
+                        result.delta_hz[index - 1],
+                        record["tune_x_mean_khz"],
+                        record["tune_y_mean_khz"],
+                        record["tune_s_mean_khz"],
+                        record["tune_x_mean_unitless"],
+                        record["tune_y_mean_unitless"],
+                        record["tune_s_mean_unitless"],
+                    ]
+                )
+        payload = {
+            "entry_values": entry_values,
+            "alpha0": result.alpha0,
+            "alpha0_details": result.alpha0_details,
+            "xi_x": result.xi[0],
+            "xi_y": result.xi[1],
+            "xi_s": result.xi[2],
+            "fit_x_coeffs": result.fit_x_coeffs,
+            "fit_y_coeffs": result.fit_y_coeffs,
+            "fit_s_coeffs": result.fit_s_coeffs,
+            "rf_points_pv": result.rf_points_hz.tolist(),
+            "delta_rf_pv": result.delta_hz.tolist(),
+            "tune_x_khz": result.tune_x_khz.tolist(),
+            "tune_y_khz": result.tune_y_khz.tolist(),
+            "tune_s_khz": result.tune_s_khz.tolist(),
+            "point_records": result.point_records,
+        }
+        with json_path.open("w", encoding="utf-8") as stream:
+            json.dump(_json_ready(payload), stream, indent=2, sort_keys=True)
+            stream.write("\n")
+    except Exception as exc:
+        state.log("Could not export measurement result: %s" % exc)
+        return False
+    state.log("Exported measurement data to %s and %s." % (csv_path, json_path))
+    state.record_event("measurement_exported", csv_path=str(csv_path), json_path=str(json_path))
+    return True
+
+
 def load_default_matrix(state: RuntimeState):
     """Load the embedded legacy matrix without depending on external files."""
     apply_embedded_default_matrix(state)
@@ -1710,6 +1776,7 @@ def MeaChrom(state: RuntimeState, entry_values: Dict[str, str]) -> Optional[List
         return None
 
     set_frf_slowly(state, state.frf0)
+    state.log("alpha0 used during measurement: %.8f" % result.alpha0)
     state.log(
         "Measured chromaticity: xi_x=%.4f, xi_y=%.4f, xi_s=%.4f"
         % (result.xi[0], result.xi[1], result.xi[2])
@@ -1902,7 +1969,9 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         self._build_plot_panel(plot)
 
     def _build_input_panel(self, parent):
-        tk.Label(parent, text="Inputs", font=LARGE_FONT).grid(row=0, column=0, columnspan=2, sticky="ew")
+        tk.Label(parent, text="Chromaticity", font=LARGE_FONT).grid(row=0, column=0, columnspan=2, sticky="ew")
+        input_frame = tk.LabelFrame(parent, text="Measurement inputs")
+        input_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 6))
         default_alpha0 = "dynamic"
         labels = [
             ("ntimes", "N of Q measurements", "7"),
@@ -1914,30 +1983,42 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
             ("delay_mea_Tunes", "t between Q measurements /s", "1"),
             ("alpha0", "alpha0", default_alpha0),
         ]
-        for row, (key, label, value) in enumerate(labels, start=1):
-            tk.Label(parent, text=label, anchor="w").grid(row=row, column=0, sticky="ew", pady=1)
+        for row, (key, label, value) in enumerate(labels):
+            tk.Label(input_frame, text=label, anchor="w").grid(row=row, column=0, sticky="ew", pady=1)
             var = tk.StringVar(value=value)
             self.entry_vars[key] = var
-            tk.Entry(parent, textvariable=var, justify="center", width=12).grid(row=row, column=1, sticky="ew", pady=1)
+            tk.Entry(input_frame, textvariable=var, justify="center", width=12).grid(row=row, column=1, sticky="ew", pady=1)
 
-        self.measure_button = tk.Button(parent, text="Measure the chromaticity", command=self._on_measure)
-        self.measure_button.grid(row=9, column=0, columnspan=2, sticky="ew", pady=(6, 2))
-        self.alpha_button = tk.Button(parent, text="Measure alpha0", command=self._on_alpha)
-        self.alpha_button.grid(row=10, column=0, columnspan=2, sticky="ew", pady=2)
-        self.preview_button = tk.Button(parent, text="Preview RF sweep", command=self._on_preview_measure)
-        self.preview_button.grid(row=11, column=0, columnspan=2, sticky="ew", pady=2)
-        self.matrix_button = tk.Button(parent, text="Measure matrix", command=self._on_measure_matrix)
-        self.matrix_button.grid(row=12, column=0, columnspan=2, sticky="ew", pady=2)
-        self.reset_button = tk.Button(parent, text="reset", command=self._on_reset)
-        self.reset_button.grid(row=13, column=0, columnspan=2, sticky="ew", pady=2)
-        self.save_state_button = tk.Button(parent, text="Save current setting", command=self._on_save_setting)
-        self.save_state_button.grid(row=14, column=0, columnspan=2, sticky="ew", pady=2)
-        self.stop_button = tk.Button(parent, text="Stop", command=self._on_stop)
-        self.stop_button.grid(row=15, column=0, columnspan=2, sticky="ew", pady=2)
-        self.scan_button = tk.Button(parent, text="sext scan", command=self._on_open_scan_window)
-        self.scan_button.grid(row=16, column=0, columnspan=2, sticky="ew", pady=2)
-        self.dev_button = tk.Button(parent, text="dev / PV window", command=self._on_open_dev_window)
-        self.dev_button.grid(row=17, column=0, columnspan=2, sticky="ew", pady=2)
+        chroma_frame = tk.LabelFrame(parent, text="Chromaticity actions")
+        chroma_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        self.measure_button = tk.Button(chroma_frame, text="Measure the chromaticity", command=self._on_measure)
+        self.measure_button.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(4, 2), padx=4)
+        self.alpha_button = tk.Button(chroma_frame, text="Measure alpha0", command=self._on_alpha)
+        self.alpha_button.grid(row=1, column=0, sticky="ew", pady=2, padx=4)
+        self.preview_button = tk.Button(chroma_frame, text="Preview RF sweep", command=self._on_preview_measure)
+        self.preview_button.grid(row=1, column=1, sticky="ew", pady=2, padx=4)
+        self.export_data_button = tk.Button(chroma_frame, text="Export last data", command=self._on_export_measurement_data)
+        self.export_data_button.grid(row=2, column=0, sticky="ew", pady=2, padx=4)
+        self.export_plot_button = tk.Button(chroma_frame, text="Save plot image", command=self._on_export_plot)
+        self.export_plot_button.grid(row=2, column=1, sticky="ew", pady=2, padx=4)
+
+        runtime_frame = tk.LabelFrame(parent, text="Machine state / tools")
+        runtime_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        self.save_state_button = tk.Button(runtime_frame, text="Save current setting", command=self._on_save_setting)
+        self.save_state_button.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(4, 2), padx=4)
+        self.reset_button = tk.Button(runtime_frame, text="reset", command=self._on_reset)
+        self.reset_button.grid(row=1, column=0, sticky="ew", pady=2, padx=4)
+        self.stop_button = tk.Button(runtime_frame, text="Stop", command=self._on_stop)
+        self.stop_button.grid(row=1, column=1, sticky="ew", pady=2, padx=4)
+        self.dev_button = tk.Button(runtime_frame, text="dev / PV window", command=self._on_open_dev_window)
+        self.dev_button.grid(row=2, column=0, columnspan=2, sticky="ew", pady=2, padx=4)
+
+        advanced_frame = tk.LabelFrame(parent, text="Advanced studies")
+        advanced_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(0, 2))
+        self.matrix_button = tk.Button(advanced_frame, text="Measure matrix", command=self._on_measure_matrix)
+        self.matrix_button.grid(row=0, column=0, sticky="ew", pady=(4, 2), padx=4)
+        self.scan_button = tk.Button(advanced_frame, text="sext scan", command=self._on_open_scan_window)
+        self.scan_button.grid(row=0, column=1, sticky="ew", pady=(4, 2), padx=4)
 
     def _build_matrix_panel(self, parent):
         top = tk.Frame(parent)
@@ -2168,8 +2249,13 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         self._show_info_dialog("RF sweep preview", self._measurement_preview_lines(preview))
 
     def _on_measure_matrix(self):
+        bump_dim = 2 if self.state.bump_option in (1, 2) else 3
+        total_chroma_runs = bump_dim * 2
         lines = [
-            "This action will step sextupole currents and run repeated chromaticity measurements.",
+            "Bump mode: %d" % self.state.bump_option,
+            "Matrix dimension: %dD" % bump_dim,
+            "Planned chromaticity measurements: %d" % total_chroma_runs,
+            "This action will step sextupole currents by +/- 1.0 in each active family/group.",
             "It will therefore write sextupole setpoints, feedback/orbit disable commands, and RF sweep commands.",
             "Use conservative settings first and keep a saved baseline snapshot.",
         ]
@@ -2238,6 +2324,46 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
     def _on_bump_mode(self):
         self.state.bump_option = int(self.bump_var.get())
         self.state.log("Selected bump option %d." % self.state.bump_option)
+
+    def _on_export_measurement_data(self):
+        if self.state.last_result is None:
+            self.state.log("No chromaticity result is available to export.")
+            return
+        if filedialog is None:
+            self.state.log("File dialogs are unavailable in this session.")
+            return
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Save chromaticity data",
+        )
+        if not filename:
+            return
+        try:
+            export_measurement_result(self.state, self.state.last_result, self._entry_values(), Path(filename))
+        except Exception as exc:
+            self.state.log("Export failed: %s" % exc)
+
+    def _on_export_plot(self):
+        if self.state.last_result is None or self.fig is None:
+            self.state.log("No plotted chromaticity result is available to export.")
+            return
+        if filedialog is None:
+            self.state.log("File dialogs are unavailable in this session.")
+            return
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG image", "*.png"), ("PDF document", "*.pdf"), ("All files", "*.*")],
+            title="Save chromaticity plot",
+        )
+        if not filename:
+            return
+        try:
+            self.fig.savefig(filename, dpi=180, bbox_inches="tight")
+            self.state.log("Saved plot image to %s." % filename)
+            self.state.record_event("plot_exported", path=str(filename))
+        except Exception as exc:
+            self.state.log("Could not save plot image: %s" % exc)
 
     def _on_change_sext(self, axis_index: int, sign: int):
         steps = [0.0, 0.0, 0.0]
