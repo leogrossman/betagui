@@ -56,7 +56,7 @@ Confirm:
 - the GUI starts
 - status messages do not show missing critical PVs
 - the embedded default matrix loads
-- the live PV readback pane shows sensible values for RF, tune, feedback, and sextupoles
+- optional: open `dev / PV window` and confirm RF, tune, feedback, and sextupole readbacks look sensible
 
 Do not try write-capable actions yet.
 

@@ -28,8 +28,9 @@ python3 control_room/betagui.py
 Without `--safe`, both files behave like the legacy script and are write-capable
 by default.
 
-The GUI also shows a live PV readback pane so you can confirm the main machine
-readbacks are alive before trusting any measurement result.
+The GUI has a `dev / PV window` button for optional live readback checks and
+small RF command tests. It is not open by default, so the normal GUI stays
+lighter during routine operation.
 
 Both control-room entrypoints create a session log directory by default under
 `./betagui_logs/`. Each session stores a human-readable `session.log`, a

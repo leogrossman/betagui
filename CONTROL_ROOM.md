@@ -48,7 +48,7 @@ Read-only means:
 - live EPICS connection is allowed
 - write paths are suppressed
 - use this first to confirm startup and PV visibility
-- the right-hand live PV readback pane should show current machine values
+- use `dev / PV window` if you want optional live PV readback and RF test controls
 - runtime logs are still written under `./betagui_logs/`
 
 CLI fallback:

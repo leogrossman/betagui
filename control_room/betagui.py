@@ -1716,7 +1716,6 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         self.cor_step_vars: List[tk.StringVar] = []
         self.cor_readouts: List[tk.Text] = []
         self.correction_buttons: List[tk.Button] = []
-        self.pv_readout_text = None
         self.status_text = None
         self.fig = None
         self.ax_orbit = None
@@ -1724,6 +1723,7 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         self.ax_y = None
         self.ax_s = None
         self.canvas = None
+        self.dev_window = None
         self._last_result_marker = None
         self._build_widgets()
         self._refresh_matrix_display()
@@ -1786,6 +1786,8 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         self.stop_button.grid(row=14, column=0, columnspan=2, sticky="ew", pady=2)
         self.scan_button = tk.Button(parent, text="sext scan", command=self._on_open_scan_window)
         self.scan_button.grid(row=15, column=0, columnspan=2, sticky="ew", pady=2)
+        self.dev_button = tk.Button(parent, text="dev / PV window", command=self._on_open_dev_window)
+        self.dev_button.grid(row=16, column=0, columnspan=2, sticky="ew", pady=2)
 
     def _build_matrix_panel(self, parent):
         top = tk.Frame(parent)
@@ -1831,16 +1833,6 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
             readout.insert("1.0", "0.0")
             self.cor_readouts.append(readout)
 
-        pv_frame = tk.LabelFrame(parent, text="live PV readback")
-        pv_frame.grid(row=4, column=0, sticky="nsew", pady=(6, 0))
-        pv_frame.columnconfigure(0, weight=1)
-        pv_frame.rowconfigure(0, weight=1)
-        self.pv_readout_text = tk.Text(pv_frame, height=16, width=40, wrap="none")
-        pv_scroll = tk.Scrollbar(pv_frame, command=self.pv_readout_text.yview)
-        self.pv_readout_text.configure(yscrollcommand=pv_scroll.set)
-        self.pv_readout_text.grid(row=0, column=0, sticky="nsew")
-        pv_scroll.grid(row=0, column=1, sticky="ns")
-
     def _build_status_panel(self, parent):
         parent.columnconfigure(0, weight=1)
         parent.rowconfigure(0, weight=1)
@@ -1878,7 +1870,8 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
     def _drain_log(self):
         self._set_status_text()
         self._refresh_matrix_display()
-        self._refresh_pv_readout()
+        if self.dev_window is not None and self.dev_window.winfo_exists():
+            self.dev_window.refresh()
         result = getattr(self.state, "last_result", None)
         marker = id(result) if result is not None else None
         if marker != self._last_result_marker:
@@ -1908,40 +1901,6 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
                     widget.insert("1.0", "%5.3f" % self.state.B[row, col])
                 else:
                     widget.insert("1.0", " ")
-
-    def _refresh_pv_readout(self):
-        if self.pv_readout_text is None:
-            return
-        snapshot = _machine_snapshot(self.state)
-        lines = [
-            "rf_setpoint_hz      %r" % snapshot["rf_hz"],
-            "tune_x_khz          %r" % snapshot["tune_x_khz"],
-            "tune_y_khz          %r" % snapshot["tune_y_khz"],
-            "tune_s_khz          %r" % snapshot["tune_s_khz"],
-            "optics_mode         %r" % snapshot["optics_mode"],
-            "orbit_mode_rb       %r" % snapshot["orbit_mode_readback"],
-            "feedback_x          %r" % snapshot["feedback_x"],
-            "feedback_y          %r" % snapshot["feedback_y"],
-            "feedback_s          %r" % snapshot["feedback_s"],
-            "cavity_voltage_kv   %r" % snapshot["cavity_voltage_kv"],
-            "beam_energy_mev     %r" % snapshot["beam_energy_mev"],
-            "beam_current        %r" % snapshot["beam_current"],
-            "lifetime_10h        %r" % snapshot["lifetime_10h"],
-            "lifetime_100h       %r" % snapshot["lifetime_100h"],
-            "calc_lifetime       %r" % snapshot["calculated_lifetime"],
-            "qpd1_sigma_x        %r" % snapshot["qpd1_sigma_x"],
-            "qpd1_sigma_y        %r" % snapshot["qpd1_sigma_y"],
-            "qpd0_sigma_x        %r" % snapshot["qpd0_sigma_x"],
-            "qpd0_sigma_y        %r" % snapshot["qpd0_sigma_y"],
-            "dose_rate           %r" % snapshot["dose_rate"],
-            "white_noise         %r" % snapshot["white_noise"],
-            "",
-            "sextupoles:",
-        ]
-        for label, value in sorted(snapshot["sextupoles"].items()):
-            lines.append("  %-16s %r" % (label, value))
-        self.pv_readout_text.delete("1.0", tk.END)
-        self.pv_readout_text.insert("1.0", "\n".join(lines))
 
     def _update_plot(self, result: Optional[MeasurementResult]):
         if result is None or self.fig is None:
@@ -2006,6 +1965,15 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
 
     def _on_open_scan_window(self):
         SecondaryScanWindow(self.master, self.state, self._entry_values)
+
+    def _on_open_dev_window(self):
+        if self.dev_window is not None and self.dev_window.winfo_exists():
+            self.dev_window.lift()
+            self.dev_window.focus_set()
+            self.dev_window.refresh(force=True)
+            return
+        self.dev_window = DevToolsWindow(self.master, self.state)
+        self.dev_window.refresh(force=True)
 
     def _on_load_matrix(self):
         if filedialog is None:
@@ -2184,6 +2152,167 @@ class SecondaryScanWindow:
             daemon=True,
         )
         worker.start()
+
+
+class DevToolsWindow:
+    """Optional test window for live PV readback and small RF command checks."""
+
+    def __init__(self, master, state: RuntimeState):
+        self.master = master
+        self.state = state
+        self.window = tk.Toplevel(master)
+        self.window.title("betagui dev / PV window")
+        self.window.geometry("760x560")
+        self.window.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.last_refresh_ts = 0.0
+        self.auto_refresh_var = tk.BooleanVar(value=False)
+        self.rf_delta_var = tk.StringVar(value="10.0")
+        self.rf_status_var = tk.StringVar(value="RF test idle.")
+        self.current_rf_var = tk.StringVar(value="RF: ?")
+        self._after_id = None
+        self._build()
+
+    def _build(self):
+        self.window.columnconfigure(0, weight=1)
+        self.window.rowconfigure(1, weight=1)
+
+        controls = tk.LabelFrame(self.window, text="RF test")
+        controls.grid(row=0, column=0, sticky="ew", padx=8, pady=8)
+        tk.Label(controls, textvariable=self.current_rf_var).grid(row=0, column=0, padx=4, pady=4, sticky="w")
+        tk.Label(controls, text="delta Hz").grid(row=0, column=1, padx=4, pady=4)
+        tk.Entry(controls, textvariable=self.rf_delta_var, width=10, justify="center").grid(row=0, column=2, padx=4, pady=4)
+        tk.Button(controls, text="Refresh RF", command=self._refresh_rf_status).grid(row=0, column=3, padx=4, pady=4)
+        tk.Button(controls, text="Shift RF +delta", command=lambda: self._shift_rf(+1.0)).grid(row=0, column=4, padx=4, pady=4)
+        tk.Button(controls, text="Shift RF -delta", command=lambda: self._shift_rf(-1.0)).grid(row=0, column=5, padx=4, pady=4)
+        tk.Button(controls, text="Restore saved RF", command=self._restore_saved_rf).grid(row=0, column=6, padx=4, pady=4)
+        tk.Checkbutton(
+            controls,
+            text="auto refresh",
+            variable=self.auto_refresh_var,
+            command=self._toggle_auto_refresh,
+        ).grid(row=1, column=0, columnspan=2, padx=4, pady=(0, 4), sticky="w")
+        tk.Button(controls, text="Refresh now", command=lambda: self.refresh(force=True)).grid(row=1, column=2, padx=4, pady=(0, 4))
+        tk.Label(controls, textvariable=self.rf_status_var, anchor="w").grid(row=1, column=3, columnspan=4, padx=4, pady=(0, 4), sticky="ew")
+
+        pv_frame = tk.LabelFrame(self.window, text="live PV readback")
+        pv_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        pv_frame.columnconfigure(0, weight=1)
+        pv_frame.rowconfigure(0, weight=1)
+        self.pv_readout_text = tk.Text(pv_frame, height=28, width=90, wrap="none")
+        pv_scroll_y = tk.Scrollbar(pv_frame, command=self.pv_readout_text.yview)
+        pv_scroll_x = tk.Scrollbar(pv_frame, command=self.pv_readout_text.xview, orient="horizontal")
+        self.pv_readout_text.configure(yscrollcommand=pv_scroll_y.set, xscrollcommand=pv_scroll_x.set)
+        self.pv_readout_text.grid(row=0, column=0, sticky="nsew")
+        pv_scroll_y.grid(row=0, column=1, sticky="ns")
+        pv_scroll_x.grid(row=1, column=0, sticky="ew")
+
+    def _toggle_auto_refresh(self):
+        if self.auto_refresh_var.get():
+            self._schedule_refresh()
+        else:
+            self._cancel_refresh()
+
+    def _schedule_refresh(self):
+        self._cancel_refresh()
+        if self.window.winfo_exists() and self.auto_refresh_var.get():
+            self._after_id = self.window.after(1000, self._auto_refresh_tick)
+
+    def _cancel_refresh(self):
+        if self._after_id is not None:
+            try:
+                self.window.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+
+    def _auto_refresh_tick(self):
+        self._after_id = None
+        self.refresh(force=True)
+        self._schedule_refresh()
+
+    def _refresh_rf_status(self):
+        current_rf = _get_float(self.state, self.state.pvs.rf_setpoint, 0.0)
+        self.current_rf_var.set("RF: %.6f Hz" % current_rf)
+        self.rf_status_var.set("RF readback refreshed.")
+
+    def _shift_rf(self, sign: float):
+        try:
+            delta_hz = sign * float(self.rf_delta_var.get())
+        except ValueError as exc:
+            self.state.log("Invalid RF delta: %s" % exc)
+            self.rf_status_var.set("Invalid RF delta.")
+            return
+        current_rf = _get_float(self.state, self.state.pvs.rf_setpoint, 0.0)
+        target_rf = current_rf + delta_hz
+        self.state.log("Developer RF test: %.6f -> %.6f Hz" % (current_rf, target_rf))
+        self.state.record_event(
+            "developer_rf_shift",
+            current_rf_hz=current_rf,
+            delta_hz=delta_hz,
+            target_rf_hz=target_rf,
+            safe_mode=not self.state.can_write_machine,
+        )
+        set_frf_slowly(self.state, target_rf, n_steps=1, delay_s=0.0)
+        self._refresh_rf_status()
+        self.refresh(force=True)
+
+    def _restore_saved_rf(self):
+        if not self.state.saved_settings_valid:
+            self.state.log("Developer RF restore skipped: no valid saved RF.")
+            self.rf_status_var.set("No valid saved RF.")
+            return
+        self.state.log("Developer RF restore to %.6f Hz" % self.state.frf0)
+        self.state.record_event(
+            "developer_rf_restore",
+            target_rf_hz=self.state.frf0,
+            safe_mode=not self.state.can_write_machine,
+        )
+        set_frf_slowly(self.state, self.state.frf0, n_steps=1, delay_s=0.0)
+        self._refresh_rf_status()
+        self.refresh(force=True)
+
+    def refresh(self, force: bool = False):
+        if not self.window.winfo_exists():
+            return
+        now = time.time()
+        if not force and now - self.last_refresh_ts < 1.0:
+            return
+        self.last_refresh_ts = now
+        snapshot = _machine_snapshot(self.state)
+        lines = [
+            "rf_setpoint_hz      %r" % snapshot["rf_hz"],
+            "tune_x_khz          %r" % snapshot["tune_x_khz"],
+            "tune_y_khz          %r" % snapshot["tune_y_khz"],
+            "tune_s_khz          %r" % snapshot["tune_s_khz"],
+            "optics_mode         %r" % snapshot["optics_mode"],
+            "orbit_mode_rb       %r" % snapshot["orbit_mode_readback"],
+            "feedback_x          %r" % snapshot["feedback_x"],
+            "feedback_y          %r" % snapshot["feedback_y"],
+            "feedback_s          %r" % snapshot["feedback_s"],
+            "cavity_voltage_kv   %r" % snapshot["cavity_voltage_kv"],
+            "beam_energy_mev     %r" % snapshot["beam_energy_mev"],
+            "beam_current        %r" % snapshot["beam_current"],
+            "lifetime_10h        %r" % snapshot["lifetime_10h"],
+            "lifetime_100h       %r" % snapshot["lifetime_100h"],
+            "calc_lifetime       %r" % snapshot["calculated_lifetime"],
+            "qpd1_sigma_x        %r" % snapshot["qpd1_sigma_x"],
+            "qpd1_sigma_y        %r" % snapshot["qpd1_sigma_y"],
+            "qpd0_sigma_x        %r" % snapshot["qpd0_sigma_x"],
+            "qpd0_sigma_y        %r" % snapshot["qpd0_sigma_y"],
+            "dose_rate           %r" % snapshot["dose_rate"],
+            "white_noise         %r" % snapshot["white_noise"],
+            "",
+            "sextupoles:",
+        ]
+        for label, value in sorted(snapshot["sextupoles"].items()):
+            lines.append("  %-16s %r" % (label, value))
+        self.pv_readout_text.delete("1.0", tk.END)
+        self.pv_readout_text.insert("1.0", "\n".join(lines))
+        self.current_rf_var.set("RF: %.6f Hz" % float(snapshot["rf_hz"]))
+
+    def _on_close(self):
+        self._cancel_refresh()
+        self.window.destroy()
 
 
 def launch_gui(state: RuntimeState, window_title: str = "Chromaticity tool pos alpha@MLS (Python 3 port)") -> int:

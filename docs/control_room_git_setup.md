@@ -1,83 +1,99 @@
 # Control-Room Git Setup
 
-Use an SSH deploy key that is restricted to this repository.
+This setup is intentionally local to the repo checkout.
 
-This avoids browser login on the control-room machine and keeps the access scope
-as small as possible.
+It does not require:
 
-## 1. Generate A Repo-Specific SSH Key
+- changing global Git config
+- editing `~/.ssh/config`
+- adding a GitHub login in a browser
 
-Run this on the control-room machine:
+It keeps the SSH key and helper files inside the repo working directory.
+
+## 1. Go To The Repo
 
 ```bash
-mkdir -p ~/.ssh
-chmod 700 ~/.ssh
-ssh-keygen -t ed25519 -f ~/.ssh/betagui_control_room -C "betagui-control-room"
-chmod 600 ~/.ssh/betagui_control_room
-chmod 644 ~/.ssh/betagui_control_room.pub
+cd ~/path/to/betagui
 ```
 
-## 2. Show The Public Key
+## 2. Create A Repo-Local Key Directory
+
+```bash
+mkdir -p .git-local
+chmod 700 .git-local
+```
+
+## 3. Generate A Repo-Specific Deploy Key
+
+```bash
+ssh-keygen -t ed25519 -f .git-local/betagui_control_room -C "betagui-control-room"
+chmod 600 .git-local/betagui_control_room
+chmod 644 .git-local/betagui_control_room.pub
+```
+
+## 4. Show The Public Key
 
 Copy this output:
 
 ```bash
-cat ~/.ssh/betagui_control_room.pub
+cat .git-local/betagui_control_room.pub
 ```
 
-## 3. Add It To GitHub As A Deploy Key
+## 5. Add It To GitHub As A Deploy Key
 
-In the GitHub repository:
+In `leogrossman/betagui`:
 
 - open `Settings`
 - open `Deploy keys`
 - click `Add deploy key`
 - title: `control-room-machine`
 - paste the public key
-- enable write access only if you want to push `control_room_outputs/` from the machine
+- enable write access only if this machine should push `control_room_outputs/`
 
-If you only need `git pull`, leave write access disabled.
+If this machine only needs `git pull`, keep the deploy key read-only.
 
-## 4. Add A Small SSH Config Entry
+## 6. Add A Repo-Local SSH Wrapper
 
-Run this on the control-room machine:
+Create a small helper script inside the repo:
 
 ```bash
-cat >> ~/.ssh/config <<'EOF'
-Host github-betagui
-    HostName github.com
-    User git
-    IdentityFile ~/.ssh/betagui_control_room
-    IdentitiesOnly yes
+cat > .git-local/ssh-betagui <<'EOF'
+#!/usr/bin/env bash
+exec ssh -i "$(dirname "$0")/betagui_control_room" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "$@"
 EOF
-chmod 600 ~/.ssh/config
+chmod 700 .git-local/ssh-betagui
 ```
 
-## 5. Clone Or Repoint The Repo
-
-Fresh clone:
+## 7. Set A Repo-Local Remote URL
 
 ```bash
-git clone git@github-betagui:leogrossman/betagui.git
-cd betagui
+git remote set-url origin git@github.com:leogrossman/betagui.git
 ```
 
-Existing checkout:
+## 8. Set Repo-Local Git Config Only
+
+This writes to `.git/config` in this checkout only:
 
 ```bash
-git remote set-url origin git@github-betagui:leogrossman/betagui.git
+git config core.sshCommand "$PWD/.git-local/ssh-betagui"
 ```
 
-## 6. Test SSH And Pull
+Check it:
 
 ```bash
-ssh -T git@github-betagui
+git config --local --get core.sshCommand
+```
+
+## 9. Test SSH And Pull
+
+```bash
+$PWD/.git-local/ssh-betagui -T git@github.com
 git pull
 ```
 
-## 7. Push Machine Outputs Back
+## 10. Push Machine Outputs Back
 
-Only works if the deploy key was added with write access.
+Only works if the deploy key has write access:
 
 ```bash
 git add control_room_outputs
@@ -85,7 +101,7 @@ git commit -m "Add control-room machine outputs"
 git push
 ```
 
-## 8. Typical Control-Room Workflow
+## 11. Typical Control-Room Workflow
 
 ```bash
 git pull
@@ -106,7 +122,8 @@ git push
 
 ## Notes
 
+- `.git-local/` should stay uncommitted.
 - `betagui_logs/` is intentionally gitignored.
 - `control_room_outputs/` is intended to be commit-friendly.
-- If control-room policy does not allow write access to GitHub, use a read-only
+- If control-room policy does not allow GitHub write access, use a read-only
   deploy key and move `control_room_outputs/` back manually.
