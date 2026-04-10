@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy scipy matplotlib
+
+      - name: Run unit tests
+        run: |
+          python -m unittest tests.test_matrix_io tests.test_mock_measurement tests.test_output_regression tests.test_measure_cli tests.smoke_test_import
+
+      - name: Check syntax
+        run: |
+          python -m py_compile control_room/betagui.py control_room/betagui_safe.py control_room/betagui_cli.py control_room/betagui_cli_safe.py development/betagui.py src/betagui_py3.py

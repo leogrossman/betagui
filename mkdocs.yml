@@ -1,0 +1,31 @@
+site_name: betagui
+site_description: MLS betagui Python 3 port documentation
+repo_url: https://github.com/leogrossman/betagui
+repo_name: leogrossman/betagui
+docs_dir: docs
+site_dir: site
+theme:
+  name: mkdocs
+markdown_extensions:
+  - tables
+  - toc:
+      permalink: true
+nav:
+  - Home: index.md
+  - Overview: README.md
+  - Control Room:
+      - Runtime Checklist: runtime_checklist.md
+      - Control-Room Test Plan: control_room_test_plan.md
+      - Feature Parity: feature_parity.md
+      - Theory And Operation: theory_and_operation.md
+      - Write Paths: write_paths.md
+  - Development:
+      - Development Workflow: development_workflow.md
+      - Testing Workflow: testing_workflow.md
+      - Open Features: open_features.md
+      - GitLab Docs Plan: gitlab_docs_plan.md
+      - Reference Context: reference_context.md
+  - Code Understanding:
+      - Code Walkthrough: code_walkthrough.md
+      - Porting Notes: porting_notes.md
+      - PV Inventory: pv_inventory.md
