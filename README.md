@@ -10,6 +10,7 @@ Use the standalone files in [control_room/](control_room):
 - [control_room/betagui_cli.py](control_room/betagui_cli.py): minimal CLI fallback
 - [control_room/machine_check.py](control_room/machine_check.py): snapshot, compare, and restore helper
 - [control_room/tools/collect_epics_inventory.py](control_room/tools/collect_epics_inventory.py): EPICS and environment inventory
+- [control_room/tools/longitudinal_diagnostics.py](control_room/tools/longitudinal_diagnostics.py): passive time-series probe for uncertain `tuneSyn` / RF behavior
 - [control_room/tools/step_test.py](control_room/tools/step_test.py): small read-only step runner
 
 The GUI file embeds the default legacy response matrices, so it can be copied
@@ -50,6 +51,7 @@ Before any live test, capture a baseline machine snapshot:
 python3 control_room/machine_check.py snapshot
 python3 control_room/tools/collect_epics_inventory.py
 python3 control_room/tools/step_test.py baseline
+python3 control_room/tools/longitudinal_diagnostics.py --duration 60 --sample-hz 2
 ```
 
 Commit-friendly machine outputs are written under `./control_room_outputs/`.

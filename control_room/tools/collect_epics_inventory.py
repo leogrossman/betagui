@@ -137,6 +137,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", help="Output directory. Default: ./control_room_outputs/inventory/")
     parser.add_argument("--probe-limit", type=int, default=50, help="How many legacy PVs to probe with cainfo/caget.")
     parser.add_argument("--use-caget", action="store_true", help="Use caget instead of cainfo for PV probes.")
+    parser.add_argument(
+        "--pv",
+        action="append",
+        default=[],
+        metavar="PVNAME",
+        help="Add one extra PV to probe and save in the inventory output.",
+    )
     return parser
 
 
@@ -147,6 +154,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     out_dir = session_dir(output_root)
 
     legacy_pvs = extract_legacy_pvs()
+    extra_pv_results = probe_pvs(args.pv, use_caget=args.use_caget, limit=None) if args.pv else []
     payload = {
         "timestamp": time.time(),
         "project_root": str(PROJECT_ROOT),
@@ -156,6 +164,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "pvlist": collect_pvlist(),
         "legacy_pv_count": len(legacy_pvs),
         "legacy_pv_probe_results": probe_pvs(legacy_pvs, use_caget=args.use_caget, limit=args.probe_limit),
+        "extra_pv_probe_results": extra_pv_results,
     }
 
     payload_path = out_dir / "inventory.json"
@@ -169,6 +178,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         stream.write("Python: %s\n" % payload["python_versions"]["python"].splitlines()[0])
         stream.write("pvlist available: %s\n" % payload["pvlist"]["available"])
         stream.write("Legacy PV count in source: %s\n" % payload["legacy_pv_count"])
+        stream.write("Extra PV probes: %s\n" % len(extra_pv_results))
 
     print("Inventory saved to:", payload_path)
     print("Summary saved to: ", summary_path)

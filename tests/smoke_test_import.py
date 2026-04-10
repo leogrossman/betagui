@@ -33,6 +33,14 @@ class SmokeImportTest(unittest.TestCase):
         module = load_module(root / "control_room" / "ssmb_monitor.py", "ssmb_monitor_module")
         self.assertTrue(hasattr(module, "open_window"))
 
+    def test_import_longitudinal_diagnostics(self):
+        root = Path(__file__).resolve().parents[1]
+        module = load_module(
+            root / "control_room" / "tools" / "longitudinal_diagnostics.py",
+            "longitudinal_diagnostics_module",
+        )
+        self.assertTrue(hasattr(module, "analyze_samples"))
+
 
 if __name__ == "__main__":
     unittest.main()

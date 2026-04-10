@@ -16,6 +16,8 @@ packages installed.
   baseline snapshot, compare, and restore helper
 - [tools/collect_epics_inventory.py](control_room/tools/collect_epics_inventory.py)
   environment, command, and PV inventory collector
+- [tools/longitudinal_diagnostics.py](control_room/tools/longitudinal_diagnostics.py)
+  passive capture of `tuneSyn`, RF, and extra readback PVs for later FFT/statistical review
 - [tools/step_test.py](control_room/tools/step_test.py)
   small step-by-step read-only runner
 - [runtime_checklist.md](docs/runtime_checklist.md)
@@ -35,6 +37,7 @@ Before anything else, capture a baseline snapshot:
 python3 control_room/machine_check.py snapshot
 python3 control_room/tools/collect_epics_inventory.py
 python3 control_room/tools/step_test.py baseline
+python3 control_room/tools/longitudinal_diagnostics.py --duration 60 --sample-hz 2
 ```
 
 GUI:
@@ -51,6 +54,8 @@ Read-only means:
 - use `dev / PV window` if you want optional live PV readback and RF test controls
 - use `SSMB monitor` if you want an optional low-rate read-only sidecar for
   RF/tune/chromaticity/lifetime/undulator-style monitoring
+- edit the threshold block at the top of `control_room/ssmb_monitor.py` if you
+  want to tune green/yellow/red ranges or add optional experiment PV names
 - use `Preview RF sweep` before a measurement if you want to inspect the planned RF points in Hz
 - runtime logs are still written under `./.betagui_local/logs/`
 

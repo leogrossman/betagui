@@ -8,7 +8,7 @@ import queue
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 try:
@@ -52,8 +52,27 @@ STATUS_THRESHOLDS = {
     "lifetime": {"green": 5.0, "yellow": 1.0},
     "coupling_corr": {"green": 0.20, "yellow": 0.50},
 }
-OPTIONAL_READBACK_PVS = {
-    "u125_1": "U125IL2RP",
+EXPERIMENT_OPTIONAL_PVS = {
+    # Fill these in only when you have verified machine PV names and want the
+    # monitor to include them. Empty entries do not trigger any PV access.
+    "u125_1": None,
+    "global_clock": None,
+    "alpha1": None,
+    "alpha2": None,
+    "eta1": None,
+    "eta2": None,
+    "octupole_1": None,
+    "octupole_2": None,
+}
+EXPERIMENT_LABELS = {
+    "u125_1": "U125/1",
+    "global_clock": "Global clock",
+    "alpha1": "α1",
+    "alpha2": "α2",
+    "eta1": "η1",
+    "eta2": "η2",
+    "octupole_1": "Octupole 1",
+    "octupole_2": "Octupole 2",
 }
 TREND_CHOICES = [
     ("eta", "η"),
@@ -74,8 +93,10 @@ TREND_CHOICES = [
     ("xi_x", "ξx"),
     ("xi_y", "ξy"),
     ("xi_s", "ξs"),
-    ("u125_1", "U125/1"),
 ]
+for _optional_key, _optional_pv in EXPERIMENT_OPTIONAL_PVS.items():
+    if _optional_pv:
+        TREND_CHOICES.append((_optional_key, EXPERIMENT_LABELS.get(_optional_key, _optional_key)))
 
 
 def _safe_float(value, default=None):
@@ -146,6 +167,7 @@ class MonitorSample:
     xi_x: Optional[float] = None
     xi_y: Optional[float] = None
     xi_s: Optional[float] = None
+    extra_values: Dict[str, Optional[float]] = field(default_factory=dict)
 
 
 class _PollWorker(threading.Thread):
@@ -239,6 +261,12 @@ class _PollWorker(threading.Thread):
             candidates = [0.0, 0.5, 1.0]
             return min(abs(frac - candidate) for candidate in candidates)
 
+        extra_values = {}
+        for key, pv_name in EXPERIMENT_OPTIONAL_PVS.items():
+            if not pv_name:
+                continue
+            extra_values[key] = _safe_float(adapter.get(pv_name, None), None)
+
         return MonitorSample(
             timestamp=now,
             rf_pv=rf_pv,
@@ -261,7 +289,7 @@ class _PollWorker(threading.Thread):
             beam_current=_safe_float(adapter.get(getattr(pvs, "beam_current", None), None), None),
             white_noise=_safe_float(adapter.get(getattr(pvs, "white_noise", None), None), None),
             optics_mode=_safe_float(adapter.get(pvs.optics_mode, None), None),
-            u125_1=_safe_float(adapter.get(OPTIONAL_READBACK_PVS["u125_1"], None), None),
+            u125_1=extra_values.get("u125_1"),
             lifetime_10h=lifetime_10h,
             lifetime_100h=lifetime_100h,
             lifetime_calc=lifetime_calc,
@@ -280,6 +308,7 @@ class _PollWorker(threading.Thread):
             xi_x=xi_x,
             xi_y=xi_y,
             xi_s=xi_s,
+            extra_values=extra_values,
         )
 
 
@@ -352,7 +381,6 @@ class SSMBMonitorWindow:
             ("ξx", "xi_x"),
             ("ξy", "xi_y"),
             ("ξs", "xi_s"),
-            ("U125/1", "u125_1"),
             ("τcalc", "lifetime_calc"),
             ("τ10h", "lifetime_10h"),
             ("τ100h", "lifetime_100h"),
@@ -534,7 +562,6 @@ class SSMBMonitorWindow:
         self._set_row("xi_x", "%.4f" % sample.xi_x if sample.xi_x is not None else "UNKNOWN", self._xi_state(sample.xi_x))
         self._set_row("xi_y", "%.4f" % sample.xi_y if sample.xi_y is not None else "UNKNOWN", self._xi_state(sample.xi_y))
         self._set_row("xi_s", "%.4f" % sample.xi_s if sample.xi_s is not None else "UNKNOWN", self._xi_state(sample.xi_s))
-        self._set_row("u125_1", "%.4f" % sample.u125_1 if sample.u125_1 is not None else "UNKNOWN", "INFO")
         self._set_row("lifetime_calc", "%.4f" % sample.lifetime_calc if sample.lifetime_calc is not None else "UNKNOWN", lifetime_state)
         self._set_row("lifetime_10h", "%.4f" % sample.lifetime_10h if sample.lifetime_10h is not None else "UNKNOWN", self._lifetime_state(sample.lifetime_10h))
         self._set_row("lifetime_100h", "%.4f" % sample.lifetime_100h if sample.lifetime_100h is not None else "UNKNOWN", self._lifetime_state(sample.lifetime_100h))
@@ -566,7 +593,6 @@ class SSMBMonitorWindow:
             "Beam current        %r" % sample.beam_current,
             "White noise         %r" % sample.white_noise,
             "Optics mode         %r" % sample.optics_mode,
-            "U125/1             %r" % sample.u125_1,
             "Lifetime 10h        %r" % sample.lifetime_10h,
             "Lifetime 100h       %r" % sample.lifetime_100h,
             "Lifetime calc       %r" % sample.lifetime_calc,
@@ -575,6 +601,11 @@ class SSMBMonitorWindow:
             "QPD0 sigma x        %r" % sample.sigma_x_0,
             "QPD0 sigma y        %r" % sample.sigma_y_0,
         ]
+        if sample.extra_values:
+            raw_lines.append("")
+            raw_lines.append("Optional experiment PVs")
+            for key, value in sample.extra_values.items():
+                raw_lines.append("%-20s %r" % (EXPERIMENT_LABELS.get(key, key), value))
         self.raw_text.delete("1.0", tk.END)
         self.raw_text.insert("1.0", "\n".join(raw_lines))
 
@@ -616,7 +647,10 @@ class SSMBMonitorWindow:
     def _series(self, key: str):
         values = []
         for sample in self.history:
-            values.append(getattr(sample, key, None))
+            if hasattr(sample, key):
+                values.append(getattr(sample, key, None))
+            else:
+                values.append(sample.extra_values.get(key))
         return values
 
     def _plot_metric(self, axis, key: str):
