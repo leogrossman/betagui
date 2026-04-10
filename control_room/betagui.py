@@ -444,7 +444,14 @@ def sample_tunes(
     }
 
 
-def measure_chromaticity(adapter, pvs: BetaguiPVs, inputs: MeasurementInputs, alpha0: Optional[float] = None, harmonic_number: int = 80) -> MeasurementResult:
+def measure_chromaticity(
+    adapter,
+    pvs: BetaguiPVs,
+    inputs: MeasurementInputs,
+    alpha0: Optional[float] = None,
+    harmonic_number: int = 80,
+    progress_logger=None,
+) -> MeasurementResult:
     if not pvs.rf_setpoint:
         raise ValueError("No RF PV configured for this profile.")
     frf0_hz = float(adapter.get(pvs.rf_setpoint, 0.0) or 0.0)
@@ -470,7 +477,20 @@ def measure_chromaticity(adapter, pvs: BetaguiPVs, inputs: MeasurementInputs, al
     tune_y = []
     tune_s = []
     point_records: List[Dict[str, object]] = []
-    for rf_hz in rf_points_hz:
+    estimated_point_time_s = inputs.delay_after_rf_s + max(inputs.n_tune_samples - 1, 0) * inputs.delay_between_tune_reads_s
+    for point_index, rf_hz in enumerate(rf_points_hz, start=1):
+        if progress_logger is not None:
+            remaining_points = len(rf_points_hz) - point_index
+            progress_logger(
+                "RF sweep point %d/%d: target %.6f (step %.6f, est. %.1f s remaining)"
+                % (
+                    point_index,
+                    len(rf_points_hz),
+                    float(rf_hz),
+                    float(delta_hz[point_index - 1]),
+                    max(remaining_points, 0) * estimated_point_time_s,
+                )
+            )
         ramp_rf(adapter, pvs.rf_setpoint, float(rf_hz))
         if inputs.delay_after_rf_s > 0.0:
             time.sleep(inputs.delay_after_rf_s)
@@ -605,7 +625,14 @@ def apply_sextupole_response(adapter, delta_chrom: Sequence[float], response_mat
     return applied
 
 
-def measure_chromaticity_with_feedback_control(adapter, pvs: BetaguiPVs, inputs: MeasurementInputs, alpha0: Optional[float] = None, harmonic_number: int = 80) -> MeasurementResult:
+def measure_chromaticity_with_feedback_control(
+    adapter,
+    pvs: BetaguiPVs,
+    inputs: MeasurementInputs,
+    alpha0: Optional[float] = None,
+    harmonic_number: int = 80,
+    progress_logger=None,
+) -> MeasurementResult:
     """Legacy-like wrapper that disables/restores feedback around measurement."""
     snapshot = disable_feedback_for_measurement(adapter, pvs)
     try:
@@ -615,6 +642,7 @@ def measure_chromaticity_with_feedback_control(adapter, pvs: BetaguiPVs, inputs:
             inputs=inputs,
             alpha0=alpha0,
             harmonic_number=harmonic_number,
+            progress_logger=progress_logger,
         )
         result.feedback_snapshot = {str(key): float(value) for key, value in snapshot.items()}
         return result
@@ -1556,10 +1584,14 @@ def _measurement_inputs_from_dict(values: Dict[str, str]) -> MeasurementInputs:
 
 
 def _log_measurement_plan(state: RuntimeState, inputs: MeasurementInputs, alpha0_text: str):
+    estimated_duration_s = inputs.n_rf_points * (
+        inputs.delay_after_rf_s + max(inputs.n_tune_samples - 1, 0) * inputs.delay_between_tune_reads_s
+    )
     state.log(
         "RF sweep plan: %d points, %d tune samples per point."
         % (inputs.n_rf_points, inputs.n_tune_samples)
     )
+    state.log("Estimated sweep time: about %.1f s plus EPICS overhead." % estimated_duration_s)
     if alpha0_text == "dynamic":
         state.log("alpha0 source: dynamic from live PVs.")
     else:
@@ -1658,6 +1690,7 @@ def MeaChrom(state: RuntimeState, entry_values: Dict[str, str]) -> Optional[List
             inputs=inputs,
             alpha0=alpha0,
             harmonic_number=NHARMONIC,
+            progress_logger=state.log,
         )
     except Exception as exc:
         state.log("Chromaticity measurement failed: %s" % exc)
@@ -1677,7 +1710,10 @@ def MeaChrom(state: RuntimeState, entry_values: Dict[str, str]) -> Optional[List
         return None
 
     set_frf_slowly(state, state.frf0)
-    state.log("Measured xi = %s" % [round(value, 4) for value in result.xi])
+    state.log(
+        "Measured chromaticity: xi_x=%.4f, xi_y=%.4f, xi_s=%.4f"
+        % (result.xi[0], result.xi[1], result.xi[2])
+    )
     state.last_result = result  # porting change: cache latest result for plotting
     payload = {
         "measurement": measurement_name,
@@ -1928,7 +1964,7 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
 
         correction_frame = tk.LabelFrame(parent, text="dξ readout / correction")
         correction_frame.grid(row=3, column=0, sticky="ew", pady=(6, 0))
-        labels = ("x", "y", "s")
+        labels = ("xi_x", "xi_y", "xi_s")
         self.cor_step_vars = []
         self.cor_readouts = []
         for row, axis_name in enumerate(labels):
@@ -2026,19 +2062,21 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         positions, bpms = BPDM()
         self.ax_orbit.clear()
         self.ax_orbit.plot(positions, bpms, "r-")
-        self.ax_orbit.set_xlabel("BPM position")
-        self.ax_orbit.set_ylabel("Orbit displacement")
+        self.ax_orbit.set_title("Orbit readback along the ring")
+        self.ax_orbit.set_xlabel("BPM position [m]")
+        self.ax_orbit.set_ylabel("Orbit displacement [arb.]")
         plots = (
-            (self.ax_x, result.delta_hz, result.tune_x_khz, result.fit_x, "fx"),
-            (self.ax_y, result.delta_hz, result.tune_y_khz, result.fit_y, "fy"),
-            (self.ax_s, result.delta_hz, result.tune_s_khz, result.fit_s, "fs"),
+            (self.ax_x, result.delta_hz, result.tune_x_khz, result.fit_x, "Horizontal tune vs RF", "Tune X frequency [kHz]"),
+            (self.ax_y, result.delta_hz, result.tune_y_khz, result.fit_y, "Vertical tune vs RF", "Tune Y frequency [kHz]"),
+            (self.ax_s, result.delta_hz, result.tune_s_khz, result.fit_s, "Longitudinal tune vs RF", "Synchrotron frequency [kHz]"),
         )
-        for axis, delta_hz, tune_values, fit_poly, label in plots:
+        for axis, delta_hz, tune_values, fit_poly, title, y_label in plots:
             axis.clear()
             axis.plot(delta_hz, tune_values, "ro")
             axis.plot(delta_hz, fit_poly(delta_hz), "b-")
-            axis.set_xlabel("dfrf")
-            axis.set_ylabel(label)
+            axis.set_title(title)
+            axis.set_xlabel("RF offset [PV units]")
+            axis.set_ylabel(y_label)
         self.fig.tight_layout()
         self.canvas.draw()
 
