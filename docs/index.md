@@ -4,7 +4,7 @@ This is the documentation landing page for the MLS `betagui` Python 3 port.
 
 ## For Control-Room Users
 
-- [README.md](README.md)
+- [overview.md](overview.md)
 - [runtime_checklist.md](runtime_checklist.md)
 - [control_room_test_plan.md](control_room_test_plan.md)
 - [feature_parity.md](feature_parity.md)
@@ -30,7 +30,7 @@ This is the documentation landing page for the MLS `betagui` Python 3 port.
 
 If you want a repo homepage for testers, point them first to:
 
-1. [README.md](README.md)
+1. [overview.md](overview.md)
 2. [runtime_checklist.md](runtime_checklist.md)
 3. [feature_parity.md](feature_parity.md)
 

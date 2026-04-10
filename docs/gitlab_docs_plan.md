@@ -7,7 +7,7 @@ project handbook.
 
 Do nothing special and use the repository browser:
 
-- keep [README.md](README.md) as the main landing page
+- keep [overview.md](overview.md) as the main landing page
 - use [index.md](index.md) as the table of contents
 - link testers first to the control-room entrypoint and runtime checklist
 
@@ -38,7 +38,7 @@ already close to what a small MkDocs or Pages setup would need:
 ## Suggested Audience Split
 
 - operators and testers:
-  `README.md`, `runtime_checklist.md`, `feature_parity.md`
+  `overview.md`, `runtime_checklist.md`, `feature_parity.md`
 - developers:
   `development_workflow.md`, `testing_workflow.md`, `open_features.md`
 - maintainers and reviewers:
