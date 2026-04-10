@@ -10,7 +10,12 @@ Use ``--safe`` for read-only preflight.
 # ------------------------------------------------------------------------------
 
 import argparse
+import json
+import os
+import platform
 import signal
+import socket
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -37,7 +42,74 @@ try:
 except ImportError:  # pragma: no cover - depends on host packages
     FigureCanvasTkAgg = None
     Figure = None
-    MATPLOTLIB_AVAILABLE = False
+MATPLOTLIB_AVAILABLE = False
+
+
+DEFAULT_LOG_DIRNAME = "betagui_logs"
+
+
+def _json_ready(value):
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.poly1d):
+        return value.c.tolist()
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(item) for item in value]
+    return repr(value)
+
+
+@dataclass
+class SessionLogger:
+    session_dir: Path
+    text_log_path: Path
+    event_log_path: Path
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    @classmethod
+    def create(cls, root: Optional[Path], prefix: str):
+        root_dir = Path(root) if root is not None else Path.cwd() / DEFAULT_LOG_DIRNAME
+        session_name = "%s_%s_pid%s" % (prefix, time.strftime("%Y%m%d_%H%M%S"), os.getpid())
+        session_dir = root_dir / session_name
+        session_dir.mkdir(parents=True, exist_ok=False)
+        measurements_dir = session_dir / "measurements"
+        measurements_dir.mkdir()
+        return cls(
+            session_dir=session_dir,
+            text_log_path=session_dir / "session.log",
+            event_log_path=session_dir / "events.jsonl",
+        )
+
+    def log_line(self, line: str):
+        with self._lock:
+            with self.text_log_path.open("a", encoding="utf-8") as stream:
+                stream.write(line + "\n")
+
+    def record(self, event_type: str, **payload):
+        event = {
+            "timestamp": time.time(),
+            "event": event_type,
+            "data": _json_ready(payload),
+        }
+        with self._lock:
+            with self.event_log_path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(event, sort_keys=True) + "\n")
+
+    def write_payload(self, relative_name: str, payload) -> Path:
+        payload_path = self.session_dir / relative_name
+        payload_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            with payload_path.open("w", encoding="utf-8") as stream:
+                json.dump(_json_ready(payload), stream, indent=2, sort_keys=True)
+                stream.write("\n")
+        return payload_path
 
 
 # ------------------------------------------------------------------------------
@@ -217,6 +289,15 @@ class MeasurementResult:
     fit_s: np.poly1d
     xi: List[float]
     alpha0: float
+    alpha0_details: Dict[str, object] = field(default_factory=dict)
+    point_records: List[Dict[str, object]] = field(default_factory=list)
+    fit_x_coeffs: List[float] = field(default_factory=list)
+    fit_y_coeffs: List[float] = field(default_factory=list)
+    fit_s_coeffs: List[float] = field(default_factory=list)
+    initial_rf_hz: float = 0.0
+    optics_mode: float = 0.0
+    dmax: float = 0.0
+    feedback_snapshot: Dict[str, float] = field(default_factory=dict)
 
 
 def optics_mode_to_dmax(optics_mode) -> float:
@@ -227,7 +308,7 @@ def optics_mode_to_dmax(optics_mode) -> float:
     return 2.0
 
 
-def calculate_alpha0(adapter, pvs: BetaguiPVs, harmonic_number: int = 80, samples: int = 10) -> float:
+def calculate_alpha0_with_details(adapter, pvs: BetaguiPVs, harmonic_number: int = 80, samples: int = 10):
     if not pvs.tune_s or not pvs.rf_setpoint or not pvs.cavity_voltage or not pvs.beam_energy:
         raise ValueError("Dynamic alpha0 requires tune_s, RF, cavity voltage, and beam energy PVs.")
     freq_samples = [float(adapter.get(pvs.tune_s, 0.0) or 0.0) for _ in range(samples)]
@@ -237,7 +318,28 @@ def calculate_alpha0(adapter, pvs: BetaguiPVs, harmonic_number: int = 80, sample
     energy_ev = float(adapter.get(pvs.beam_energy, 0.0) or 0.0) * 1e6
     if rf_hz == 0.0 or cavity_voltage_v == 0.0:
         raise ValueError("RF frequency and cavity voltage must be non-zero.")
-    return (freq_s_khz * 1000.0) ** 2 / (rf_hz * 1000.0) ** 2 * 2.0 * np.pi * harmonic_number * energy_ev / cavity_voltage_v
+    alpha0 = (freq_s_khz * 1000.0) ** 2 / (rf_hz * 1000.0) ** 2 * 2.0 * np.pi * harmonic_number * energy_ev / cavity_voltage_v
+    details = {
+        "mode": "dynamic",
+        "harmonic_number": harmonic_number,
+        "tune_s_samples_khz": freq_samples,
+        "tune_s_mean_khz": freq_s_khz,
+        "rf_hz": rf_hz,
+        "cavity_voltage_v": cavity_voltage_v,
+        "beam_energy_ev": energy_ev,
+        "alpha0": alpha0,
+    }
+    return float(alpha0), details
+
+
+def calculate_alpha0(adapter, pvs: BetaguiPVs, harmonic_number: int = 80, samples: int = 10) -> float:
+    alpha0, _details = calculate_alpha0_with_details(
+        adapter,
+        pvs,
+        harmonic_number=harmonic_number,
+        samples=samples,
+    )
+    return alpha0
 
 
 def build_rf_range(frf0_hz: float, alpha0: float, dmax: float, delta_x_min_mm: float, delta_x_max_mm: float, n_points: int) -> np.ndarray:
@@ -297,6 +399,9 @@ def sample_tunes(
         "x": average_tune_samples(tune_x),
         "y": average_tune_samples(tune_y),
         "s": average_tune_samples(tune_s),
+        "raw_x": tune_x,
+        "raw_y": tune_y,
+        "raw_s": tune_s,
     }
 
 
@@ -304,8 +409,13 @@ def measure_chromaticity(adapter, pvs: BetaguiPVs, inputs: MeasurementInputs, al
     if not pvs.rf_setpoint:
         raise ValueError("No RF PV configured for this profile.")
     frf0_hz = float(adapter.get(pvs.rf_setpoint, 0.0) or 0.0)
+    alpha0_details = {"mode": "fixed", "alpha0": float(alpha0)} if alpha0 is not None else {}
     if alpha0 is None:
-        alpha0 = calculate_alpha0(adapter, pvs, harmonic_number=harmonic_number)
+        alpha0, alpha0_details = calculate_alpha0_with_details(
+            adapter,
+            pvs,
+            harmonic_number=harmonic_number,
+        )
     optics_mode = adapter.get(pvs.optics_mode, 0) if pvs.optics_mode else 0
     dmax = optics_mode_to_dmax(optics_mode)
     rf_points_hz = build_rf_range(
@@ -320,6 +430,7 @@ def measure_chromaticity(adapter, pvs: BetaguiPVs, inputs: MeasurementInputs, al
     tune_x = []
     tune_y = []
     tune_s = []
+    point_records: List[Dict[str, object]] = []
     for rf_hz in rf_points_hz:
         ramp_rf(adapter, pvs.rf_setpoint, float(rf_hz))
         if inputs.delay_after_rf_s > 0.0:
@@ -330,14 +441,30 @@ def measure_chromaticity(adapter, pvs: BetaguiPVs, inputs: MeasurementInputs, al
             inputs.n_tune_samples,
             delay_between_reads_s=inputs.delay_between_tune_reads_s,
         )
+        point_records.append(
+            {
+                "rf_target_hz": float(rf_hz),
+                "rf_readback_hz": float(adapter.get(pvs.rf_setpoint, rf_hz) or rf_hz),
+                "tune_x_samples_khz": sampled["raw_x"],
+                "tune_y_samples_khz": sampled["raw_y"],
+                "tune_s_samples_khz": sampled["raw_s"],
+                "tune_x_mean_khz": sampled["x"],
+                "tune_y_mean_khz": sampled["y"],
+                "tune_s_mean_khz": sampled["s"],
+                "machine_context": _measurement_point_context_from_adapter(adapter, pvs),
+            }
+        )
         tune_x.append(sampled["x"])
         tune_y.append(sampled["y"])
         tune_s.append(sampled["s"])
     ramp_rf(adapter, pvs.rf_setpoint, frf0_hz)
     fit_order = min(inputs.fit_order, len(delta_hz) - 1)
-    fit_x = np.poly1d(np.polyfit(delta_hz, tune_x, fit_order))
-    fit_y = np.poly1d(np.polyfit(delta_hz, tune_y, fit_order))
-    fit_s = np.poly1d(np.polyfit(delta_hz, tune_s, fit_order))
+    fit_x_coeffs = np.polyfit(delta_hz, tune_x, fit_order)
+    fit_y_coeffs = np.polyfit(delta_hz, tune_y, fit_order)
+    fit_s_coeffs = np.polyfit(delta_hz, tune_s, fit_order)
+    fit_x = np.poly1d(fit_x_coeffs)
+    fit_y = np.poly1d(fit_y_coeffs)
+    fit_s = np.poly1d(fit_s_coeffs)
     # Porting fix: the legacy expression was written as `1.0/(48.0/constants.c)/1000`
     # and annotated with `frev = 6246 kHz`. The comment matches `c / 48 / 1000`,
     # so use that intended value here.
@@ -361,6 +488,14 @@ def measure_chromaticity(adapter, pvs: BetaguiPVs, inputs: MeasurementInputs, al
         fit_s=fit_s,
         xi=xi,
         alpha0=float(alpha0),
+        alpha0_details=alpha0_details,
+        point_records=point_records,
+        fit_x_coeffs=np.asarray(fit_x_coeffs, dtype=float).tolist(),
+        fit_y_coeffs=np.asarray(fit_y_coeffs, dtype=float).tolist(),
+        fit_s_coeffs=np.asarray(fit_s_coeffs, dtype=float).tolist(),
+        initial_rf_hz=float(frf0_hz),
+        optics_mode=float(optics_mode or 0.0),
+        dmax=float(dmax),
     )
 
 
@@ -431,13 +566,15 @@ def measure_chromaticity_with_feedback_control(adapter, pvs: BetaguiPVs, inputs:
     """Legacy-like wrapper that disables/restores feedback around measurement."""
     snapshot = disable_feedback_for_measurement(adapter, pvs)
     try:
-        return measure_chromaticity(
+        result = measure_chromaticity(
             adapter=adapter,
             pvs=pvs,
             inputs=inputs,
             alpha0=alpha0,
             harmonic_number=harmonic_number,
         )
+        result.feedback_snapshot = {str(key): float(value) for key, value in snapshot.items()}
+        return result
     finally:
         restore_feedback_after_measurement(adapter, snapshot)
 
@@ -492,26 +629,36 @@ class UnavailableAdapter:
 class GuardedAdapter:
     """Thin live-EPICS wrapper with optional write suppression."""
 
-    def __init__(self, adapter, allow_machine_writes: bool, logger):
+    def __init__(self, adapter, allow_machine_writes: bool, logger, event_recorder=None):
         self._adapter = adapter
         self.allow_machine_writes = allow_machine_writes
         self._logger = logger
+        self._event_recorder = event_recorder
 
     def get(self, name: str, default=None):
         try:
             return self._adapter.get(name, default)
         except Exception as exc:  # pragma: no cover - depends on external EPICS
             self._logger("Read failed for %s: %s" % (name, exc))
+            if self._event_recorder is not None:
+                self._event_recorder("pv_get_failed", pv=name, default=default, error=str(exc))
             return default
 
     def put(self, name: str, value):
         if self.allow_machine_writes:
             try:
-                return self._adapter.put(name, value)
+                result = self._adapter.put(name, value)
+                if self._event_recorder is not None:
+                    self._event_recorder("pv_put", pv=name, value=value, result=result)
+                return result
             except Exception as exc:  # pragma: no cover - depends on external EPICS
                 self._logger("Write failed for %s: %s" % (name, exc))
+                if self._event_recorder is not None:
+                    self._event_recorder("pv_put_failed", pv=name, value=value, error=str(exc))
                 return False
         self._logger("Suppressed live write to %s -> %r" % (name, value))
+        if self._event_recorder is not None:
+            self._event_recorder("pv_put_suppressed", pv=name, value=value)
         return False
 
 
@@ -519,6 +666,7 @@ class GuardedAdapter:
 class RuntimeConfig:
     allow_machine_writes: bool = False
     auto_load_default_matrix: bool = True
+    log_root: Optional[Path] = None
 
 
 @dataclass
@@ -526,6 +674,7 @@ class RuntimeState:
     config: RuntimeConfig
     pvs: BetaguiPVs = field(default_factory=BetaguiPVs.legacy)
     adapter: Optional[GuardedAdapter] = None
+    session_logger: Optional[SessionLogger] = None
     messages: List[str] = field(default_factory=list)
     stop_requested: bool = False
     frf0: float = 0.0
@@ -538,12 +687,28 @@ class RuntimeState:
     bump_dim: int = 3
     mat_status: int = 4
     last_result: Optional[MeasurementResult] = None
+    measurement_counter: int = 0
 
     def log(self, message: str):
         timestamp = time.strftime("%H:%M:%S")
         line = "[%s] %s" % (timestamp, message)
         self.messages.append(line)
         print(line)
+        if self.session_logger is not None:
+            self.session_logger.log_line(line)
+
+    def record_event(self, event_type: str, **payload):
+        if self.session_logger is not None:
+            self.session_logger.record(event_type, **payload)
+
+    def write_payload(self, relative_name: str, payload) -> Optional[Path]:
+        if self.session_logger is None:
+            return None
+        return self.session_logger.write_payload(relative_name, payload)
+
+    def next_measurement_name(self, prefix: str) -> str:
+        self.measurement_counter += 1
+        return "%s_%03d" % (prefix, self.measurement_counter)
 
     @property
     def can_write_machine(self) -> bool:
@@ -553,6 +718,32 @@ class RuntimeState:
 def create_runtime(config: Optional[RuntimeConfig] = None) -> RuntimeState:
     config = config or RuntimeConfig()
     state = RuntimeState(config=config, pvs=BetaguiPVs.legacy())
+    try:
+        state.session_logger = SessionLogger.create(config.log_root, "betagui_gui")
+    except Exception as exc:
+        print("Could not create session logger: %s" % exc)
+        state.session_logger = None
+    if state.session_logger is not None:
+        state.log("Session log directory: %s" % state.session_logger.session_dir)
+        state.write_payload(
+            "session_metadata.json",
+            {
+                "script": "control_room/betagui.py",
+                "cwd": str(Path.cwd()),
+                "hostname": socket.gethostname(),
+                "pid": os.getpid(),
+                "python": sys.version,
+                "platform": platform.platform(),
+                "allow_machine_writes": config.allow_machine_writes,
+            },
+        )
+        state.record_event(
+            "session_start",
+            script="control_room/betagui.py",
+            cwd=str(Path.cwd()),
+            hostname=socket.gethostname(),
+            allow_machine_writes=config.allow_machine_writes,
+        )
     try:
         base_adapter = EpicsAdapter()
         state.log("Using live EPICS adapter.")
@@ -564,6 +755,7 @@ def create_runtime(config: Optional[RuntimeConfig] = None) -> RuntimeState:
         adapter=base_adapter,
         allow_machine_writes=config.allow_machine_writes,
         logger=state.log,
+        event_recorder=state.record_event,
     )
     save_setting(state)
     if config.auto_load_default_matrix:
@@ -584,6 +776,117 @@ def _get_float(state: RuntimeState, pv_name: str, default: float = 0.0) -> float
         return default
 
 
+def _sextupole_snapshot(state: RuntimeState) -> Dict[str, float]:
+    names = [
+        ("S1P1", state.pvs.sext_s1p1),
+        ("S1P2", state.pvs.sext_s1p2),
+        ("S2P1", state.pvs.sext_s2p1),
+        ("S2P2", state.pvs.sext_s2p2),
+        ("S2P2K", state.pvs.sext_s2p2k),
+        ("S2P2L", state.pvs.sext_s2p2l),
+        ("S3P1", state.pvs.sext_s3p1),
+        ("S3P2", state.pvs.sext_s3p2),
+    ]
+    return {label: _get_float(state, pv_name, 0.0) for label, pv_name in names if pv_name}
+
+
+def _machine_snapshot(state: RuntimeState) -> Dict[str, object]:
+    return {
+        "timestamp": time.time(),
+        "rf_hz": _get_float(state, state.pvs.rf_setpoint, 0.0),
+        "tune_x_khz": _get_float(state, state.pvs.tune_x, 0.0),
+        "tune_y_khz": _get_float(state, state.pvs.tune_y, 0.0),
+        "tune_s_khz": _get_float(state, state.pvs.tune_s, 0.0),
+        "optics_mode": _get_float(state, state.pvs.optics_mode, 0.0),
+        "orbit_mode_readback": _get_float(state, state.pvs.orbit_mode_readback, 0.0),
+        "feedback_x": _get_float(state, state.pvs.feedback_x, 0.0),
+        "feedback_y": _get_float(state, state.pvs.feedback_y, 0.0),
+        "feedback_s": _get_float(state, state.pvs.feedback_s, 0.0),
+        "cavity_voltage_kv": _get_float(state, state.pvs.cavity_voltage, 0.0),
+        "beam_energy_mev": _get_float(state, state.pvs.beam_energy, 0.0),
+        "beam_current": _get_float(state, state.pvs.beam_current, 0.0),
+        "lifetime_10h": _get_float(state, state.pvs.beam_lifetime_10h, 0.0),
+        "lifetime_100h": _get_float(state, state.pvs.beam_lifetime_100h, 0.0),
+        "calculated_lifetime": _get_float(state, state.pvs.calculated_lifetime, 0.0),
+        "qpd1_sigma_x": _get_float(state, state.pvs.qpd1_sigma_x, 0.0),
+        "qpd1_sigma_y": _get_float(state, state.pvs.qpd1_sigma_y, 0.0),
+        "qpd0_sigma_x": _get_float(state, state.pvs.qpd0_sigma_x, 0.0),
+        "qpd0_sigma_y": _get_float(state, state.pvs.qpd0_sigma_y, 0.0),
+        "dose_rate": _get_float(state, state.pvs.dose_rate, 0.0),
+        "white_noise": _get_float(state, state.pvs.white_noise, 0.0),
+        "sextupoles": _sextupole_snapshot(state),
+    }
+
+
+def _measurement_point_context(state: RuntimeState) -> Dict[str, object]:
+    snapshot = _machine_snapshot(state)
+    return {
+        "rf_hz": snapshot["rf_hz"],
+        "tune_x_khz": snapshot["tune_x_khz"],
+        "tune_y_khz": snapshot["tune_y_khz"],
+        "tune_s_khz": snapshot["tune_s_khz"],
+        "optics_mode": snapshot["optics_mode"],
+        "orbit_mode_readback": snapshot["orbit_mode_readback"],
+        "feedback_x": snapshot["feedback_x"],
+        "feedback_y": snapshot["feedback_y"],
+        "feedback_s": snapshot["feedback_s"],
+        "cavity_voltage_kv": snapshot["cavity_voltage_kv"],
+        "beam_energy_mev": snapshot["beam_energy_mev"],
+        "beam_current": snapshot["beam_current"],
+        "lifetime_10h": snapshot["lifetime_10h"],
+        "lifetime_100h": snapshot["lifetime_100h"],
+        "calculated_lifetime": snapshot["calculated_lifetime"],
+        "qpd1_sigma_x": snapshot["qpd1_sigma_x"],
+        "qpd1_sigma_y": snapshot["qpd1_sigma_y"],
+        "qpd0_sigma_x": snapshot["qpd0_sigma_x"],
+        "qpd0_sigma_y": snapshot["qpd0_sigma_y"],
+        "dose_rate": snapshot["dose_rate"],
+        "white_noise": snapshot["white_noise"],
+        "sextupoles": snapshot["sextupoles"],
+    }
+
+
+def _measurement_point_context_from_adapter(adapter, pvs: BetaguiPVs) -> Dict[str, object]:
+    snapshot = {
+        "rf_hz": float(adapter.get(pvs.rf_setpoint, 0.0) or 0.0),
+        "tune_x_khz": float(adapter.get(pvs.tune_x, 0.0) or 0.0),
+        "tune_y_khz": float(adapter.get(pvs.tune_y, 0.0) or 0.0),
+        "tune_s_khz": float(adapter.get(pvs.tune_s, 0.0) or 0.0),
+        "optics_mode": float(adapter.get(pvs.optics_mode, 0.0) or 0.0),
+        "orbit_mode_readback": float(adapter.get(pvs.orbit_mode_readback, 0.0) or 0.0),
+        "feedback_x": float(adapter.get(pvs.feedback_x, 0.0) or 0.0),
+        "feedback_y": float(adapter.get(pvs.feedback_y, 0.0) or 0.0),
+        "feedback_s": float(adapter.get(pvs.feedback_s, 0.0) or 0.0),
+        "cavity_voltage_kv": float(adapter.get(pvs.cavity_voltage, 0.0) or 0.0),
+        "beam_energy_mev": float(adapter.get(pvs.beam_energy, 0.0) or 0.0),
+        "beam_current": float(adapter.get(pvs.beam_current, 0.0) or 0.0),
+        "lifetime_10h": float(adapter.get(pvs.beam_lifetime_10h, 0.0) or 0.0),
+        "lifetime_100h": float(adapter.get(pvs.beam_lifetime_100h, 0.0) or 0.0),
+        "calculated_lifetime": float(adapter.get(pvs.calculated_lifetime, 0.0) or 0.0),
+        "qpd1_sigma_x": float(adapter.get(pvs.qpd1_sigma_x, 0.0) or 0.0),
+        "qpd1_sigma_y": float(adapter.get(pvs.qpd1_sigma_y, 0.0) or 0.0),
+        "qpd0_sigma_x": float(adapter.get(pvs.qpd0_sigma_x, 0.0) or 0.0),
+        "qpd0_sigma_y": float(adapter.get(pvs.qpd0_sigma_y, 0.0) or 0.0),
+        "dose_rate": float(adapter.get(pvs.dose_rate, 0.0) or 0.0),
+        "white_noise": float(adapter.get(pvs.white_noise, 0.0) or 0.0),
+        "sextupoles": {
+            label: float(adapter.get(name, 0.0) or 0.0)
+            for label, name in [
+                ("S1P1", pvs.sext_s1p1),
+                ("S1P2", pvs.sext_s1p2),
+                ("S2P1", pvs.sext_s2p1),
+                ("S2P2", pvs.sext_s2p2),
+                ("S2P2K", pvs.sext_s2p2k),
+                ("S2P2L", pvs.sext_s2p2l),
+                ("S3P1", pvs.sext_s3p1),
+                ("S3P2", pvs.sext_s3p2),
+            ]
+            if name
+        },
+    }
+    return snapshot
+
+
 def save_setting(state: RuntimeState):
     """Save current machine values for later reset.
 
@@ -595,12 +898,14 @@ def save_setting(state: RuntimeState):
     if raw_rf in (None, ""):
         state.saved_settings_valid = False
         state.log("Could not save current settings: RF setpoint is unavailable.")
+        state.record_event("save_setting", success=False, reason="rf_unavailable")
         return False
     try:
         frf0 = float(raw_rf)
     except (TypeError, ValueError):
         state.saved_settings_valid = False
         state.log("Could not save current settings: RF setpoint is non-numeric (%r)." % (raw_rf,))
+        state.record_event("save_setting", success=False, reason="rf_non_numeric", raw_rf=raw_rf)
         return False
 
     state.ini_sext = [_get_float(state, name, 0.0) for name in state.pvs.sextupole_names()]
@@ -613,6 +918,15 @@ def save_setting(state: RuntimeState):
     state.ini_orbit = _get_float(state, state.pvs.orbit_mode_readback, 0.0)
     state.saved_settings_valid = True
     state.log("Saved current settings.")
+    state.record_event(
+        "save_setting",
+        success=True,
+        frf0=state.frf0,
+        ini_fdb=state.ini_fdb,
+        ini_orbit=state.ini_orbit,
+        ini_sext=state.ini_sext,
+        snapshot=_machine_snapshot(state),
+    )
     return True
 
 
@@ -656,8 +970,10 @@ def set_all2ini(state: RuntimeState):
     """WRITE PATH: restore RF, sextupoles, feedback, orbit, and phase modulation."""
     if not state.saved_settings_valid:
         state.log("Reset is unavailable: no valid saved settings are stored.")
+        state.record_event("reset_skipped", reason="no_valid_saved_settings")
         return False
     state.log("Resetting saved parameters.")
+    before_snapshot = _machine_snapshot(state)
     set_frf_slowly(state, state.frf0)
     for pv_name, value in zip(state.pvs.sextupole_names(), state.ini_sext):
         if pv_name:
@@ -672,16 +988,27 @@ def set_all2ini(state: RuntimeState):
         state.adapter.put(state.pvs.orbit_mode, state.ini_orbit)
     if state.pvs.phase_modulation:
         state.adapter.put(state.pvs.phase_modulation, "disabled")
+    state.record_event(
+        "reset_completed",
+        before_snapshot=before_snapshot,
+        after_snapshot=_machine_snapshot(state),
+    )
     return True
 
 
 def cal_alpha0(state: RuntimeState) -> Optional[float]:
     try:
-        alpha0 = calculate_alpha0(state.adapter, state.pvs, harmonic_number=NHARMONIC)
+        alpha0, details = calculate_alpha0_with_details(
+            state.adapter,
+            state.pvs,
+            harmonic_number=NHARMONIC,
+        )
     except Exception as exc:
         state.log("Could not calculate alpha0: %s" % exc)
+        state.record_event("alpha0_failed", error=str(exc), snapshot=_machine_snapshot(state))
         return None
     state.log("alpha0 = %.8f" % alpha0)
+    state.record_event("alpha0_calculated", details=details, snapshot=_machine_snapshot(state))
     return alpha0
 
 
@@ -692,6 +1019,7 @@ def BPDM():
 
 def set_all_sexts(state: RuntimeState, delta_chrom: Sequence[float]):
     """WRITE PATH: apply inverse response matrix to sextupole currents."""
+    before_snapshot = _sextupole_snapshot(state)
     try:
         applied = apply_sextupole_response(
             adapter=state.adapter,
@@ -702,8 +1030,16 @@ def set_all_sexts(state: RuntimeState, delta_chrom: Sequence[float]):
         )
     except Exception as exc:
         state.log("Could not apply sextupole correction: %s" % exc)
+        state.record_event("sextupole_correction_failed", delta_chrom=list(delta_chrom), error=str(exc))
         return {}
     state.log("Applied sextupole increments: %s" % applied)
+    state.record_event(
+        "sextupole_correction",
+        delta_chrom=list(delta_chrom),
+        applied=applied,
+        before_snapshot=before_snapshot,
+        after_snapshot=_sextupole_snapshot(state),
+    )
     return applied
 
 
@@ -776,6 +1112,12 @@ def measure_poly_response_matrix(
     matrix = np.zeros((3, len(groups) * 2))
     state.stop_requested = False
     state.log("Starting legacy-style polynomial sextupole scan.")
+    state.record_event(
+        "poly_scan_started",
+        output_dir=str(output_dir),
+        scan_ranges=scan_ranges,
+        baseline=baseline,
+    )
 
     try:
         for family_index, ((family_name, pv_names), (delta_min, delta_max)) in enumerate(zip(groups, scan_ranges)):
@@ -825,6 +1167,11 @@ def measure_poly_response_matrix(
 
         np.savetxt(output_dir / "ploy_co_mat.txt", matrix)
         state.log("Saved polynomial response matrix to %s." % (output_dir / "ploy_co_mat.txt"))
+        state.record_event(
+            "poly_scan_completed",
+            output_dir=str(output_dir),
+            matrix=matrix.tolist(),
+        )
         return matrix
     finally:
         for (_, pv_names), current in zip(groups, baseline):
@@ -973,6 +1320,13 @@ def generate_scan_table(
     output_dir.mkdir(parents=True, exist_ok=True)
     np.savetxt(output_dir / "sext_setting.txt", candidates)
     state.log("Saved %d scan candidates to %s." % (len(candidates), output_dir / "sext_setting.txt"))
+    state.record_event(
+        "scan_table_candidates",
+        output_dir=str(output_dir),
+        candidate_count=int(len(candidates)),
+        xi_ranges=xi_ranges,
+        scan_ranges=scan_ranges,
+    )
 
     if not state.can_write_machine:
         state.log("Scan-table execution needs write access; candidates only were saved.")
@@ -1068,6 +1422,14 @@ def load_matrix_file(state: RuntimeState, path: Path) -> bool:
     state.bump_dim = bump_dim
     state.bump_option = mat_status
     state.log("Loaded matrix from %s with shape %s." % (path, matrix.shape))
+    state.record_event(
+        "matrix_loaded",
+        path=str(path),
+        shape=list(matrix.shape),
+        mat_status=mat_status,
+        bump_dim=bump_dim,
+        matrix=matrix.tolist(),
+    )
     return True
 
 
@@ -1089,6 +1451,12 @@ def save_matrix_file(state: RuntimeState, path: Path) -> bool:
         state.log("Could not save matrix to %s: %s" % (path, exc))
         return False
     state.log("Saved matrix to %s." % path)
+    state.record_event(
+        "matrix_saved",
+        path=str(path),
+        mat_status=state.mat_status,
+        matrix=state.B.tolist(),
+    )
     return True
 
 
@@ -1123,15 +1491,35 @@ def _log_measurement_plan(state: RuntimeState, inputs: MeasurementInputs, alpha0
 def MeaChrom(state: RuntimeState, entry_values: Dict[str, str]) -> Optional[List[float]]:
     """Legacy-style chromaticity measurement wrapper."""
     state.stop_requested = False
+    measurement_name = state.next_measurement_name("chromaticity")
+    start_snapshot = _machine_snapshot(state)
     state.log("Starting chromaticity measurement.")
+    state.record_event(
+        "chromaticity_measurement_started",
+        measurement=measurement_name,
+        entry_values=entry_values,
+        start_snapshot=start_snapshot,
+    )
     try:
         inputs = _measurement_inputs_from_dict(entry_values)
     except Exception as exc:
         state.log("Invalid measurement inputs: %s" % exc)
+        state.record_event(
+            "chromaticity_measurement_failed",
+            measurement=measurement_name,
+            error=str(exc),
+            stage="parse_inputs",
+        )
         return None
 
     if not state.can_write_machine:
         state.log("Chromaticity measurement needs write access.")
+        state.record_event(
+            "chromaticity_measurement_failed",
+            measurement=measurement_name,
+            error="write_access_required",
+            stage="permission_check",
+        )
         return None
 
     alpha0_text = entry_values.get("alpha0", "dynamic").strip()
@@ -1141,6 +1529,13 @@ def MeaChrom(state: RuntimeState, entry_values: Dict[str, str]) -> Optional[List
             alpha0 = float(alpha0_text)
         except ValueError:
             state.log("Invalid alpha0 entry: %r" % alpha0_text)
+            state.record_event(
+                "chromaticity_measurement_failed",
+                measurement=measurement_name,
+                error="invalid_alpha0",
+                alpha0_text=alpha0_text,
+                stage="alpha0_parse",
+            )
             return None
     _log_measurement_plan(state, inputs, alpha0_text)
 
@@ -1154,19 +1549,81 @@ def MeaChrom(state: RuntimeState, entry_values: Dict[str, str]) -> Optional[List
         )
     except Exception as exc:
         state.log("Chromaticity measurement failed: %s" % exc)
+        failure_payload = {
+            "measurement": measurement_name,
+            "error": str(exc),
+            "entry_values": entry_values,
+            "start_snapshot": start_snapshot,
+        }
+        payload_path = state.write_payload("measurements/%s_failed.json" % measurement_name, failure_payload)
+        state.record_event(
+            "chromaticity_measurement_failed",
+            measurement=measurement_name,
+            error=str(exc),
+            payload_path=payload_path,
+        )
         return None
 
     set_frf_slowly(state, state.frf0)
     state.log("Measured xi = %s" % [round(value, 4) for value in result.xi])
     state.last_result = result  # porting change: cache latest result for plotting
+    payload = {
+        "measurement": measurement_name,
+        "entry_values": entry_values,
+        "inputs": {
+            "n_tune_samples": inputs.n_tune_samples,
+            "n_rf_points": inputs.n_rf_points,
+            "delta_x_min_mm": inputs.delta_x_min_mm,
+            "delta_x_max_mm": inputs.delta_x_max_mm,
+            "fit_order": inputs.fit_order,
+            "delay_after_rf_s": inputs.delay_after_rf_s,
+            "delay_between_tune_reads_s": inputs.delay_between_tune_reads_s,
+        },
+        "result": {
+            "alpha0": result.alpha0,
+            "alpha0_details": result.alpha0_details,
+            "xi": result.xi,
+            "rf_points_hz": result.rf_points_hz.tolist(),
+            "delta_hz": result.delta_hz.tolist(),
+            "tune_x_khz": result.tune_x_khz.tolist(),
+            "tune_y_khz": result.tune_y_khz.tolist(),
+            "tune_s_khz": result.tune_s_khz.tolist(),
+            "fit_x_coeffs": result.fit_x_coeffs,
+            "fit_y_coeffs": result.fit_y_coeffs,
+            "fit_s_coeffs": result.fit_s_coeffs,
+            "optics_mode": result.optics_mode,
+            "dmax": result.dmax,
+            "feedback_snapshot": result.feedback_snapshot,
+            "point_records": result.point_records,
+        },
+        "start_snapshot": start_snapshot,
+        "end_snapshot": _machine_snapshot(state),
+    }
+    payload_path = state.write_payload("measurements/%s.json" % measurement_name, payload)
+    state.record_event(
+        "chromaticity_measurement_completed",
+        measurement=measurement_name,
+        xi=result.xi,
+        alpha0=result.alpha0,
+        payload_path=payload_path,
+    )
     return result.xi
 
 
 def measure_response_matrix(state: RuntimeState, entry_values: Dict[str, str]) -> Optional[np.ndarray]:
     """WRITE PATH: step sextupoles and measure the response matrix."""
+    measurement_name = state.next_measurement_name("response_matrix")
     state.log("Starting response matrix measurement.")
+    state.record_event(
+        "response_matrix_started",
+        measurement=measurement_name,
+        entry_values=entry_values,
+        bump_option=state.bump_option,
+        start_snapshot=_machine_snapshot(state),
+    )
     if not state.can_write_machine:
         state.log("Response matrix measurement needs write access.")
+        state.record_event("response_matrix_failed", measurement=measurement_name, error="write_access_required")
         return None
 
     nsext_p2 = [
@@ -1186,6 +1643,7 @@ def measure_response_matrix(state: RuntimeState, entry_values: Dict[str, str]) -
     for index in range(bump_dim):
         if state.stop_requested:
             state.log("Matrix measurement stopped.")
+            state.record_event("response_matrix_stopped", measurement=measurement_name, axis=index)
             return None
         state.log("Measuring matrix axis %d/%d." % (index + 1, bump_dim))
         group = nsext[index]
@@ -1197,17 +1655,43 @@ def measure_response_matrix(state: RuntimeState, entry_values: Dict[str, str]) -
         xi_2 = MeaChrom(state, entry_values)
         if xi_1 is None or xi_2 is None:
             state.log("Matrix measurement aborted during axis %d." % index)
+            state.record_event("response_matrix_failed", measurement=measurement_name, axis=index, error="chromaticity_measurement_failed")
             return None
         a_matrix[index, :] = (np.asarray(xi_2) - np.asarray(xi_1))[0:bump_dim]
+        state.record_event(
+            "response_matrix_axis",
+            measurement=measurement_name,
+            axis=index,
+            xi_minus=xi_1,
+            xi_plus=xi_2,
+            row=a_matrix[index, :].tolist(),
+        )
 
     try:
         state.B = np.linalg.inv(a_matrix.T)
     except np.linalg.LinAlgError as exc:
         state.log("Response matrix inversion failed: %s" % exc)
+        state.record_event("response_matrix_failed", measurement=measurement_name, error=str(exc), stage="invert")
         return None
     state.bump_dim = bump_dim
     state.mat_status = state.bump_option
     state.log("Measured response matrix with shape %s." % (state.B.shape,))
+    payload_path = state.write_payload(
+        "measurements/%s.json" % measurement_name,
+        {
+            "measurement": measurement_name,
+            "bump_option": state.bump_option,
+            "a_matrix": a_matrix.tolist(),
+            "inverse_matrix": state.B.tolist(),
+            "end_snapshot": _machine_snapshot(state),
+        },
+    )
+    state.record_event(
+        "response_matrix_completed",
+        measurement=measurement_name,
+        matrix=state.B.tolist(),
+        payload_path=payload_path,
+    )
     return state.B
 
 
@@ -1708,6 +2192,14 @@ def apply_embedded_default_matrix(state):
         state.bump_dim = 3
         state.bump_option = 3
     state.log("Loaded embedded default matrix with shape %s." % (state.B.shape,))
+    state.record_event(
+        "matrix_loaded",
+        path="embedded_default",
+        shape=list(state.B.shape),
+        mat_status=state.mat_status,
+        bump_dim=state.bump_dim,
+        matrix=state.B.tolist(),
+    )
 
 
 WINDOW_TITLE = "Chromaticity tool pos alpha@MLS"
@@ -1725,6 +2217,10 @@ def build_arg_parser():
         action="store_true",
         help="Skip loading the embedded default response matrix on startup.",
     )
+    parser.add_argument(
+        "--log-dir",
+        help="Directory where runtime logs and raw measurement payloads will be written. Default: ./betagui_logs/",
+    )
     return parser
 
 
@@ -1735,7 +2231,14 @@ def main(argv=None):
         RuntimeConfig(
             allow_machine_writes=not args.safe,
             auto_load_default_matrix=False,
+            log_root=Path(args.log_dir) if args.log_dir else None,
         )
+    )
+    state.record_event(
+        "process_arguments",
+        argv=list(argv) if argv is not None else sys.argv[1:],
+        safe=args.safe,
+        no_default_matrix=args.no_default_matrix,
     )
     if not args.no_default_matrix:
         apply_embedded_default_matrix(state)

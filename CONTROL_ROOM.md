@@ -32,6 +32,7 @@ Read-only means:
 - live EPICS connection is allowed
 - write paths are suppressed
 - use this first to confirm startup and PV visibility
+- runtime logs are still written under `./betagui_logs/`
 
 CLI fallback:
 
@@ -52,6 +53,18 @@ CLI:
 ```bash
 python3 control_room/betagui_cli.py
 ```
+
+## Logs
+
+Both control-room entrypoints write a session log directory by default under
+`./betagui_logs/`.
+
+Each session contains:
+
+- `session.log`: human-readable runtime log
+- `events.jsonl`: structured PV/event log
+- `measurements/`: raw measurement payloads with RF points, tune samples, and
+  calculated results
 
 ## Read Before First Live Use
 

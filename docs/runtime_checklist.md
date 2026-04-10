@@ -19,6 +19,8 @@ Use this short checklist before any future real-machine deployment.
 - Confirm the GUI starts without import or display errors.
 - Confirm the status panel does not report missing critical PVs.
 - Confirm expected legacy PVs are reachable with `cainfo`.
+- Confirm a new session directory appears under `./betagui_logs/`.
+- Confirm `session.log` and `events.jsonl` are being written.
 
 ## PV Sanity
 
@@ -33,13 +35,15 @@ Use this short checklist before any future real-machine deployment.
 
 - Review [write_paths.md](write_paths.md).
 - Confirm saved initial settings are sensible before testing reset behavior.
-- Confirm operator intent before enabling any write-capable run.
-- Use `--allow-writes` only after read-only validation is complete.
+- Confirm operator intent before switching from `--safe` to the default
+  write-capable run.
+- Preserve the session log directory from each test run for later analysis.
 
 ## First Live Functional Checks
 
 - Measure `alpha0` only if the required PVs are confirmed.
 - Run a small chromaticity measurement with conservative inputs.
+- Confirm a raw measurement payload appears under `betagui_logs/.../measurements/`.
 - Verify RF returns to the initial value afterward.
 - Verify feedback/orbit states are restored afterward.
 - Only then consider matrix measurement or manual correction buttons.

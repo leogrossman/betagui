@@ -25,6 +25,11 @@ python3 control_room/betagui.py
 Without `--safe`, both files behave like the legacy script and are write-capable
 by default.
 
+Both control-room entrypoints create a session log directory by default under
+`./betagui_logs/`. Each session stores a human-readable `session.log`, a
+structured `events.jsonl`, and raw measurement payloads under
+`measurements/`.
+
 Before first machine use, read:
 
 - [CONTROL_ROOM.md](CONTROL_ROOM.md)
