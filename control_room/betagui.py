@@ -176,7 +176,7 @@ class EpicsAdapter:
 # Legacy EPICS names from original/betagui.py.
 pvfreqX = "TUNEZRP:measX"
 pvfreqY = "TUNEZRP:measY"
-pvfreqS = "CUMZ4X003GP:tuneSyn"
+pvfreqS = "cumz4x003gp:tuneSyn"
 pvfrfSet = "MCLKHGP:setFrq"
 pvS1P1 = "S1P1RP:setCur"
 pvS1P2 = "S1P2RP:setCur"

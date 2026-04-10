@@ -138,7 +138,7 @@ class UnavailableAdapter:
 class BetaguiPVs:
     tune_x: Optional[str] = "TUNEZRP:measX"
     tune_y: Optional[str] = "TUNEZRP:measY"
-    tune_s: Optional[str] = "CUMZ4X003GP:tuneSyn"
+    tune_s: Optional[str] = "cumz4x003gp:tuneSyn"
     rf_setpoint: Optional[str] = "MCLKHGP:setFrq"
     optics_mode: Optional[str] = "MLSOPCCP:actOptRmpTblSet"
     orbit_mode: Optional[str] = "ORBITCCP:selRunMode"
