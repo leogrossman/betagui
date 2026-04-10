@@ -112,6 +112,12 @@ python3 control_room/betagui_cli_safe.py
 The digital twin is for development and integration testing, not for the final
 control-room launchers.
 
+⚠️ **Container not included (too large for GitHub). Download it first:**
+
+```bash
+apptainer pull support/digital_twin/pyat-as-twin-softioc.sif oras://registry.hzdr.de/digital-twins-for-accelerators/containers/pyat-softioc-digital-twin:v0-1-3-mls.2469803
+```
+
 Start the twin:
 
 ```bash

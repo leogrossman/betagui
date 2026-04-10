@@ -15,3 +15,6 @@ venv/
 *.swp
 *~
 ._*
+
+# digital twin container (too large for git)
+support/digital_twin/*.sif
