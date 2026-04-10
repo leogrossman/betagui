@@ -1978,7 +1978,7 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
             ("Npoints", "Ndfrf", "11"),
             ("dfmin", "dfrfmin w.r.t Xdisp /mm", "-2"),
             ("dfmax", "dfrfmax w.r.t Xdisp /mm", "2"),
-            ("fit_order", "fit ordr", "1"),
+            ("fit_order", "fit ordr", "2"),
             ("delay_set_rf", "delay after setting rf /s", "5"),
             ("delay_mea_Tunes", "t between Q measurements /s", "1"),
             ("alpha0", "alpha0", default_alpha0),
