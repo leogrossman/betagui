@@ -29,6 +29,33 @@ class FakeAdapter:
         return True
 
 
+class FakeTextWidget:
+    def __init__(self, yview_value=(0.0, 1.0)):
+        self.content = ""
+        self.deleted = 0
+        self.inserted = 0
+        self.seen = 0
+        self.moves = []
+        self._yview_value = yview_value
+
+    def yview(self):
+        return self._yview_value
+
+    def delete(self, *_args):
+        self.deleted += 1
+        self.content = ""
+
+    def insert(self, *_args):
+        self.inserted += 1
+        self.content += _args[-1]
+
+    def see(self, *_args):
+        self.seen += 1
+
+    def yview_moveto(self, value):
+        self.moves.append(value)
+
+
 class ControlRoomRuntimeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -334,6 +361,20 @@ class ControlRoomRuntimeTest(unittest.TestCase):
             self.assertTrue(ok)
             self.assertTrue((Path(tmpdir) / "result.csv").exists())
             self.assertTrue((Path(tmpdir) / "result.json").exists())
+
+    def test_set_status_text_only_redraws_when_messages_change(self):
+        module = self.module
+        window = module.mainwindow.__new__(module.mainwindow)
+        window.state = type("State", (), {"messages": ["line one", "line two"]})()
+        window.status_text = FakeTextWidget()
+        window._last_status_message_count = -1
+        module.mainwindow._set_status_text(window)
+        self.assertEqual(window.status_text.deleted, 1)
+        self.assertEqual(window.status_text.inserted, 1)
+        self.assertEqual(window.status_text.seen, 1)
+        module.mainwindow._set_status_text(window)
+        self.assertEqual(window.status_text.deleted, 1)
+        self.assertEqual(window.status_text.inserted, 1)
 
 
 if __name__ == "__main__":

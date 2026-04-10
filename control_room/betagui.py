@@ -2008,6 +2008,7 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         self.dev_window = None
         self.ssmb_window = None
         self._last_result_marker = None
+        self._last_status_message_count = -1
         self._build_widgets()
         self._refresh_matrix_display()
         self._refresh_mode_state()
@@ -2164,9 +2165,27 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
     def _set_status_text(self):
         if self.status_text is None:
             return
+        message_count = len(self.state.messages)
+        if message_count == self._last_status_message_count:
+            return
+        self._last_status_message_count = message_count
+        yview = self.status_text.yview()
+        was_at_bottom = (not yview) or yview[1] >= 0.999
         self.status_text.delete("1.0", tk.END)
         self.status_text.insert(tk.END, "\n".join(self.state.messages[-200:]))
-        self.status_text.see(tk.END)
+        if was_at_bottom:
+            self.status_text.see(tk.END)
+        elif yview:
+            self.status_text.yview_moveto(yview[0])
+
+    def _matrix_group_description(self) -> str:
+        mapping = {
+            1: "2D: S1=(S1P1,S1P2), S2=(S2P1,S2P2K,S2P2L)",
+            2: "2D(P2): S1P2, S2P2=(S2P2K,S2P2L)",
+            3: "3D: S1=(S1P1,S1P2), S2=(S2P1,S2P2K,S2P2L), S3=(S3P1,S3P2)",
+            4: "3D(P2): S1P2, S2P2=(S2P2K,S2P2L), S3P2",
+        }
+        return mapping.get(self.state.bump_option, "Unknown matrix mode")
 
     def _drain_log(self):
         self._set_status_text()
@@ -2328,10 +2347,11 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         bump_dim = 2 if self.state.bump_option in (1, 2) else 3
         total_chroma_runs = bump_dim * 2
         lines = [
+            self._matrix_group_description(),
             "Bump mode: %d" % self.state.bump_option,
             "Matrix dimension: %dD" % bump_dim,
             "Planned chromaticity measurements: %d" % total_chroma_runs,
-            "This action will step sextupole currents by +/- 1.0 in each active family/group.",
+            "Each active sextupole group will be stepped to baseline - 1.0 A, then restored to baseline.",
             "It will therefore write sextupole setpoints, feedback/orbit disable commands, and RF sweep commands.",
             "Use conservative settings first and keep a saved baseline snapshot.",
         ]
