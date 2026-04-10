@@ -1075,6 +1075,17 @@ def cal_alpha0(state: RuntimeState) -> Optional[float]:
         state.record_event("alpha0_failed", error=str(exc), snapshot=_machine_snapshot(state))
         return None
     state.log("alpha0 = %.8f" % alpha0)
+    if "tune_s_mean_khz" in details:
+        state.log(
+            "alpha0 inputs: tuneSyn raw=%r, tuneSyn_khz=%.6f, Qs=%.6f, Ucav=%.3f kV, E=%.3f MeV"
+            % (
+                details.get("tune_s_samples_raw", ["?"])[0] if details.get("tune_s_samples_raw") else "?",
+                float(details["tune_s_mean_khz"]),
+                float(details["tune_s_mean_unitless"]),
+                float(details["cavity_voltage_v"]) / 1000.0,
+                float(details["beam_energy_ev"]) / 1.0e6,
+            )
+        )
     state.record_event("alpha0_calculated", details=details, snapshot=_machine_snapshot(state))
     return alpha0
 
@@ -1973,7 +1984,11 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
     def _drain_log(self):
         self._set_status_text()
         self._refresh_matrix_display()
-        if self.dev_window is not None and self.dev_window.winfo_exists():
+        if (
+            self.dev_window is not None
+            and getattr(self.dev_window, "window", None) is not None
+            and self.dev_window.window.winfo_exists()
+        ):
             self.dev_window.refresh()
         result = getattr(self.state, "last_result", None)
         marker = id(result) if result is not None else None
@@ -2151,9 +2166,13 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         SecondaryScanWindow(self.master, self.state, self._entry_values)
 
     def _on_open_dev_window(self):
-        if self.dev_window is not None and self.dev_window.winfo_exists():
-            self.dev_window.lift()
-            self.dev_window.focus_set()
+        if (
+            self.dev_window is not None
+            and getattr(self.dev_window, "window", None) is not None
+            and self.dev_window.window.winfo_exists()
+        ):
+            self.dev_window.window.lift()
+            self.dev_window.window.focus_set()
             self.dev_window.refresh(force=True)
             return
         self.dev_window = DevToolsWindow(self.master, self.state)
