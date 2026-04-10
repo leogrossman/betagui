@@ -9,19 +9,56 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 try:
     import tkinter as tk
+    from tkinter import ttk
 except ImportError:  # pragma: no cover - depends on host packages
     tk = None
+    ttk = None
+
+try:
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    from matplotlib.figure import Figure
+
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:  # pragma: no cover - depends on host packages
+    FigureCanvasTkAgg = None
+    Figure = None
+    MATPLOTLIB_AVAILABLE = False
 
 
 E_REST_MEV = 0.51099895
 REVOLUTION_FREQUENCY_KHZ = 299792458.0 / 48.0 / 1000.0
+SEVERITY_COLORS = {
+    "GREEN": "#c7efcf",
+    "YELLOW": "#fff4b2",
+    "RED": "#f6b0ae",
+    "UNKNOWN": "#d9d9d9",
+    "INFO": "#d7e7ff",
+}
+TREND_CHOICES = [
+    ("eta", "η"),
+    ("alpha0", "α0"),
+    ("tune_x", "Qx"),
+    ("tune_y", "Qy"),
+    ("tune_s", "Qs"),
+    ("tune_s_khz", "f_s [kHz]"),
+    ("rf_pv", "RF PV"),
+    ("rf_jitter", "RF jitter"),
+    ("tune_x_jitter", "Qx jitter"),
+    ("tune_y_jitter", "Qy jitter"),
+    ("tune_s_jitter", "Qs jitter"),
+    ("beam_current", "Beam current"),
+    ("white_noise", "White noise"),
+    ("xi_x", "ξx"),
+    ("xi_y", "ξy"),
+    ("xi_s", "ξs"),
+]
 
 
-def _safe_float(value, default=0.0):
+def _safe_float(value, default=None):
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -29,26 +66,20 @@ def _safe_float(value, default=0.0):
 
 
 def _tune_s_khz_from_pv(raw_value: float) -> float:
-    return raw_value / 1000.0
+    return float(raw_value) / 1000.0
 
 
 def _unitless_tune_from_khz(freq_khz: float) -> float:
-    return freq_khz / REVOLUTION_FREQUENCY_KHZ
+    return float(freq_khz) / REVOLUTION_FREQUENCY_KHZ
 
 
-def _severity_from_thresholds(value: Optional[float], green: float, yellow: float, invert: bool = False) -> str:
+def _severity_from_thresholds(value: Optional[float], green: float, yellow: float) -> str:
     if value is None:
         return "UNKNOWN"
-    val = abs(value)
-    if invert:
-        if val > green:
-            return "GREEN"
-        if val > yellow:
-            return "YELLOW"
-        return "RED"
-    if val < green:
+    value = abs(value)
+    if value < green:
         return "GREEN"
-    if val < yellow:
+    if value < yellow:
         return "YELLOW"
     return "RED"
 
@@ -80,6 +111,9 @@ class MonitorSample:
     tune_y_jitter: Optional[float] = None
     tune_s_jitter: Optional[float] = None
     rf_jitter: Optional[float] = None
+    xi_x: Optional[float] = None
+    xi_y: Optional[float] = None
+    xi_s: Optional[float] = None
 
 
 class _PollWorker(threading.Thread):
@@ -88,82 +122,91 @@ class _PollWorker(threading.Thread):
         self.state = state
         self.result_queue = result_queue
         self.stop_event = stop_event
-        self.rf_history = deque(maxlen=20)
-        self.tx_history = deque(maxlen=20)
-        self.ty_history = deque(maxlen=20)
-        self.ts_history = deque(maxlen=20)
+        self.rf_history = deque(maxlen=60)
+        self.tx_history = deque(maxlen=60)
+        self.ty_history = deque(maxlen=60)
+        self.ts_history = deque(maxlen=60)
 
     def run(self):
         while not self.stop_event.is_set():
-            sample = self._collect_sample()
-            self.result_queue.put(sample)
+            self.result_queue.put(self._collect_sample())
             self.stop_event.wait(1.0)
+
+    def _std(self, values):
+        if len(values) < 2:
+            return None
+        mean = sum(values) / len(values)
+        variance = sum((item - mean) ** 2 for item in values) / len(values)
+        return math.sqrt(variance)
 
     def _collect_sample(self):
         pvs = self.state.pvs
         adapter = self.state.adapter
         now = time.time()
+
         rf_pv = _safe_float(adapter.get(pvs.rf_setpoint, None), None)
-        tx_raw = _safe_float(adapter.get(pvs.tune_x, None), None)
-        ty_raw = _safe_float(adapter.get(pvs.tune_y, None), None)
-        ts_raw = _safe_float(adapter.get(pvs.tune_s, None), None)
-        tx_khz = tx_raw
-        ty_khz = ty_raw
-        ts_khz = _tune_s_khz_from_pv(ts_raw) if ts_raw is not None else None
-        tx = _unitless_tune_from_khz(tx_khz) if tx_khz is not None else None
-        ty = _unitless_tune_from_khz(ty_khz) if ty_khz is not None else None
-        ts = _unitless_tune_from_khz(ts_khz) if ts_khz is not None else None
-        ucav_kv = _safe_float(adapter.get(pvs.cavity_voltage, None), None)
-        energy_mev = _safe_float(adapter.get(pvs.beam_energy, None), None)
+        tune_x_raw = _safe_float(adapter.get(pvs.tune_x, None), None)
+        tune_y_raw = _safe_float(adapter.get(pvs.tune_y, None), None)
+        tune_s_raw = _safe_float(adapter.get(pvs.tune_s, None), None)
+        tune_x_khz = tune_x_raw
+        tune_y_khz = tune_y_raw
+        tune_s_khz = _tune_s_khz_from_pv(tune_s_raw) if tune_s_raw is not None else None
+        tune_x = _unitless_tune_from_khz(tune_x_khz) if tune_x_khz is not None else None
+        tune_y = _unitless_tune_from_khz(tune_y_khz) if tune_y_khz is not None else None
+        tune_s = _unitless_tune_from_khz(tune_s_khz) if tune_s_khz is not None else None
+
+        cavity_voltage_kv = _safe_float(adapter.get(pvs.cavity_voltage, None), None)
+        beam_energy_mev = _safe_float(adapter.get(pvs.beam_energy, None), None)
         alpha0 = None
         eta = None
-        if ts is not None and ts > 0.0 and ucav_kv and energy_mev:
-            alpha0 = (ts ** 2) * 2.0 * math.pi * (energy_mev * 1e6) / (80.0 * (ucav_kv * 1000.0))
-            gamma = energy_mev / E_REST_MEV
+        if tune_s is not None and tune_s > 0.0 and cavity_voltage_kv and beam_energy_mev:
+            alpha0 = (tune_s ** 2) * 2.0 * math.pi * (beam_energy_mev * 1e6) / (80.0 * cavity_voltage_kv * 1000.0)
+            gamma = beam_energy_mev / E_REST_MEV
             eta = alpha0 - 1.0 / (gamma * gamma)
 
         for history, value in (
             (self.rf_history, rf_pv),
-            (self.tx_history, tx),
-            (self.ty_history, ty),
-            (self.ts_history, ts),
+            (self.tx_history, tune_x),
+            (self.ty_history, tune_y),
+            (self.ts_history, tune_s),
         ):
             if value is not None:
                 history.append(float(value))
 
-        def _std(values):
-            if len(values) < 2:
-                return None
-            mean = sum(values) / len(values)
-            variance = sum((item - mean) ** 2 for item in values) / len(values)
-            return math.sqrt(variance)
+        last_result = getattr(self.state, "last_result", None)
+        xi_x = float(last_result.xi[0]) if last_result is not None else None
+        xi_y = float(last_result.xi[1]) if last_result is not None else None
+        xi_s = float(last_result.xi[2]) if last_result is not None else None
 
         return MonitorSample(
             timestamp=now,
             rf_pv=rf_pv,
             alpha0=alpha0,
             eta=eta,
-            tune_x=tx,
-            tune_y=ty,
-            tune_s=ts,
-            tune_x_khz=tx_khz,
-            tune_y_khz=ty_khz,
-            tune_s_khz=ts_khz,
-            tune_x_raw=tx_raw,
-            tune_y_raw=ty_raw,
-            tune_s_raw=ts_raw,
+            tune_x=tune_x,
+            tune_y=tune_y,
+            tune_s=tune_s,
+            tune_x_khz=tune_x_khz,
+            tune_y_khz=tune_y_khz,
+            tune_s_khz=tune_s_khz,
+            tune_x_raw=tune_x_raw,
+            tune_y_raw=tune_y_raw,
+            tune_s_raw=tune_s_raw,
             feedback_x=_safe_float(adapter.get(pvs.feedback_x, None), None),
             feedback_y=_safe_float(adapter.get(pvs.feedback_y, None), None),
             feedback_s=_safe_float(adapter.get(pvs.feedback_s, None), None),
-            cavity_voltage_kv=ucav_kv,
-            beam_energy_mev=energy_mev,
+            cavity_voltage_kv=cavity_voltage_kv,
+            beam_energy_mev=beam_energy_mev,
             beam_current=_safe_float(adapter.get(getattr(pvs, "beam_current", None), None), None),
             white_noise=_safe_float(adapter.get(getattr(pvs, "white_noise", None), None), None),
             optics_mode=_safe_float(adapter.get(pvs.optics_mode, None), None),
-            tune_x_jitter=_std(self.tx_history),
-            tune_y_jitter=_std(self.ty_history),
-            tune_s_jitter=_std(self.ts_history),
-            rf_jitter=_std(self.rf_history),
+            tune_x_jitter=self._std(self.tx_history),
+            tune_y_jitter=self._std(self.ty_history),
+            tune_s_jitter=self._std(self.ts_history),
+            rf_jitter=self._std(self.rf_history),
+            xi_x=xi_x,
+            xi_y=xi_y,
+            xi_s=xi_s,
         )
 
 
@@ -175,16 +218,129 @@ class SSMBMonitorWindow:
         self.state = state
         self.window = tk.Toplevel(master)
         self.window.title("SSMB monitor")
-        self.window.geometry("640x560")
+        self.window.geometry("1080x720")
         self.window.protocol("WM_DELETE_WINDOW", self.close)
         self.result_queue = queue.Queue()
         self.stop_event = threading.Event()
         self.worker = _PollWorker(state, self.result_queue, self.stop_event)
         self.current_sample = None
-        self.status_text = tk.Text(self.window, wrap="word", height=30, width=80)
-        self.status_text.pack(fill="both", expand=True, padx=8, pady=8)
+        self.history = deque(maxlen=300)
+        self.row_labels: Dict[str, Dict[str, tk.Label]] = {}
+        self.summary_var = tk.StringVar(value="SSMB STATUS: UNKNOWN")
+        self.trend_var_1 = tk.StringVar(value="eta")
+        self.trend_var_2 = tk.StringVar(value="xi_x")
+        self.raw_text = None
+        self.fig = None
+        self.ax_top = None
+        self.ax_bottom = None
+        self.canvas = None
+        self._build()
         self.worker.start()
         self._tick()
+
+    def _build(self):
+        self.window.columnconfigure(0, weight=1)
+        self.window.columnconfigure(1, weight=1)
+        self.window.rowconfigure(1, weight=1)
+
+        header = tk.Frame(self.window)
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=8)
+        tk.Label(header, textvariable=self.summary_var, font=("Helvetica", 14, "bold")).pack(side="left")
+
+        left = tk.Frame(self.window)
+        left.grid(row=1, column=0, sticky="nsew", padx=(8, 4), pady=(0, 8))
+        left.columnconfigure(0, weight=1)
+        left.rowconfigure(2, weight=1)
+
+        right = tk.Frame(self.window)
+        right.grid(row=1, column=1, sticky="nsew", padx=(4, 8), pady=(0, 8))
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(1, weight=1)
+
+        self._build_status_table(left)
+        self._build_raw_panel(left)
+        self._build_plot_panel(right)
+
+    def _build_status_table(self, parent):
+        frame = tk.LabelFrame(parent, text="SSMB diagnostics")
+        frame.grid(row=0, column=0, sticky="ew")
+        rows = [
+            ("η", "eta"),
+            ("α0", "alpha0"),
+            ("Qs", "tune_s"),
+            ("f_s [kHz]", "tune_s_khz"),
+            ("Qx", "tune_x"),
+            ("Qy", "tune_y"),
+            ("ξx", "xi_x"),
+            ("ξy", "xi_y"),
+            ("ξs", "xi_s"),
+            ("RF jitter", "rf_jitter"),
+            ("Qx jitter", "tune_x_jitter"),
+            ("Qy jitter", "tune_y_jitter"),
+            ("Qs jitter", "tune_s_jitter"),
+            ("Feedback", "feedback"),
+        ]
+        for row_index, (label_text, key) in enumerate(rows):
+            tk.Label(frame, text=label_text, anchor="w", width=12).grid(row=row_index, column=0, sticky="ew", padx=4, pady=2)
+            value_label = tk.Label(frame, text="UNKNOWN", anchor="w", width=18)
+            value_label.grid(row=row_index, column=1, sticky="ew", padx=4, pady=2)
+            state_label = tk.Label(frame, text="UNKNOWN", anchor="center", width=10, bg=SEVERITY_COLORS["UNKNOWN"])
+            state_label.grid(row=row_index, column=2, sticky="ew", padx=4, pady=2)
+            self.row_labels[key] = {"value": value_label, "state": state_label}
+
+        self.diagnostics_text = tk.Text(frame, height=8, width=50, wrap="word")
+        self.diagnostics_text.grid(row=len(rows), column=0, columnspan=3, sticky="ew", padx=4, pady=(8, 4))
+
+    def _build_raw_panel(self, parent):
+        frame = tk.LabelFrame(parent, text="Raw / interpreted values")
+        frame.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+        self.raw_text = tk.Text(frame, height=18, width=58, wrap="none")
+        raw_scroll = tk.Scrollbar(frame, command=self.raw_text.yview)
+        self.raw_text.configure(yscrollcommand=raw_scroll.set)
+        self.raw_text.grid(row=0, column=0, sticky="nsew")
+        raw_scroll.grid(row=0, column=1, sticky="ns")
+
+    def _build_plot_panel(self, parent):
+        controls = tk.LabelFrame(parent, text="Live trends")
+        controls.grid(row=0, column=0, sticky="ew")
+        labels = {key: text for key, text in TREND_CHOICES}
+        tk.Label(controls, text="Top trend").grid(row=0, column=0, padx=4, pady=4)
+        tk.Label(controls, text="Bottom trend").grid(row=1, column=0, padx=4, pady=4)
+        if ttk is not None:
+            ttk.Combobox(
+                controls,
+                textvariable=self.trend_var_1,
+                values=[key for key, _text in TREND_CHOICES],
+                width=18,
+                state="readonly",
+            ).grid(row=0, column=1, padx=4, pady=4)
+            ttk.Combobox(
+                controls,
+                textvariable=self.trend_var_2,
+                values=[key for key, _text in TREND_CHOICES],
+                width=18,
+                state="readonly",
+            ).grid(row=1, column=1, padx=4, pady=4)
+        else:
+            tk.OptionMenu(controls, self.trend_var_1, *labels.keys()).grid(row=0, column=1, padx=4, pady=4)
+            tk.OptionMenu(controls, self.trend_var_2, *labels.keys()).grid(row=1, column=1, padx=4, pady=4)
+
+        plot_frame = tk.LabelFrame(parent, text="History")
+        plot_frame.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+        plot_frame.columnconfigure(0, weight=1)
+        plot_frame.rowconfigure(0, weight=1)
+        if MATPLOTLIB_AVAILABLE:
+            self.fig = Figure(figsize=(5.5, 5.5))
+            self.ax_top = self.fig.add_subplot(211)
+            self.ax_bottom = self.fig.add_subplot(212)
+            self.canvas = FigureCanvasTkAgg(self.fig, master=plot_frame)
+            self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        else:
+            tk.Label(plot_frame, text="matplotlib unavailable; live trend plots are disabled.").grid(
+                row=0, column=0, sticky="w", padx=8, pady=8
+            )
 
     def _tick(self):
         if not self.window.winfo_exists():
@@ -194,100 +350,148 @@ class SSMBMonitorWindow:
                 self.current_sample = self.result_queue.get_nowait()
             except queue.Empty:
                 break
+            self.history.append(self.current_sample)
         if self.current_sample is not None:
             self._render(self.current_sample)
         self.window.after(500, self._tick)
 
-    def _line(self, label: str, value, severity: str):
-        return "%-18s %-16s %s" % (label, value, severity)
+    def _set_row(self, key: str, value_text: str, severity: str):
+        row = self.row_labels[key]
+        row["value"].config(text=value_text)
+        row["state"].config(text=severity, bg=SEVERITY_COLORS.get(severity, SEVERITY_COLORS["UNKNOWN"]))
+
+    def _xi_state(self, value: Optional[float]) -> str:
+        if value is None:
+            return "UNKNOWN"
+        absolute = abs(value)
+        if absolute < 1.0:
+            return "GREEN"
+        if absolute < 3.0:
+            return "YELLOW"
+        return "RED"
+
+    def _feedback_state(self, sample: MonitorSample) -> str:
+        if None in (sample.feedback_x, sample.feedback_y, sample.feedback_s):
+            return "UNKNOWN"
+        if (sample.feedback_x, sample.feedback_y, sample.feedback_s) == (1.0, 1.0, 1.0):
+            return "GREEN"
+        return "YELLOW"
 
     def _render(self, sample: MonitorSample):
-        severity = []
         eta_state = _severity_from_thresholds(sample.eta, 2e-5, 1e-4)
         alpha0_state = "GREEN" if sample.alpha0 is not None and 1e-5 < sample.alpha0 < 5e-2 else "YELLOW"
+        qx_state = _severity_from_thresholds(sample.tune_x_jitter, 1e-4, 5e-4)
+        qy_state = _severity_from_thresholds(sample.tune_y_jitter, 1e-4, 5e-4)
+        qs_state = _severity_from_thresholds(sample.tune_s_jitter, 1e-5, 5e-5)
         rf_state = _severity_from_thresholds(sample.rf_jitter, 0.02, 0.10)
-        tx_state = _severity_from_thresholds(sample.tune_x_jitter, 1e-4, 5e-4)
-        ty_state = _severity_from_thresholds(sample.tune_y_jitter, 1e-4, 5e-4)
-        ts_state = _severity_from_thresholds(sample.tune_s_jitter, 1e-5, 5e-5)
-        feedback_state = "GREEN" if (sample.feedback_x, sample.feedback_y, sample.feedback_s) == (1.0, 1.0, 1.0) else "YELLOW"
+        feedback_state = self._feedback_state(sample)
 
-        for state in (eta_state, alpha0_state, rf_state, tx_state, ty_state, ts_state):
-            severity.append(state)
-
-        score = max(0, 100 - 20 * severity.count("RED") - 8 * severity.count("YELLOW"))
+        severities = [eta_state, alpha0_state, qx_state, qy_state, qs_state, rf_state]
+        score = max(0, 100 - 20 * severities.count("RED") - 8 * severities.count("YELLOW"))
         if score >= 80:
             status = "OK"
         elif score >= 55:
             status = "MARGINAL"
         else:
             status = "FAIL"
+        self.summary_var.set("SSMB STATUS: %s    score=%d" % (status, score))
 
-        lines = [
-            "SSMB STATUS: %s   score=%d" % (status, score),
-            "",
-            "[ Longitudinal ]",
-            self._line("eta", "%.6e" % sample.eta if sample.eta is not None else "UNKNOWN", eta_state),
-            self._line("alpha0", "%.8f" % sample.alpha0 if sample.alpha0 is not None else "UNKNOWN", alpha0_state),
-            self._line("Qs", "%.6f" % sample.tune_s if sample.tune_s is not None else "UNKNOWN", ts_state),
-            self._line("f_s [kHz]", "%.6f" % sample.tune_s_khz if sample.tune_s_khz is not None else "UNKNOWN", ts_state),
-            self._line("RF jitter", "%.6f" % sample.rf_jitter if sample.rf_jitter is not None else "UNKNOWN", rf_state),
-            "",
-            "[ Transverse ]",
-            self._line("Qx", "%.6f" % sample.tune_x if sample.tune_x is not None else "UNKNOWN", tx_state),
-            self._line("Qy", "%.6f" % sample.tune_y if sample.tune_y is not None else "UNKNOWN", ty_state),
-            self._line("Qx jitter", "%.6e" % sample.tune_x_jitter if sample.tune_x_jitter is not None else "UNKNOWN", tx_state),
-            self._line("Qy jitter", "%.6e" % sample.tune_y_jitter if sample.tune_y_jitter is not None else "UNKNOWN", ty_state),
-            self._line("xi_x", "%.4f" % self._last_xi(0) if self._last_xi(0) is not None else "UNKNOWN", self._xi_state(0)),
-            self._line("xi_y", "%.4f" % self._last_xi(1) if self._last_xi(1) is not None else "UNKNOWN", self._xi_state(1)),
-            "",
-            "[ Machine / raw ]",
-            self._line("RF PV", "%.6f" % sample.rf_pv if sample.rf_pv is not None else "UNKNOWN", "INFO"),
-            self._line("tuneX raw", "%.6f" % sample.tune_x_raw if sample.tune_x_raw is not None else "UNKNOWN", "INFO"),
-            self._line("tuneY raw", "%.6f" % sample.tune_y_raw if sample.tune_y_raw is not None else "UNKNOWN", "INFO"),
-            self._line("tuneSyn raw", "%.6f" % sample.tune_s_raw if sample.tune_s_raw is not None else "UNKNOWN", "INFO"),
-            self._line("Ucav [kV]", "%.3f" % sample.cavity_voltage_kv if sample.cavity_voltage_kv is not None else "UNKNOWN", "INFO"),
-            self._line("E [MeV]", "%.3f" % sample.beam_energy_mev if sample.beam_energy_mev is not None else "UNKNOWN", "INFO"),
-            self._line("Beam current", "%.6f" % sample.beam_current if sample.beam_current is not None else "UNKNOWN", "INFO"),
-            self._line("Feedback", "%s/%s/%s" % (sample.feedback_x, sample.feedback_y, sample.feedback_s), feedback_state),
-            "",
-            "[ Diagnostics ]",
+        self._set_row("eta", "%.6e" % sample.eta if sample.eta is not None else "UNKNOWN", eta_state)
+        self._set_row("alpha0", "%.8f" % sample.alpha0 if sample.alpha0 is not None else "UNKNOWN", alpha0_state)
+        self._set_row("tune_s", "%.6f" % sample.tune_s if sample.tune_s is not None else "UNKNOWN", qs_state)
+        self._set_row("tune_s_khz", "%.6f" % sample.tune_s_khz if sample.tune_s_khz is not None else "UNKNOWN", qs_state)
+        self._set_row("tune_x", "%.6f" % sample.tune_x if sample.tune_x is not None else "UNKNOWN", qx_state)
+        self._set_row("tune_y", "%.6f" % sample.tune_y if sample.tune_y is not None else "UNKNOWN", qy_state)
+        self._set_row("xi_x", "%.4f" % sample.xi_x if sample.xi_x is not None else "UNKNOWN", self._xi_state(sample.xi_x))
+        self._set_row("xi_y", "%.4f" % sample.xi_y if sample.xi_y is not None else "UNKNOWN", self._xi_state(sample.xi_y))
+        self._set_row("xi_s", "%.4f" % sample.xi_s if sample.xi_s is not None else "UNKNOWN", self._xi_state(sample.xi_s))
+        self._set_row("rf_jitter", "%.6f" % sample.rf_jitter if sample.rf_jitter is not None else "UNKNOWN", rf_state)
+        self._set_row("tune_x_jitter", "%.6e" % sample.tune_x_jitter if sample.tune_x_jitter is not None else "UNKNOWN", qx_state)
+        self._set_row("tune_y_jitter", "%.6e" % sample.tune_y_jitter if sample.tune_y_jitter is not None else "UNKNOWN", qy_state)
+        self._set_row("tune_s_jitter", "%.6e" % sample.tune_s_jitter if sample.tune_s_jitter is not None else "UNKNOWN", qs_state)
+        self._set_row(
+            "feedback",
+            "%s/%s/%s" % (sample.feedback_x, sample.feedback_y, sample.feedback_s),
+            feedback_state,
+        )
+
+        raw_lines = [
+            "RF PV               %r" % sample.rf_pv,
+            "Qx raw              %r" % sample.tune_x_raw,
+            "Qx [kHz]            %r" % sample.tune_x_khz,
+            "Qx                  %r" % sample.tune_x,
+            "Qy raw              %r" % sample.tune_y_raw,
+            "Qy [kHz]            %r" % sample.tune_y_khz,
+            "Qy                  %r" % sample.tune_y,
+            "tuneSyn raw         %r" % sample.tune_s_raw,
+            "f_s [kHz]           %r" % sample.tune_s_khz,
+            "Qs                  %r" % sample.tune_s,
+            "Ucav [kV]           %r" % sample.cavity_voltage_kv,
+            "E [MeV]             %r" % sample.beam_energy_mev,
+            "Beam current        %r" % sample.beam_current,
+            "White noise         %r" % sample.white_noise,
+            "Optics mode         %r" % sample.optics_mode,
         ]
-        lines.extend(self._inferred_faults(sample))
-        self.status_text.delete("1.0", tk.END)
-        self.status_text.insert("1.0", "\n".join(lines))
+        self.raw_text.delete("1.0", tk.END)
+        self.raw_text.insert("1.0", "\n".join(raw_lines))
 
-    def _last_xi(self, index: int):
-        result = getattr(self.state, "last_result", None)
-        if result is None:
-            return None
-        return float(result.xi[index])
+        issues = self._inferred_faults(sample)
+        self.diagnostics_text.delete("1.0", tk.END)
+        self.diagnostics_text.insert("1.0", "\n".join(issues))
+        self._update_plots()
 
-    def _xi_state(self, index: int):
-        value = self._last_xi(index)
-        if value is None:
-            return "UNKNOWN"
-        abs_value = abs(value)
-        if abs_value < 1.0:
-            return "GREEN"
-        if abs_value < 3.0:
-            return "YELLOW"
-        return "RED"
-
-    def _inferred_faults(self, sample: MonitorSample):
+    def _inferred_faults(self, sample: MonitorSample) -> List[str]:
         issues = []
         if sample.eta is not None and abs(sample.eta) > 1e-4:
-            issues.append("- slip factor too large for comfortable SSMB operation")
+            issues.append("- |η| is too large for comfortable SSMB operation")
+        if sample.alpha0 is not None and sample.alpha0 > 1e-3:
+            issues.append("- α0 is above the usual low-alpha SSMB regime")
         if sample.tune_s_jitter is not None and sample.tune_s_jitter > 5e-5:
             issues.append("- synchrotron tune jitter is high")
         if sample.rf_jitter is not None and sample.rf_jitter > 0.10:
             issues.append("- RF readback jitter is high")
-        if self._last_xi(0) is not None and abs(self._last_xi(0)) > 3.0:
+        if sample.xi_x is not None and abs(sample.xi_x) > 3.0:
             issues.append("- horizontal chromaticity is far from zero")
-        if self._last_xi(1) is not None and abs(self._last_xi(1)) > 3.0:
+        if sample.xi_y is not None and abs(sample.xi_y) > 3.0:
             issues.append("- vertical chromaticity is far from zero")
+        if sample.feedback_x == 0.0 or sample.feedback_y == 0.0 or sample.feedback_s == 0.0:
+            issues.append("- one or more feedback loops are disabled")
         if not issues:
             issues.append("- no immediate SSMB red flags from current readbacks")
         return issues
+
+    def _series(self, key: str):
+        values = []
+        for sample in self.history:
+            values.append(getattr(sample, key, None))
+        return values
+
+    def _plot_metric(self, axis, key: str):
+        axis.clear()
+        if not self.history:
+            axis.set_title("No data yet")
+            return
+        xs = [sample.timestamp - self.history[0].timestamp for sample in self.history]
+        ys = [value for value in self._series(key)]
+        filtered = [(x, y) for x, y in zip(xs, ys) if y is not None]
+        title_lookup = dict(TREND_CHOICES)
+        if not filtered:
+            axis.set_title("%s (no data)" % title_lookup.get(key, key))
+            return
+        x_vals = [item[0] for item in filtered]
+        y_vals = [item[1] for item in filtered]
+        axis.plot(x_vals, y_vals, "b-", linewidth=1.6)
+        axis.set_title(title_lookup.get(key, key))
+        axis.set_xlabel("Time [s]")
+        axis.grid(True, alpha=0.3)
+
+    def _update_plots(self):
+        if not MATPLOTLIB_AVAILABLE or self.fig is None:
+            return
+        self._plot_metric(self.ax_top, self.trend_var_1.get())
+        self._plot_metric(self.ax_bottom, self.trend_var_2.get())
+        self.fig.tight_layout()
+        self.canvas.draw_idle()
 
     def close(self):
         self.stop_event.set()
