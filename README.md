@@ -32,6 +32,9 @@ The GUI has a `dev / PV window` button for optional live readback checks and
 small RF command tests. It is not open by default, so the normal GUI stays
 lighter during routine operation.
 
+The GUI also has a `Preview RF sweep` button and asks for confirmation before
+write-capable chromaticity, matrix, reset, correction, and RF-test actions.
+
 Both control-room entrypoints create a session log directory by default under
 `./betagui_logs/`. Each session stores a human-readable `session.log`, a
 structured `events.jsonl`, and raw measurement payloads under

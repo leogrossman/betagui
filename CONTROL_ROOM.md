@@ -49,6 +49,7 @@ Read-only means:
 - write paths are suppressed
 - use this first to confirm startup and PV visibility
 - use `dev / PV window` if you want optional live PV readback and RF test controls
+- use `Preview RF sweep` before a measurement if you want to inspect the planned RF points in Hz
 - runtime logs are still written under `./betagui_logs/`
 
 CLI fallback:

@@ -26,12 +26,13 @@ import numpy as np
 
 try:
     import tkinter as tk
-    from tkinter import filedialog
+    from tkinter import filedialog, messagebox
 
     TK_AVAILABLE = True
 except ImportError:  # pragma: no cover - depends on host packages
     tk = None
     filedialog = None
+    messagebox = None
     TK_AVAILABLE = False
 
 try:
@@ -175,7 +176,7 @@ class EpicsAdapter:
 # Legacy EPICS names from original/betagui.py.
 pvfreqX = "TUNEZRP:measX"
 pvfreqY = "TUNEZRP:measY"
-pvfreqS = "TUNEZRP:measZ"
+pvfreqS = "CUMZ4X003GP:tuneSyn"
 pvfrfSet = "MCLKHGP:setFrq"
 pvS1P1 = "S1P1RP:setCur"
 pvS1P2 = "S1P2RP:setCur"
@@ -1488,6 +1489,40 @@ def _log_measurement_plan(state: RuntimeState, inputs: MeasurementInputs, alpha0
         state.log("alpha0 source: fixed value %s." % alpha0_text)
 
 
+def preview_rf_sweep(state: RuntimeState, entry_values: Dict[str, str]) -> Dict[str, object]:
+    """Build a read-only preview of the RF sweep that MeaChrom would run."""
+    inputs = _measurement_inputs_from_dict(entry_values)
+    frf0_hz = float(state.adapter.get(state.pvs.rf_setpoint, 0.0) or 0.0)
+    optics_mode = state.adapter.get(state.pvs.optics_mode, 0) if state.pvs.optics_mode else 0
+    dmax = optics_mode_to_dmax(optics_mode)
+    alpha0_text = entry_values.get("alpha0", "dynamic").strip()
+    if alpha0_text and alpha0_text != "dynamic":
+        alpha0 = float(alpha0_text)
+        alpha0_source = "fixed"
+    else:
+        alpha0 = calculate_alpha0(state.adapter, state.pvs, harmonic_number=NHARMONIC)
+        alpha0_source = "dynamic"
+    rf_points_hz = build_rf_range(
+        frf0_hz=frf0_hz,
+        alpha0=alpha0,
+        dmax=dmax,
+        delta_x_min_mm=inputs.delta_x_min_mm,
+        delta_x_max_mm=inputs.delta_x_max_mm,
+        n_points=inputs.n_rf_points,
+    )
+    step_sizes_hz = np.diff(rf_points_hz) if len(rf_points_hz) > 1 else np.array([], dtype=float)
+    return {
+        "inputs": inputs,
+        "alpha0": float(alpha0),
+        "alpha0_source": alpha0_source,
+        "frf0_hz": float(frf0_hz),
+        "optics_mode": float(optics_mode or 0.0),
+        "dmax": float(dmax),
+        "rf_points_hz": np.asarray(rf_points_hz, dtype=float),
+        "step_sizes_hz": np.asarray(step_sizes_hz, dtype=float),
+    }
+
+
 def MeaChrom(state: RuntimeState, entry_values: Dict[str, str]) -> Optional[List[float]]:
     """Legacy-style chromaticity measurement wrapper."""
     state.stop_requested = False
@@ -1776,18 +1811,20 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         self.measure_button.grid(row=9, column=0, columnspan=2, sticky="ew", pady=(6, 2))
         self.alpha_button = tk.Button(parent, text="Measure alpha0", command=self._on_alpha)
         self.alpha_button.grid(row=10, column=0, columnspan=2, sticky="ew", pady=2)
+        self.preview_button = tk.Button(parent, text="Preview RF sweep", command=self._on_preview_measure)
+        self.preview_button.grid(row=11, column=0, columnspan=2, sticky="ew", pady=2)
         self.matrix_button = tk.Button(parent, text="Measure matrix", command=self._on_measure_matrix)
-        self.matrix_button.grid(row=11, column=0, columnspan=2, sticky="ew", pady=2)
+        self.matrix_button.grid(row=12, column=0, columnspan=2, sticky="ew", pady=2)
         self.reset_button = tk.Button(parent, text="reset", command=self._on_reset)
-        self.reset_button.grid(row=12, column=0, columnspan=2, sticky="ew", pady=2)
+        self.reset_button.grid(row=13, column=0, columnspan=2, sticky="ew", pady=2)
         self.save_state_button = tk.Button(parent, text="Save current setting", command=self._on_save_setting)
-        self.save_state_button.grid(row=13, column=0, columnspan=2, sticky="ew", pady=2)
+        self.save_state_button.grid(row=14, column=0, columnspan=2, sticky="ew", pady=2)
         self.stop_button = tk.Button(parent, text="Stop", command=self._on_stop)
-        self.stop_button.grid(row=14, column=0, columnspan=2, sticky="ew", pady=2)
+        self.stop_button.grid(row=15, column=0, columnspan=2, sticky="ew", pady=2)
         self.scan_button = tk.Button(parent, text="sext scan", command=self._on_open_scan_window)
-        self.scan_button.grid(row=15, column=0, columnspan=2, sticky="ew", pady=2)
+        self.scan_button.grid(row=16, column=0, columnspan=2, sticky="ew", pady=2)
         self.dev_button = tk.Button(parent, text="dev / PV window", command=self._on_open_dev_window)
-        self.dev_button.grid(row=16, column=0, columnspan=2, sticky="ew", pady=2)
+        self.dev_button.grid(row=17, column=0, columnspan=2, sticky="ew", pady=2)
 
     def _build_matrix_panel(self, parent):
         top = tk.Frame(parent)
@@ -1934,7 +1971,66 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
         worker = threading.Thread(target=runner, daemon=True)
         worker.start()
 
+    def _show_info_dialog(self, title: str, lines: Sequence[str]):
+        if messagebox is None:
+            self.state.log("%s\n%s" % (title, "\n".join(lines)))
+            return
+        messagebox.showinfo(title, "\n".join(lines), parent=self.master)
+
+    def _confirm_live_write(self, title: str, lines: Sequence[str]) -> bool:
+        if not self.state.can_write_machine:
+            return True
+        if messagebox is None:
+            self.state.log("Write confirmation dialog unavailable for %s." % title)
+            return False
+        return bool(messagebox.askokcancel(title, "\n".join(lines), parent=self.master))
+
+    def _measurement_preview_lines(self, preview: Dict[str, object]) -> List[str]:
+        rf_points_hz = preview["rf_points_hz"]
+        step_sizes_hz = preview["step_sizes_hz"]
+        step_min = float(np.min(step_sizes_hz)) if len(step_sizes_hz) else 0.0
+        step_max = float(np.max(step_sizes_hz)) if len(step_sizes_hz) else 0.0
+        alpha0 = float(preview["alpha0"])
+        source = preview["alpha0_source"]
+        lines = [
+            "Current RF: %.6f Hz" % float(preview["frf0_hz"]),
+            "alpha0: %.8f (%s)" % (alpha0, source),
+            "Optics mode: %s" % preview["optics_mode"],
+            "dmax: %.6f m" % float(preview["dmax"]),
+            "RF sweep points: %d" % len(rf_points_hz),
+            "RF min: %.6f Hz" % float(rf_points_hz[0]),
+            "RF max: %.6f Hz" % float(rf_points_hz[-1]),
+            "RF step: %.6f .. %.6f Hz" % (step_min, step_max),
+            "",
+            "This action will write:",
+            "- feedback X/Y/S -> 0",
+            "- orbit correction mode -> 0",
+            "- RF setpoint sweep over the points above",
+            "- RF restore to saved RF after measurement",
+            "- feedback/orbit restore after measurement",
+        ]
+        if len(rf_points_hz) <= 12:
+            lines.append("")
+            lines.append("RF points [Hz]:")
+            lines.extend(["- %.6f" % float(value) for value in rf_points_hz])
+        return lines
+
+    def _preview_measurement(self) -> Optional[Dict[str, object]]:
+        try:
+            preview = preview_rf_sweep(self.state, self._entry_values())
+        except Exception as exc:
+            self.state.log("Could not preview RF sweep: %s" % exc)
+            return None
+        return preview
+
     def _on_measure(self):
+        preview = self._preview_measurement()
+        if preview is None:
+            return
+        lines = self._measurement_preview_lines(preview)
+        if not self._confirm_live_write("Confirm chromaticity measurement", lines):
+            self.state.log("Chromaticity measurement cancelled by user.")
+            return
         self._run_background(MeaChrom, self.state, self._entry_values())
 
     def _on_alpha(self):
@@ -1946,10 +2042,32 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
 
         self._run_background(worker)
 
+    def _on_preview_measure(self):
+        preview = self._preview_measurement()
+        if preview is None:
+            return
+        self._show_info_dialog("RF sweep preview", self._measurement_preview_lines(preview))
+
     def _on_measure_matrix(self):
+        lines = [
+            "This action will step sextupole currents and run repeated chromaticity measurements.",
+            "It will therefore write sextupole setpoints, feedback/orbit disable commands, and RF sweep commands.",
+            "Use conservative settings first and keep a saved baseline snapshot.",
+        ]
+        if not self._confirm_live_write("Confirm response matrix measurement", lines):
+            self.state.log("Response matrix measurement cancelled by user.")
+            return
         self._run_background(start_bump, self.state, self._entry_values())
 
     def _on_reset(self):
+        if not self._confirm_live_write(
+            "Confirm reset",
+            [
+                "This action will restore saved RF, sextupoles, feedback, orbit mode, and phase modulation settings.",
+            ],
+        ):
+            self.state.log("Reset cancelled by user.")
+            return
         def worker():
             if set_all2ini(self.state):
                 self.after(0, self._reset_readouts)
@@ -2007,6 +2125,15 @@ class mainwindow(tk.Frame if TK_AVAILABLE else object):
             return
         if steps[axis_index] == 0.0:
             self.state.log("Correction step is zero; no sextupole change was applied.")
+            return
+        if not self._confirm_live_write(
+            "Confirm sextupole correction",
+            [
+                "This action will change sextupole set currents through the response matrix.",
+                "Requested dXi step: %r" % steps,
+            ],
+        ):
+            self.state.log("Sextupole correction cancelled by user.")
             return
         set_all_sexts(self.state, steps)
         widget = self.cor_readouts[axis_index]
@@ -2244,6 +2371,22 @@ class DevToolsWindow:
             return
         current_rf = _get_float(self.state, self.state.pvs.rf_setpoint, 0.0)
         target_rf = current_rf + delta_hz
+        if self.state.can_write_machine and messagebox is not None:
+            confirmed = messagebox.askokcancel(
+                "Confirm RF test shift",
+                "\n".join(
+                    [
+                        "Current RF: %.6f Hz" % current_rf,
+                        "Delta RF: %.6f Hz" % delta_hz,
+                        "Target RF: %.6f Hz" % target_rf,
+                    ]
+                ),
+                parent=self.window,
+            )
+            if not confirmed:
+                self.state.log("Developer RF test cancelled by user.")
+                self.rf_status_var.set("RF shift cancelled.")
+                return
         self.state.log("Developer RF test: %.6f -> %.6f Hz" % (current_rf, target_rf))
         self.state.record_event(
             "developer_rf_shift",
@@ -2261,6 +2404,16 @@ class DevToolsWindow:
             self.state.log("Developer RF restore skipped: no valid saved RF.")
             self.rf_status_var.set("No valid saved RF.")
             return
+        if self.state.can_write_machine and messagebox is not None:
+            confirmed = messagebox.askokcancel(
+                "Confirm RF restore",
+                "Restore RF to %.6f Hz?" % self.state.frf0,
+                parent=self.window,
+            )
+            if not confirmed:
+                self.state.log("Developer RF restore cancelled by user.")
+                self.rf_status_var.set("RF restore cancelled.")
+                return
         self.state.log("Developer RF restore to %.6f Hz" % self.state.frf0)
         self.state.record_event(
             "developer_rf_restore",
