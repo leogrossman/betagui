@@ -117,6 +117,7 @@ def build_default_inventory(
     specs: List[ChannelSpec] = list(LEGACY_SCALAR_CHANNELS)
     specs.extend(_monitor_specs(lattice.u125_neighborhood(), "u125_region"))
     specs.extend(_monitor_specs(lattice.l4_straight(), "l4"))
+    specs.extend(_monitor_specs(lattice.monitors(), "ring"))
     specs.extend(_octupole_specs(lattice.octupoles()))
     optional_map = dict(extra_optional_pvs or {})
     for spec in OPTIONAL_EXPERIMENT_CHANNELS:
@@ -124,7 +125,14 @@ def build_default_inventory(
         specs.append(ChannelSpec(spec.label, pv_name, spec.kind, spec.required, spec.notes, spec.tags))
     for label, pv_name in (extra_pvs or {}).items():
         specs.append(ChannelSpec(label=label, pv=pv_name, kind="scalar", notes="User-supplied extra PV.", tags=("extra",)))
-    return specs
+    deduped: List[ChannelSpec] = []
+    seen = set()
+    for spec in specs:
+        if spec.label in seen:
+            continue
+        deduped.append(spec)
+        seen.add(spec.label)
+    return deduped
 
 
 def inventory_summary(specs: Sequence[ChannelSpec]) -> Dict[str, object]:

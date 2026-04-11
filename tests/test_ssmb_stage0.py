@@ -52,6 +52,18 @@ class SSMBStage0Test(unittest.TestCase):
         finally:
             log_now.ReadOnlyEpicsAdapter = original_factory
 
+    def test_stage0_logger_rejects_write_capable_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = LoggerConfig(
+                duration_seconds=1.0,
+                sample_hz=1.0,
+                output_root=Path(tmpdir),
+                safe_mode=False,
+                allow_writes=True,
+            )
+            with self.assertRaises(ValueError):
+                log_now.run_stage0_logger(config, adapter=FakeEpicsAdapter({}))
+
     def test_parse_extra_pvs(self):
         mapping = log_now.parse_labeled_pvs(["alpha1=PV:ALPHA1", "eta2=PV:ETA2"])
         self.assertEqual(mapping["alpha1"], "PV:ALPHA1")

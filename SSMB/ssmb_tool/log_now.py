@@ -5,6 +5,7 @@ import csv
 import json
 import os
 import platform
+import re
 import socket
 import subprocess
 import sys
@@ -88,6 +89,11 @@ def _write_csv(path: Path, rows: List[Dict[str, object]]) -> None:
         writer.writerows(rows)
 
 
+def _sanitize_label(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
+    return cleaned.strip("_")
+
+
 def _sample_channel(adapter: ReadOnlyEpicsAdapter, spec: ChannelSpec) -> Dict[str, object]:
     if not spec.pv:
         return {"pv": None, "value": None, "missing": True, "reason": "unconfigured_optional"}
@@ -117,7 +123,7 @@ def _derived_metrics(sample: Dict[str, object]) -> Dict[str, object]:
     }
 
 
-def run_stage0_logger(config: LoggerConfig) -> Path:
+def build_specs(config: LoggerConfig):
     config.validate()
     lattice = LatticeContext.load(config.lattice_export)
     specs = build_default_inventory(
@@ -128,29 +134,30 @@ def run_stage0_logger(config: LoggerConfig) -> Path:
     if not config.include_bpm_buffer:
         specs = [spec for spec in specs if spec.label != "bpm_buffer_raw"]
     if not config.include_candidate_bpm_scalars:
-        specs = [spec for spec in specs if "bpm" not in spec.tags]
+        specs = [spec for spec in specs if "u125_region" not in spec.tags and "l4" not in spec.tags]
+    if not config.include_ring_bpm_scalars:
+        specs = [spec for spec in specs if "ring" not in spec.tags]
     if not config.include_octupoles:
         specs = [spec for spec in specs if "octupole" not in spec.tags]
+    return lattice, specs
 
-    logger = SessionLogger.create(config.output_root, "ssmb_stage0")
-    logger.log("Starting Stage 0 passive SSMB logging.")
-    logger.log("Sample rate %.3f Hz for %.1f s." % (config.sample_hz, config.duration_seconds))
 
-    try:
-        adapter = ReadOnlyEpicsAdapter(timeout=config.timeout_seconds)
-    except EpicsUnavailableError as exc:
-        logger.log(str(exc))
-        metadata = {
-            "safe_mode": config.safe_mode,
-            "allow_writes": config.allow_writes,
-            "error": str(exc),
-            "inventory": inventory_summary(specs),
-        }
-        logger.write_json("metadata.json", metadata)
-        raise
+def inventory_overview_lines(specs: Sequence[ChannelSpec]) -> List[str]:
+    lines = [
+        "Logged channels: %d" % len(specs),
+        "",
+    ]
+    for spec in specs:
+        requirement = "required" if spec.required else "optional"
+        pv_name = spec.pv or "UNCONFIGURED"
+        tag_text = ", ".join(spec.tags) if spec.tags else "-"
+        lines.append("%s | %s | %s | %s" % (spec.label, requirement, pv_name, tag_text))
+    return lines
 
+
+def build_metadata(config: LoggerConfig, lattice: LatticeContext, specs: Sequence[ChannelSpec], tool_name: str, extra: Optional[Dict[str, object]] = None) -> Dict[str, object]:
     metadata = {
-        "tool": "SSMB Stage 0 logger",
+        "tool": tool_name,
         "version": 1,
         "safe_mode": config.safe_mode,
         "allow_writes": config.allow_writes,
@@ -168,48 +175,103 @@ def run_stage0_logger(config: LoggerConfig) -> Path:
         "channel_specs": [json_ready(asdict(spec)) for spec in specs],
         "missing_pvs": {},
     }
+    if extra:
+        metadata.update(extra)
+    return metadata
 
+
+def capture_sample(adapter, specs: Sequence[ChannelSpec], sample_index: int, t_rel_s: float, extra_fields: Optional[Dict[str, object]] = None) -> Dict[str, object]:
+    sample = {
+        "timestamp_epoch_s": time.time(),
+        "t_rel_s": t_rel_s,
+        "sample_index": sample_index,
+        "channels": {},
+    }
+    for spec in specs:
+        sample["channels"][spec.label] = _sample_channel(adapter, spec)
+    sample["derived"] = _derived_metrics(sample)
+    if extra_fields:
+        sample.update(extra_fields)
+    return sample
+
+
+def write_session_outputs(
+    logger: SessionLogger,
+    metadata: Dict[str, object],
+    samples: Sequence[Dict[str, object]],
+) -> Path:
     samples_jsonl = logger.session_dir / "samples.jsonl"
-    csv_rows: List[Dict[str, object]] = []
+    csv_rows = [_flatten_for_csv(sample) for sample in samples]
     missing_counts: Dict[str, int] = {}
+    with samples_jsonl.open("w", encoding="utf-8") as stream:
+        for sample in samples:
+            for label, payload in sample["channels"].items():
+                if payload.get("missing"):
+                    missing_counts[label] = missing_counts.get(label, 0) + 1
+            stream.write(json.dumps(json_ready(sample), sort_keys=True) + "\n")
+    metadata = dict(metadata)
+    metadata["missing_pvs"] = missing_counts
+    metadata["sample_count"] = len(samples)
+    metadata["session_dir"] = str(logger.session_dir)
+    logger.write_json("metadata.json", metadata)
+    _write_csv(logger.session_dir / "samples.csv", csv_rows)
+    logger.log("Wrote %d samples." % len(samples))
+    logger.log("Outputs: metadata.json, samples.jsonl, samples.csv, session.log")
+    return logger.session_dir
+
+
+def run_stage0_logger(config: LoggerConfig, adapter=None, progress_callback=None, session_prefix: str = "ssmb_stage0", extra_metadata: Optional[Dict[str, object]] = None) -> Path:
+    if config.allow_writes or not config.safe_mode:
+        raise ValueError("Stage 0 logger is read-only only. Use the separate RF sweep tool for explicit writes.")
+    lattice, specs = build_specs(config)
+    prefix = session_prefix
+    if config.session_label:
+        prefix += "_" + _sanitize_label(config.session_label)
+    logger = SessionLogger.create(config.output_root, prefix)
+    if progress_callback is None:
+        def emit(message: str) -> None:
+            logger.log(message)
+    else:
+        def emit(message: str) -> None:
+            logger.log(message)
+            progress_callback(message)
+    emit("Starting Stage 0 passive SSMB logging.")
+    emit("Sample rate %.3f Hz for %.1f s." % (config.sample_hz, config.duration_seconds))
+
+    if adapter is None:
+        try:
+            adapter = ReadOnlyEpicsAdapter(timeout=config.timeout_seconds)
+        except EpicsUnavailableError as exc:
+            emit(str(exc))
+            metadata = {
+                "safe_mode": config.safe_mode,
+                "allow_writes": config.allow_writes,
+                "error": str(exc),
+                "inventory": inventory_summary(specs),
+            }
+            logger.write_json("metadata.json", metadata)
+            raise
+
+    metadata = build_metadata(config, lattice, specs, "SSMB Stage 0 logger", extra=extra_metadata)
     deadline = time.monotonic() + config.duration_seconds
     period = 1.0 / config.sample_hz
     sample_index = 0
     start = time.monotonic()
+    samples: List[Dict[str, object]] = []
 
-    with samples_jsonl.open("w", encoding="utf-8") as stream:
-        while True:
-            now = time.monotonic()
-            if now > deadline:
-                break
-            sample = {
-                "timestamp_epoch_s": time.time(),
-                "t_rel_s": now - start,
-                "sample_index": sample_index,
-                "channels": {},
-            }
-            for spec in specs:
-                payload = _sample_channel(adapter, spec)
-                sample["channels"][spec.label] = payload
-                if payload.get("missing"):
-                    missing_counts[spec.label] = missing_counts.get(spec.label, 0) + 1
-            sample["derived"] = _derived_metrics(sample)
-            stream.write(json.dumps(json_ready(sample), sort_keys=True) + "\n")
-            csv_rows.append(_flatten_for_csv(sample))
-            sample_index += 1
-            next_target = start + sample_index * period
-            sleep_s = next_target - time.monotonic()
-            if sleep_s > 0.0:
-                time.sleep(sleep_s)
+    while True:
+        now = time.monotonic()
+        if now > deadline:
+            break
+        sample = capture_sample(adapter, specs, sample_index=sample_index, t_rel_s=now - start)
+        samples.append(sample)
+        sample_index += 1
+        next_target = start + sample_index * period
+        sleep_s = next_target - time.monotonic()
+        if sleep_s > 0.0:
+            time.sleep(sleep_s)
 
-    metadata["missing_pvs"] = missing_counts
-    metadata["sample_count"] = sample_index
-    metadata["session_dir"] = str(logger.session_dir)
-    logger.write_json("metadata.json", metadata)
-    _write_csv(logger.session_dir / "samples.csv", csv_rows)
-    logger.log("Wrote %d samples." % sample_index)
-    logger.log("Outputs: metadata.json, samples.jsonl, samples.csv, session.log")
-    return logger.session_dir
+    return write_session_outputs(logger, metadata, samples)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -221,7 +283,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lattice-export", help="Path to lattice export JSON.")
     parser.add_argument("--no-bpm-buffer", action="store_true", help="Skip the raw BPM buffer waveform PV.")
     parser.add_argument("--no-bpm-scalars", action="store_true", help="Skip candidate scalar BPM readbacks from the lattice export.")
+    parser.add_argument("--no-ring-bpm-scalars", action="store_true", help="Skip full-ring BPM scalar candidates from the lattice export.")
     parser.add_argument("--no-octupoles", action="store_true", help="Skip octupole readback/setpoint logging.")
+    parser.add_argument("--label", default="", help="Short session label such as bump_on or bump_off.")
+    parser.add_argument("--note", default="", help="Operator note stored in metadata.")
     parser.add_argument("--pv", action="append", default=[], metavar="LABEL=PVNAME", help="Add one extra required read-only PV.")
     parser.add_argument("--optional-pv", action="append", default=[], metavar="LABEL=PVNAME", help="Fill in one optional experiment PV placeholder.")
     return parser
@@ -238,7 +303,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         lattice_export=Path(args.lattice_export).expanduser().resolve() if args.lattice_export else LoggerConfig().lattice_export,
         include_bpm_buffer=not args.no_bpm_buffer,
         include_candidate_bpm_scalars=not args.no_bpm_scalars,
+        include_ring_bpm_scalars=not args.no_ring_bpm_scalars,
         include_octupoles=not args.no_octupoles,
+        session_label=args.label,
+        operator_note=args.note,
         extra_pvs=parse_labeled_pvs(args.pv),
         extra_optional_pvs=parse_labeled_pvs(args.optional_pv),
     )

@@ -22,6 +22,23 @@ From the repo root:
 python3 -m SSMB.ssmb_tool log-now --duration 60 --sample-hz 1
 ```
 
+Or use the separate GUI:
+
+```bash
+python3 -m SSMB.ssmb_tool gui
+```
+
+For an explicit write-capable RF sweep:
+
+```bash
+python3 -m SSMB.ssmb_tool rf-sweep \
+  --center-rf-pv 499652.5 \
+  --delta-min-hz -100 \
+  --delta-max-hz 100 \
+  --points 5 \
+  --allow-writes
+```
+
 This creates a timestamped session directory under:
 
 ```text
@@ -41,6 +58,10 @@ with:
 channels such as the legacy BPM buffer if available.
 
 `samples.csv` contains flattened scalar data plus waveform summary columns.
+
+The GUI shows a live inventory preview so you can inspect exactly what will be
+logged before starting a session. Use the session label and note fields to tag
+runs such as `bump_on` and `bump_off`.
 
 ## Analysis
 
@@ -63,11 +84,17 @@ python3 -m SSMB.ssmb_tool analyze SESSION_DIR --dispersion-json dispersion.json
 - unverified optional experiment PVs stay disabled unless you pass them
 - BPM candidate PVs are derived from the lattice export and may legitimately log
   `null` if the actual EPICS naming differs
+- RF sweep execution is separate, opt-in, and previews exact RF PV values before
+  any write
+- RF sweep inputs are direct `Hz` offsets rather than the legacy chromaticity
+  `mm` proxy inputs
 
 ## Main Files
 
 - `log_now.py`: Stage 0 passive logger
 - `analyze_session.py`: Stage 1 offline analysis scaffold
+- `gui.py`: separate Stage 0 / RF sweep GUI
+- `sweep.py`: explicit RF sweep with full logging
 - `inventory.py`: machine/logging channel inventory
 - `lattice.py`: lattice export loading and region selection
 - `THEORY.md`: physics motivation and equations

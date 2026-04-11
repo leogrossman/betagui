@@ -25,7 +25,10 @@ class LoggerConfig:
     allow_writes: bool = False
     include_bpm_buffer: bool = True
     include_candidate_bpm_scalars: bool = True
+    include_ring_bpm_scalars: bool = True
     include_octupoles: bool = True
+    session_label: str = ""
+    operator_note: str = ""
     extra_pvs: Dict[str, str] = field(default_factory=dict)
     extra_optional_pvs: Dict[str, Optional[str]] = field(default_factory=dict)
 
@@ -36,8 +39,6 @@ class LoggerConfig:
             raise ValueError("sample_hz above 10 Hz is intentionally blocked for passive control-room logging.")
         if self.duration_seconds <= 0.0:
             raise ValueError("duration_seconds must be positive.")
-        if self.allow_writes:
-            raise ValueError("Write-capable mode is intentionally not implemented in Stage 0.")
 
 
 def parse_labeled_pvs(items: List[str]) -> Dict[str, str]:

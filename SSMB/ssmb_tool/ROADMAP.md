@@ -15,6 +15,8 @@ Outputs:
 - `samples.jsonl`
 - `samples.csv`
 - `session.log`
+- separate GUI for Stage 0 logging and inventory preview
+- session labels and notes for runs such as `bump_on` / `bump_off`
 
 ## Stage 1: Offline Reconstruction
 
@@ -43,12 +45,12 @@ Target:
 
 ## Stage 3: Explicit Write-Capable Scan Support
 
-Not implemented.
+Implemented minimally.
 
 Target:
 
 - opt-in only
-- scripted RF scans
+- scripted RF scans with exact RF PV preview and user confirmation
 - scripted bump scans
 - explicit restore/snapshot discipline
 
