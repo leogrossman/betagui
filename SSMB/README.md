@@ -1,27 +1,36 @@
 # SSMB
 
-This folder contains SSMB-specific work kept separate from the main `betagui`
-control-room tool.
+This folder is the separate SSMB tool area. Treat it as a small standalone
+workspace inside the larger repo.
 
-## Contents
-
-- `MLS_lattice/`
-  lattice exports, element tables, and briefing material used as machine
-  reference context
-- `ssmb_tool/`
-  new separate SSMB development tool focused on passive logging and later
-  off-momentum / momentum-compaction reconstruction
-
-## First Command
-
-From the repo root:
+Normal control-room use:
 
 ```bash
-python3 -m SSMB.ssmb_tool log-now --duration 60 --sample-hz 1
+cd SSMB
+python3 ssmb_gui.py
 ```
 
-Then read:
+Write-capable RF sweep mode:
 
-- `ssmb_tool/README.md`
-- `ssmb_tool/THEORY.md`
-- `ssmb_tool/ROADMAP.md`
+```bash
+cd SSMB
+python3 ssmb_gui.py --allow-writes
+```
+
+Local runtime data stays under:
+
+```text
+SSMB/.ssmb_local/
+```
+
+That directory is gitignored, so normal `git pull` will not touch your local
+SSMB logs.
+
+Relevant contents:
+
+- `ssmb_gui.py`
+  single operator-facing GUI entrypoint
+- `ssmb_tool/`
+  internal implementation
+- `MLS_lattice/`
+  lattice exports and briefing material

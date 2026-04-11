@@ -11,7 +11,9 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 
-DEFAULT_LOG_DIRNAME = ".ssmb_local/ssmb_stage0"
+PACKAGE_ROOT = Path(__file__).resolve().parent
+SSMB_ROOT = PACKAGE_ROOT.parent
+DEFAULT_LOG_DIRNAME = str(SSMB_ROOT / ".ssmb_local" / "ssmb_stage0")
 
 
 def json_ready(value: Any):

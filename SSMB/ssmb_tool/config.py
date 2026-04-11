@@ -6,9 +6,10 @@ from typing import Dict, List, Optional
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
+SSMB_ROOT = PACKAGE_ROOT.parent
 LATTICE_DIR = PACKAGE_ROOT.parent / "MLS_lattice"
 DEFAULT_LATTICE_EXPORT = LATTICE_DIR / "mls_lattice_low_emittance_export.json"
-DEFAULT_OUTPUT_ROOT = Path(".ssmb_local") / "ssmb_stage0"
+DEFAULT_OUTPUT_ROOT = SSMB_ROOT / ".ssmb_local" / "ssmb_stage0"
 DEFAULT_SAMPLE_HZ = 1.0
 DEFAULT_DURATION_S = 60.0
 DEFAULT_TIMEOUT_S = 0.5

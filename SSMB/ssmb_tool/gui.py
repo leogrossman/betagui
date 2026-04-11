@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from typing import Optional, Sequence
 
-from .config import LoggerConfig, parse_labeled_pvs
+from .config import LoggerConfig, SSMB_ROOT, parse_labeled_pvs
 from .epics_io import EpicsUnavailableError, ReadOnlyEpicsAdapter
 from .log_now import build_specs, inventory_overview_lines, run_stage0_logger
 from .sweep import RF_PV_NAME, SweepRuntimeConfig, build_plan_from_hz, preview_lines, run_rf_sweep_session
@@ -48,7 +48,7 @@ class SSMBGui:
         self.timeout_var = tk.StringVar(value="0.5")
         self.label_var = tk.StringVar(value="")
         self.note_var = tk.StringVar(value="")
-        self.output_dir_var = tk.StringVar(value=str(Path.cwd() / ".ssmb_local" / "ssmb_stage0"))
+        self.output_dir_var = tk.StringVar(value=str(SSMB_ROOT / ".ssmb_local" / "ssmb_stage0"))
         self.include_bpm_buffer_var = tk.BooleanVar(value=True)
         self.include_candidate_bpm_var = tk.BooleanVar(value=True)
         self.include_ring_bpm_var = tk.BooleanVar(value=True)

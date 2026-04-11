@@ -16,55 +16,32 @@ Default behavior is fully read-only.
 
 ## Quick Start
 
-From the repo root:
+Operator-facing entrypoint:
 
 ```bash
-python3 -m SSMB.ssmb_tool log-now --duration 60 --sample-hz 1
+cd SSMB
+python3 ssmb_gui.py
 ```
 
-Or use the separate GUI:
+If you need the explicit RF sweep execution button:
 
 ```bash
-python3 -m SSMB.ssmb_tool gui
+cd SSMB
+python3 ssmb_gui.py --allow-writes
 ```
 
-For an explicit write-capable RF sweep:
+The GUI includes presets for:
 
-```bash
-python3 -m SSMB.ssmb_tool rf-sweep \
-  --center-rf-pv 499652.5 \
-  --delta-min-hz -100 \
-  --delta-max-hz 100 \
-  --points 5 \
-  --allow-writes
-```
-
-Useful control-room cases for today:
-
-```bash
-python3 -m SSMB.ssmb_tool log-now --duration 60 --sample-hz 1 --heavy --label low_alpha
-python3 -m SSMB.ssmb_tool log-now --duration 60 --sample-hz 1 --heavy --label bump_off
-python3 -m SSMB.ssmb_tool log-now --duration 60 --sample-hz 1 --heavy --label bump_on
-```
-
-For RF sweep logging with an externally fixed bump state:
-
-```bash
-python3 -m SSMB.ssmb_tool rf-sweep \
-  --center-rf-pv 499652.5 \
-  --delta-min-hz -100 \
-  --delta-max-hz 100 \
-  --points 5 \
-  --sample-hz 1 \
-  --heavy \
-  --label rf_sweep_bump_off \
-  --allow-writes
-```
+- low-alpha full passive log
+- bump OFF passive log
+- bump ON passive log
+- RF sweep with bump OFF label
+- RF sweep with bump ON label
 
 This creates a timestamped session directory under:
 
 ```text
-./.ssmb_local/ssmb_stage0/
+SSMB/.ssmb_local/ssmb_stage0/
 ```
 
 That directory is local-only and gitignored, so a normal `git pull` will not
@@ -108,17 +85,8 @@ This is still read-only in Stage 0. Keep heavy mode at modest rates such as
 
 ## Analysis
 
-Offline analysis scaffold:
-
-```bash
-python3 -m SSMB.ssmb_tool analyze control_room_outputs/ssmb_stage0/SESSION_DIR
-```
-
-If you already have a first-order dispersion map for selected BPMs:
-
-```bash
-python3 -m SSMB.ssmb_tool analyze SESSION_DIR --dispersion-json dispersion.json
-```
+Offline analysis code is still in `ssmb_tool/`, but the control-room workflow
+should stay on the GUI script only today.
 
 ## Control-Room Safety
 

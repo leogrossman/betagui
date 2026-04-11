@@ -23,5 +23,6 @@ support/digital_twin/*.sif
 betagui_logs/
 .betagui_local/
 .ssmb_local/
+SSMB/.ssmb_local/
 .git-local/
 control_room/inventory/
