@@ -90,6 +90,10 @@ def _monitor_specs(elements: Iterable[LatticeElement], region_tag: str) -> List[
 
 
 def _octupole_specs(elements: Iterable[LatticeElement]) -> List[ChannelSpec]:
+    return _power_supply_specs(elements, "octupole")
+
+
+def _power_supply_specs(elements: Iterable[LatticeElement], device_tag: str) -> List[ChannelSpec]:
     seen = set()
     specs: List[ChannelSpec] = []
     for element in elements:
@@ -102,8 +106,8 @@ def _octupole_specs(elements: Iterable[LatticeElement]) -> List[ChannelSpec]:
                 label=element.family_name.lower(),
                 pv=pv_name,
                 kind="scalar",
-                notes="%s octupole current/readback candidate." % element.family_name,
-                tags=("octupole", element.section or "ring"),
+                notes="%s %s current/readback candidate." % (element.family_name, device_tag),
+                tags=(device_tag, element.section or "ring"),
             )
         )
     return specs
@@ -118,7 +122,9 @@ def build_default_inventory(
     specs.extend(_monitor_specs(lattice.u125_neighborhood(), "u125_region"))
     specs.extend(_monitor_specs(lattice.l4_straight(), "l4"))
     specs.extend(_monitor_specs(lattice.monitors(), "ring"))
-    specs.extend(_octupole_specs(lattice.octupoles()))
+    specs.extend(_power_supply_specs(lattice.sextupoles(), "sextupole"))
+    specs.extend(_power_supply_specs(lattice.octupoles(), "octupole"))
+    specs.extend(_power_supply_specs(lattice.quadrupoles(), "quadrupole"))
     optional_map = dict(extra_optional_pvs or {})
     for spec in OPTIONAL_EXPERIMENT_CHANNELS:
         pv_name = optional_map.get(spec.label, spec.pv)

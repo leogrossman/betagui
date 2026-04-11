@@ -137,6 +137,10 @@ def build_specs(config: LoggerConfig):
         specs = [spec for spec in specs if "u125_region" not in spec.tags and "l4" not in spec.tags]
     if not config.include_ring_bpm_scalars:
         specs = [spec for spec in specs if "ring" not in spec.tags]
+    if not config.include_quadrupoles:
+        specs = [spec for spec in specs if "quadrupole" not in spec.tags]
+    if not config.include_sextupoles:
+        specs = [spec for spec in specs if "sextupole" not in spec.tags]
     if not config.include_octupoles:
         specs = [spec for spec in specs if "octupole" not in spec.tags]
     return lattice, specs
@@ -279,12 +283,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--duration", type=float, default=60.0, help="Capture duration in seconds. Default: 60")
     parser.add_argument("--sample-hz", type=float, default=1.0, help="Sample rate in Hz. Default: 1")
     parser.add_argument("--timeout", type=float, default=0.5, help="PV read timeout in seconds. Default: 0.5")
-    parser.add_argument("--output-dir", help="Output root. Default: ./control_room_outputs/ssmb_stage0/")
+    parser.add_argument("--output-dir", help="Output root. Default: ./.ssmb_local/ssmb_stage0/")
     parser.add_argument("--lattice-export", help="Path to lattice export JSON.")
     parser.add_argument("--no-bpm-buffer", action="store_true", help="Skip the raw BPM buffer waveform PV.")
     parser.add_argument("--no-bpm-scalars", action="store_true", help="Skip candidate scalar BPM readbacks from the lattice export.")
     parser.add_argument("--no-ring-bpm-scalars", action="store_true", help="Skip full-ring BPM scalar candidates from the lattice export.")
+    parser.add_argument("--quadrupoles", action="store_true", help="Include quadrupole current/readback candidates from the lattice export.")
+    parser.add_argument("--no-sextupoles", action="store_true", help="Skip sextupole current/readback candidates from the lattice export.")
     parser.add_argument("--no-octupoles", action="store_true", help="Skip octupole readback/setpoint logging.")
+    parser.add_argument("--heavy", action="store_true", help="Convenience preset: enable ring BPMs, quadrupoles, sextupoles, and octupoles at the chosen sample rate.")
     parser.add_argument("--label", default="", help="Short session label such as bump_on or bump_off.")
     parser.add_argument("--note", default="", help="Operator note stored in metadata.")
     parser.add_argument("--pv", action="append", default=[], metavar="LABEL=PVNAME", help="Add one extra required read-only PV.")
@@ -303,8 +310,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         lattice_export=Path(args.lattice_export).expanduser().resolve() if args.lattice_export else LoggerConfig().lattice_export,
         include_bpm_buffer=not args.no_bpm_buffer,
         include_candidate_bpm_scalars=not args.no_bpm_scalars,
-        include_ring_bpm_scalars=not args.no_ring_bpm_scalars,
-        include_octupoles=not args.no_octupoles,
+        include_ring_bpm_scalars=True if args.heavy else not args.no_ring_bpm_scalars,
+        include_quadrupoles=True if args.heavy else args.quadrupoles,
+        include_sextupoles=True if args.heavy else not args.no_sextupoles,
+        include_octupoles=True if args.heavy else not args.no_octupoles,
         session_label=args.label,
         operator_note=args.note,
         extra_pvs=parse_labeled_pvs(args.pv),

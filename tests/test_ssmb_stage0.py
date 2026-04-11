@@ -16,6 +16,8 @@ class SSMBStage0Test(unittest.TestCase):
         self.assertIn("rf_setpoint", labels)
         self.assertIn("tune_x_raw", labels)
         self.assertIn("tune_s_raw", labels)
+        self.assertIn("s1m2k1rp", labels)
+        self.assertIn("q3m2k1rp", labels)
 
     def test_fake_adapter_blocks_put(self):
         adapter = FakeEpicsAdapter({"pv": 1.0})
@@ -63,6 +65,26 @@ class SSMBStage0Test(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 log_now.run_stage0_logger(config, adapter=FakeEpicsAdapter({}))
+
+    def test_stage0_session_label_appears_in_session_dir_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            class MissingAdapter:
+                def get(self, _name, default=None):
+                    return default
+            config = LoggerConfig(
+                duration_seconds=0.25,
+                sample_hz=1.0,
+                output_root=Path(tmpdir),
+                include_bpm_buffer=False,
+                include_candidate_bpm_scalars=False,
+                include_ring_bpm_scalars=False,
+                include_quadrupoles=False,
+                include_sextupoles=False,
+                include_octupoles=False,
+                session_label="bump_on",
+            )
+            session_dir = log_now.run_stage0_logger(config, adapter=MissingAdapter())
+            self.assertIn("bump_on", session_dir.name)
 
     def test_parse_extra_pvs(self):
         mapping = log_now.parse_labeled_pvs(["alpha1=PV:ALPHA1", "eta2=PV:ETA2"])

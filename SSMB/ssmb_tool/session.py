@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 
-DEFAULT_LOG_DIRNAME = "control_room_outputs/ssmb_stage0"
+DEFAULT_LOG_DIRNAME = ".ssmb_local/ssmb_stage0"
 
 
 def json_ready(value: Any):

@@ -140,6 +140,40 @@ This is why the logger captures:
 - optics mode
 - orbit-correction state
 - BPM candidates around U125 and L4
+- full-ring BPM scalars when enabled
+- quadrupole, sextupole, and octupole current readbacks when enabled
 - sextupole and octupole settings
 
 today, even before the radiation monitor is integrated.
+
+## Why Bump-On And Bump-Off Logging Matter
+
+For today's runs, the practical comparison is not to switch the bump from the
+script, but to log the machine in both externally prepared states:
+
+- `bump_off`
+- `bump_on`
+
+This lets the offline analysis compare:
+
+- the old synchrotron-tune-based `α0` proxy
+- reconstructed `δs(fRF)` from BPM orbit
+- orbit and optics changes induced by the bump
+
+without conflating state changes inside the logger itself.
+
+## Why RF Sweep Logging Is Separate
+
+Passive logging and RF sweeps are intentionally separate paths.
+
+The passive Stage 0 logger never writes anything.
+
+The RF sweep tool:
+
+- takes direct `Hz` offsets, not the legacy chromaticity `mm` proxy
+- prints the exact RF PV values that would be written
+- requires explicit write opt-in
+- restores the initial RF after the sweep
+
+That separation is deliberate so today's urgent data capture remains simple and
+read-only by default.

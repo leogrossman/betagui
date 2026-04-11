@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 PACKAGE_ROOT = Path(__file__).resolve().parent
 LATTICE_DIR = PACKAGE_ROOT.parent / "MLS_lattice"
 DEFAULT_LATTICE_EXPORT = LATTICE_DIR / "mls_lattice_low_emittance_export.json"
-DEFAULT_OUTPUT_ROOT = Path("control_room_outputs") / "ssmb_stage0"
+DEFAULT_OUTPUT_ROOT = Path(".ssmb_local") / "ssmb_stage0"
 DEFAULT_SAMPLE_HZ = 1.0
 DEFAULT_DURATION_S = 60.0
 DEFAULT_TIMEOUT_S = 0.5
@@ -26,6 +26,8 @@ class LoggerConfig:
     include_bpm_buffer: bool = True
     include_candidate_bpm_scalars: bool = True
     include_ring_bpm_scalars: bool = True
+    include_quadrupoles: bool = False
+    include_sextupoles: bool = True
     include_octupoles: bool = True
     session_label: str = ""
     operator_note: str = ""
@@ -39,6 +41,8 @@ class LoggerConfig:
             raise ValueError("sample_hz above 10 Hz is intentionally blocked for passive control-room logging.")
         if self.duration_seconds <= 0.0:
             raise ValueError("duration_seconds must be positive.")
+        if self.include_ring_bpm_scalars and self.sample_hz > 2.0:
+            raise ValueError("Full-ring BPM scalar logging is limited to 2 Hz or below to avoid unnecessary PV load.")
 
 
 def parse_labeled_pvs(items: List[str]) -> Dict[str, str]:

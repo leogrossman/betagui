@@ -221,6 +221,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", help="Output root.")
     parser.add_argument("--label", default="", help="Short session label.")
     parser.add_argument("--note", default="", help="Operator note stored in metadata.")
+    parser.add_argument("--quadrupoles", action="store_true", help="Include quadrupole current/readback candidates from the lattice export.")
+    parser.add_argument("--no-sextupoles", action="store_true", help="Skip sextupole current/readback candidates from the lattice export.")
+    parser.add_argument("--no-octupoles", action="store_true", help="Skip octupole current/readback candidates from the lattice export.")
+    parser.add_argument("--no-ring-bpm-scalars", action="store_true", help="Skip full-ring BPM scalar candidates from the lattice export.")
+    parser.add_argument("--no-bpm-scalars", action="store_true", help="Skip candidate scalar BPM readbacks near U125/L4.")
+    parser.add_argument("--no-bpm-buffer", action="store_true", help="Skip the BPM waveform/buffer PV.")
+    parser.add_argument("--heavy", action="store_true", help="Convenience preset: enable ring BPMs, quadrupoles, sextupoles, and octupoles at the chosen sample rate.")
     parser.add_argument("--allow-writes", action="store_true", help="Required opt-in for any RF write.")
     parser.add_argument("--pv", action="append", default=[], metavar="LABEL=PVNAME")
     parser.add_argument("--optional-pv", action="append", default=[], metavar="LABEL=PVNAME")
@@ -243,9 +250,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         duration_seconds=args.duration,
         sample_hz=args.sample_hz,
         timeout_seconds=args.timeout,
-        output_root=Path(args.output_dir).expanduser().resolve() if args.output_dir else Path.cwd() / "control_room_outputs" / "ssmb_stage0",
+        output_root=Path(args.output_dir).expanduser().resolve() if args.output_dir else Path.cwd() / ".ssmb_local" / "ssmb_stage0",
         safe_mode=not args.allow_writes,
         allow_writes=args.allow_writes,
+        include_bpm_buffer=not args.no_bpm_buffer,
+        include_candidate_bpm_scalars=not args.no_bpm_scalars,
+        include_ring_bpm_scalars=True if args.heavy else not args.no_ring_bpm_scalars,
+        include_quadrupoles=True if args.heavy else args.quadrupoles,
+        include_sextupoles=True if args.heavy else not args.no_sextupoles,
+        include_octupoles=True if args.heavy else not args.no_octupoles,
         session_label=args.label,
         operator_note=args.note,
         extra_pvs=parse_labeled_pvs(args.pv),

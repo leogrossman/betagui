@@ -58,6 +58,12 @@ class LatticeContext:
     def octupoles(self) -> List[LatticeElement]:
         return [item for item in self.elements if item.element_type == "Octupole"]
 
+    def quadrupoles(self) -> List[LatticeElement]:
+        return [item for item in self.elements if item.element_type == "Quadrupole"]
+
+    def sextupoles(self) -> List[LatticeElement]:
+        return [item for item in self.elements if item.element_type == "Sextupole"]
+
     def section_elements(self, section: str) -> List[LatticeElement]:
         return [item for item in self.elements if item.section == section]
 

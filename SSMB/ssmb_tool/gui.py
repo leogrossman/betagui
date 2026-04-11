@@ -48,11 +48,14 @@ class SSMBGui:
         self.timeout_var = tk.StringVar(value="0.5")
         self.label_var = tk.StringVar(value="")
         self.note_var = tk.StringVar(value="")
-        self.output_dir_var = tk.StringVar(value=str(Path.cwd() / "control_room_outputs" / "ssmb_stage0"))
+        self.output_dir_var = tk.StringVar(value=str(Path.cwd() / ".ssmb_local" / "ssmb_stage0"))
         self.include_bpm_buffer_var = tk.BooleanVar(value=True)
         self.include_candidate_bpm_var = tk.BooleanVar(value=True)
         self.include_ring_bpm_var = tk.BooleanVar(value=True)
+        self.include_quadrupole_var = tk.BooleanVar(value=False)
+        self.include_sextupole_var = tk.BooleanVar(value=True)
         self.include_octupole_var = tk.BooleanVar(value=True)
+        self.heavy_mode_var = tk.BooleanVar(value=False)
 
         self.center_rf_var = tk.StringVar(value="")
         self.delta_min_hz_var = tk.StringVar(value="-100")
@@ -116,11 +119,24 @@ class SSMBGui:
             ttk.Entry(frame, textvariable=var, width=42).grid(row=row, column=1, sticky="ew", pady=2)
             row += 1
 
+        preset_row = ttk.Frame(frame)
+        preset_row.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        ttk.Button(preset_row, text="Preset: low-alpha full log", command=self._preset_low_alpha).pack(side="left")
+        ttk.Button(preset_row, text="Preset: bump OFF", command=lambda: self._preset_bump("bump_off")).pack(side="left", padx=4)
+        ttk.Button(preset_row, text="Preset: bump ON", command=lambda: self._preset_bump("bump_on")).pack(side="left")
+        row += 1
+
+        ttk.Checkbutton(frame, text="Heavy logging mode", variable=self.heavy_mode_var, command=self._toggle_heavy_mode).grid(row=row, column=0, columnspan=2, sticky="w")
+        row += 1
         ttk.Checkbutton(frame, text="Include BPM buffer waveform", variable=self.include_bpm_buffer_var, command=self._refresh_inventory).grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
         ttk.Checkbutton(frame, text="Include U125/L4 candidate BPM scalars", variable=self.include_candidate_bpm_var, command=self._refresh_inventory).grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
         ttk.Checkbutton(frame, text="Include ring BPM scalars", variable=self.include_ring_bpm_var, command=self._refresh_inventory).grid(row=row, column=0, columnspan=2, sticky="w")
+        row += 1
+        ttk.Checkbutton(frame, text="Include quadrupole currents", variable=self.include_quadrupole_var, command=self._refresh_inventory).grid(row=row, column=0, columnspan=2, sticky="w")
+        row += 1
+        ttk.Checkbutton(frame, text="Include sextupole currents", variable=self.include_sextupole_var, command=self._refresh_inventory).grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
         ttk.Checkbutton(frame, text="Include octupoles", variable=self.include_octupole_var, command=self._refresh_inventory).grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
@@ -146,6 +162,11 @@ class SSMBGui:
         row = 0
         info = "Direct RF sweep in Hz around the current or entered RF PV value. Writes are disabled unless the GUI was started with --allow-writes."
         ttk.Label(frame, text=info, wraplength=360, justify="left").grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        row += 1
+        preset_row = ttk.Frame(frame)
+        preset_row.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        ttk.Button(preset_row, text="Preset: sweep bump OFF", command=lambda: self._preset_sweep("rf_sweep_bump_off")).pack(side="left")
+        ttk.Button(preset_row, text="Preset: sweep bump ON", command=lambda: self._preset_sweep("rf_sweep_bump_on")).pack(side="left", padx=4)
         row += 1
         for label, var in (
             ("Center RF PV value", self.center_rf_var),
@@ -180,12 +201,56 @@ class SSMBGui:
             include_bpm_buffer=bool(self.include_bpm_buffer_var.get()),
             include_candidate_bpm_scalars=bool(self.include_candidate_bpm_var.get()),
             include_ring_bpm_scalars=bool(self.include_ring_bpm_var.get()),
+            include_quadrupoles=bool(self.include_quadrupole_var.get()),
+            include_sextupoles=bool(self.include_sextupole_var.get()),
             include_octupoles=bool(self.include_octupole_var.get()),
             session_label=self.label_var.get().strip(),
             operator_note=self.note_var.get().strip(),
             extra_pvs=_parse_text_mapping(self.extra_pvs_text.get("1.0", "end")),
             extra_optional_pvs=_parse_text_mapping(self.optional_pvs_text.get("1.0", "end")),
         )
+
+    def _toggle_heavy_mode(self) -> None:
+        heavy = bool(self.heavy_mode_var.get())
+        if heavy:
+            self.include_bpm_buffer_var.set(True)
+            self.include_candidate_bpm_var.set(True)
+            self.include_ring_bpm_var.set(True)
+            self.include_quadrupole_var.set(True)
+            self.include_sextupole_var.set(True)
+            self.include_octupole_var.set(True)
+            if float(self.sample_hz_var.get()) > 2.0:
+                self.sample_hz_var.set("1")
+        self._refresh_inventory()
+
+    def _preset_low_alpha(self) -> None:
+        self.label_var.set("low_alpha")
+        self.heavy_mode_var.set(True)
+        self.duration_var.set("60")
+        self.sample_hz_var.set("1")
+        self.note_var.set("Low-alpha full passive logging")
+        self._toggle_heavy_mode()
+
+    def _preset_bump(self, label: str) -> None:
+        self.label_var.set(label)
+        self.heavy_mode_var.set(True)
+        self.duration_var.set("60")
+        self.sample_hz_var.set("1")
+        self.note_var.set("Set bump state externally before starting this passive log")
+        self._toggle_heavy_mode()
+
+    def _preset_sweep(self, label: str) -> None:
+        self.label_var.set(label)
+        self.heavy_mode_var.set(True)
+        self.sample_hz_var.set("1")
+        self.note_var.set("RF sweep with external bump state fixed before run")
+        self.delta_min_hz_var.set("-100")
+        self.delta_max_hz_var.set("100")
+        self.points_var.set("5")
+        self.settle_var.set("1.0")
+        self.samples_per_point_var.set("2")
+        self.sample_spacing_var.set("0.2")
+        self._toggle_heavy_mode()
 
     def _append_log(self, message: str) -> None:
         at_bottom = self.log_text.yview()[1] >= 0.999

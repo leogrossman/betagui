@@ -39,11 +39,36 @@ python3 -m SSMB.ssmb_tool rf-sweep \
   --allow-writes
 ```
 
+Useful control-room cases for today:
+
+```bash
+python3 -m SSMB.ssmb_tool log-now --duration 60 --sample-hz 1 --heavy --label low_alpha
+python3 -m SSMB.ssmb_tool log-now --duration 60 --sample-hz 1 --heavy --label bump_off
+python3 -m SSMB.ssmb_tool log-now --duration 60 --sample-hz 1 --heavy --label bump_on
+```
+
+For RF sweep logging with an externally fixed bump state:
+
+```bash
+python3 -m SSMB.ssmb_tool rf-sweep \
+  --center-rf-pv 499652.5 \
+  --delta-min-hz -100 \
+  --delta-max-hz 100 \
+  --points 5 \
+  --sample-hz 1 \
+  --heavy \
+  --label rf_sweep_bump_off \
+  --allow-writes
+```
+
 This creates a timestamped session directory under:
 
 ```text
-./control_room_outputs/ssmb_stage0/
+./.ssmb_local/ssmb_stage0/
 ```
+
+That directory is local-only and gitignored, so a normal `git pull` will not
+touch your SSMB log data.
 
 with:
 
@@ -62,6 +87,24 @@ channels such as the legacy BPM buffer if available.
 The GUI shows a live inventory preview so you can inspect exactly what will be
 logged before starting a session. Use the session label and note fields to tag
 runs such as `bump_on` and `bump_off`.
+
+The GUI also has presets for the immediate control-room jobs:
+
+- low-alpha full passive log
+- bump-off passive log
+- bump-on passive log
+- RF sweep with bump-off label
+- RF sweep with bump-on label
+
+Heavy logging mode expands coverage to:
+
+- full-ring BPM scalar readbacks
+- sextupole currents
+- octupole currents
+- quadrupole currents
+
+This is still read-only in Stage 0. Keep heavy mode at modest rates such as
+`1 Hz`, especially when full-ring BPM scalars are enabled.
 
 ## Analysis
 
