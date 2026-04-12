@@ -57,7 +57,7 @@ DEFAULT_MONITOR_SECTION_OVERLAYS = {
     "bump_feedback": ["bump_orbit_error_mm", "bump_bpm_avg_mm", "bump_strength_a"],
     "coherent_light": ["p1_h1_ampl_avg", "p3_h1_ampl_avg"],
     "camera_temperature": ["climate_kw13_return_temp_c", "climate_sr_temp_c", "qpd_l4_center_x_avg_um"],
-    "p1_oscillation": ["p1_h1_ampl_avg", "climate_kw13_return_temp_c", "bump_orbit_error_mm"],
+    "p1_oscillation": ["p1_h1_ampl_avg", "climate_kw13_return_temp_c", "bpmz1l2rp_x", "bpmz1l2rp_y"],
     "energy_momentum": ["delta_s", "beam_energy_mev", "sigma_delta"],
     "alpha_phase_slip": ["bpm_alpha0", "legacy_alpha0", "delta_s"],
     "tunes_chromatic": ["tune_y", "tune_s", "delta_s"],
@@ -159,6 +159,7 @@ class SSMBGui:
 
     def _finish_startup(self) -> None:
         self._debug("startup: loading cached monitor history")
+        self._ensure_monitor_history_capacity()
         self._load_monitor_history_cache()
         try:
             self._place_window_on_screen(self.root, 1380, 900, x=50, y=50)
@@ -627,6 +628,20 @@ class SSMBGui:
                 continue
         return False
 
+    def _ensure_monitor_history_capacity(self) -> None:
+        try:
+            interval_s = max(0.01, float(self.monitor_interval_var.get()))
+        except Exception:
+            interval_s = 0.5
+        try:
+            span_s = max(30.0, float(self.monitor_history_span_var.get()))
+        except Exception:
+            span_s = 600.0
+        target = max(2400, int(math.ceil(span_s / interval_s * 1.25)) + 32)
+        if getattr(self.monitor_history, "maxlen", None) == target:
+            return
+        self.monitor_history = collections.deque(self.monitor_history, maxlen=target)
+
     def _trim_monitor_history(self) -> None:
         if not self.monitor_history:
             return
@@ -896,6 +911,7 @@ class SSMBGui:
                 self.rolling_window_var.set(str(max(10, int(math.ceil(LIVE_MONITOR_PLOT_WINDOW_S / interval)))))
             except Exception:
                 pass
+            self._ensure_monitor_history_capacity()
             selected = list(table.selection())
             self.monitor_extra_labels_var.set(", ".join(selected))
             window.destroy()
@@ -1277,6 +1293,7 @@ class SSMBGui:
             raise ValueError("Monitor interval must be positive.")
         self._debug("start monitor requested: interval=%s history_span=%s" % (interval, self.monitor_history_span_var.get()))
         self._debug("monitor cache path: %s" % self._monitor_history_path())
+        self._ensure_monitor_history_capacity()
         self.monitor_history.clear()
         self.monitor_stop_event = threading.Event()
         self.start_monitor_button.state(["disabled"])
@@ -1802,6 +1819,12 @@ class SSMBGui:
             "bump_bpm_l2_mm": "BPMZ1L2RP",
             "bump_bpm_k3_mm": "BPMZ1K3RP",
             "bump_bpm_l4_mm": "BPMZ1L4RP",
+            "bpmz1l2rp_x": "BPMZ1L2RP",
+            "bpmz1l2rp_y": "BPMZ1L2RP",
+            "bpmz1k3rp_x": "BPMZ1K3RP",
+            "bpmz1k3rp_y": "BPMZ1K3RP",
+            "bpmz1l4rp_x": "BPMZ1L4RP",
+            "bpmz1l4rp_y": "BPMZ1L4RP",
             "delta_s": "BPMZ4L4RP",
         }
         device_name = mapping.get(key)

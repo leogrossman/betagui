@@ -362,6 +362,14 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
                         "climate_kw13_return_temp_c": {"value": temp},
                         "climate_sr_temp_c": {"value": temp + 0.1},
                         "climate_sr_temp1_c": {"value": temp + 0.2},
+                        "bpmz1k1rp_x": {"value": bpm_l2 - 0.05},
+                        "bpmz1l2rp_x": {"value": bpm_l2},
+                        "bpmz1k3rp_x": {"value": bpm_l2 + 0.03},
+                        "bpmz1l4rp_x": {"value": bpm_l2 + 0.05},
+                        "bpmz1k1rp_y": {"value": -0.02 * index},
+                        "bpmz1l2rp_y": {"value": -0.03 * index},
+                        "bpmz1k3rp_y": {"value": -0.025 * index},
+                        "bpmz1l4rp_y": {"value": -0.015 * index},
                         "l4_bump_hcorr_k3_upstream": {"value": 0.01},
                         "l4_bump_hcorr_l4_upstream": {"value": 0.0},
                         "l4_bump_hcorr_l4_downstream": {"value": 0.0},
@@ -391,11 +399,23 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
             )
         summary = summarize_live_monitor(samples)
         thermal = summary["thermal_orbit_monitor"]
+        trend_data = summary["trend_data"]
+        self.assertEqual(len(trend_data["bpmz1l2rp_y"]), len(samples))
         self.assertIsNotNone((thermal.get("temp_to_bpm_l2") or {}).get("corr"))
+        self.assertIsNotNone((thermal.get("temp_to_bpm_l2_y") or {}).get("corr"))
         self.assertIsNotNone((thermal.get("bpm_l2_to_p1") or {}).get("corr"))
+        self.assertIsNotNone((thermal.get("bpm_l2_y_to_p1") or {}).get("corr"))
+        self.assertIsNotNone(thermal.get("temp_slope_c_per_s"))
+        self.assertIsNotNone((thermal.get("temp_slope_to_bpm_l2_y_slope") or {}).get("corr"))
         self.assertIn(
             thermal["hypothesis"],
-            ("thermal_to_beam_orbit", "thermal_to_source_point", "thermal_direct_or_unresolved", "unresolved"),
+            (
+                "thermal_to_beam_orbit",
+                "thermal_to_vertical_beam_orbit",
+                "thermal_to_source_point",
+                "thermal_direct_or_unresolved",
+                "unresolved",
+            ),
         )
 
 
