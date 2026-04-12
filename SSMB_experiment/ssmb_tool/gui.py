@@ -83,6 +83,7 @@ class SSMBGui:
         self.oscillation_selected_candidate_key = None
         self.stage0_stop_event: Optional[threading.Event] = None
         self._monitor_cache_append_count = 0
+        self._shutdown_started = False
         self._build_vars()
         self._build_ui()
         self._apply_profile()
@@ -95,6 +96,7 @@ class SSMBGui:
         self._debug("startup: loading cached monitor history")
         self._load_monitor_history_cache()
         try:
+            self._place_window_on_screen(self.root, 1380, 900, x=50, y=50)
             self.root.deiconify()
             self.root.update_idletasks()
             self.root.lift()
@@ -104,7 +106,20 @@ class SSMBGui:
         except Exception as exc:
             self._debug("root focus/lift failed: %s" % exc)
         try:
-            self._debug("startup: root geometry=%s state=%s mapped=%s" % (self.root.winfo_geometry(), self.root.state(), self.root.winfo_ismapped()))
+            self._debug(
+                "startup: root geometry=%s state=%s mapped=%s screen=%sx%s vroot=(%s,%s %sx%s)"
+                % (
+                    self.root.winfo_geometry(),
+                    self.root.state(),
+                    self.root.winfo_ismapped(),
+                    self.root.winfo_screenwidth(),
+                    self.root.winfo_screenheight(),
+                    self.root.winfo_vrootx(),
+                    self.root.winfo_vrooty(),
+                    self.root.winfo_vrootwidth(),
+                    self.root.winfo_vrootheight(),
+                )
+            )
         except Exception:
             pass
         self._debug("startup: gui ready (open popups from main window as needed)")
@@ -123,6 +138,23 @@ class SSMBGui:
             self.root.after(250, self._signal_heartbeat)
         except Exception:
             return
+
+    def _place_window_on_screen(self, window, width: int, height: int, x: Optional[int] = None, y: Optional[int] = None, relative_to_root: bool = False) -> None:
+        try:
+            if relative_to_root and self.root is not None and self.root.winfo_exists():
+                self.root.update_idletasks()
+                base_x = int(self.root.winfo_x())
+                base_y = int(self.root.winfo_y())
+                pos_x = base_x + (x if x is not None else 60)
+                pos_y = base_y + (y if y is not None else 60)
+            else:
+                pos_x = 50 if x is None else int(x)
+                pos_y = 50 if y is None else int(y)
+            pos_x = max(0, pos_x)
+            pos_y = max(0, pos_y)
+            window.geometry("%dx%d+%d+%d" % (int(width), int(height), pos_x, pos_y))
+        except Exception as exc:
+            self._debug("window placement failed: %s" % exc)
 
     def _build_vars(self) -> None:
         self.duration_var = tk.StringVar(value="60")
@@ -504,7 +536,7 @@ class SSMBGui:
     def _open_candidate_picker(self) -> None:
         window = tk.Toplevel(self.root)
         window.title("Choose Oscillation Candidates")
-        window.geometry("420x520")
+        self._place_window_on_screen(window, 420, 520, x=100, y=100, relative_to_root=True)
         frame = ttk.Frame(window, padding=10)
         frame.pack(fill="both", expand=True)
         frame.rowconfigure(1, weight=1)
@@ -530,7 +562,7 @@ class SSMBGui:
     def _open_monitor_settings_window(self) -> None:
         window = tk.Toplevel(self.root)
         window.title("Live Monitor Settings")
-        window.geometry("1100x760")
+        self._place_window_on_screen(window, 1100, 760, x=90, y=90, relative_to_root=True)
         frame = ttk.Frame(window, padding=10)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(0, weight=1)
@@ -1062,7 +1094,7 @@ class SSMBGui:
             return
         window = tk.Toplevel(self.root)
         window.title("SSMB Live Monitor")
-        window.geometry("1920x1080")
+        self._place_window_on_screen(window, 1880, 1020, x=80, y=70, relative_to_root=True)
         outer = ttk.Frame(window, padding=10)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
@@ -1178,7 +1210,7 @@ class SSMBGui:
             return
         window = tk.Toplevel(self.root)
         window.title("SSMB P1 Oscillation Study")
-        window.geometry("1340x930")
+        self._place_window_on_screen(window, 1340, 930, x=90, y=80, relative_to_root=True)
         frame = ttk.Frame(window, padding=10)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(0, weight=1)
@@ -1586,7 +1618,7 @@ class SSMBGui:
         current = self.monitor_plot_settings.get(key, {})
         window = tk.Toplevel(self.root)
         window.title("%s Plot Settings" % section.get("title", "Pane"))
-        window.geometry("360x220")
+        self._place_window_on_screen(window, 360, 220, x=120, y=120, relative_to_root=True)
         frame = ttk.Frame(window, padding=10)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(1, weight=1)
@@ -1787,7 +1819,7 @@ class SSMBGui:
         lattice, specs = build_specs(config)
         window = tk.Toplevel(self.root)
         window.title("SSMB Live Lattice View")
-        window.geometry("1360x860")
+        self._place_window_on_screen(window, 1360, 860, x=100, y=90, relative_to_root=True)
         outer = ttk.Frame(window, padding=10)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
@@ -2350,7 +2382,7 @@ class SSMBGui:
             return
         window = tk.Toplevel(self.root)
         window.title("SSMB Theory And Derived-Value Pipeline")
-        window.geometry("900x760")
+        self._place_window_on_screen(window, 900, 760, x=110, y=100, relative_to_root=True)
         frame = ttk.Frame(window, padding=10)
         frame.pack(fill="both", expand=True)
         text = tk.Text(frame, wrap="word")
@@ -2387,6 +2419,9 @@ class SSMBGui:
         self.theory_window_text = None
 
     def shutdown(self) -> None:
+        if self._shutdown_started:
+            return
+        self._shutdown_started = True
         try:
             if self.monitor_stop_event is not None:
                 self.monitor_stop_event.set()
@@ -2411,7 +2446,7 @@ class SSMBGui:
             return
         window = tk.Toplevel(self.root)
         window.title("SSMB Oscillation / Resonance Study")
-        window.geometry("1480x980")
+        self._place_window_on_screen(window, 1480, 980, x=95, y=85, relative_to_root=True)
         frame = ttk.Frame(window, padding=10)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(0, weight=1)
@@ -2505,7 +2540,7 @@ class SSMBGui:
             return
         window = tk.Toplevel(self.root)
         window.title("Experimental Bump Lab")
-        window.geometry("1700x980")
+        self._place_window_on_screen(window, 1700, 980, x=85, y=75, relative_to_root=True)
         outer = ttk.Frame(window, padding=10)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=0)
@@ -2962,9 +2997,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     root = tk.Tk()
     print("[ssmb_gui] main(): building SSMBGui", flush=True)
     app = SSMBGui(root, allow_writes=True, start_safe_mode=not bool(args.unsafe_start))
+    sigint_count = {"count": 0}
 
     def handle_sigint(_signum=None, _frame=None):
-        print("[ssmb_gui] SIGINT received, shutting down", flush=True)
+        sigint_count["count"] += 1
+        print("[ssmb_gui] SIGINT received, shutting down (count=%d)" % sigint_count["count"], flush=True)
+        if sigint_count["count"] >= 2:
+            print("[ssmb_gui] forcing exit after repeated SIGINT", flush=True)
+            os._exit(130)
         try:
             root.after(0, app.shutdown)
         except Exception:
