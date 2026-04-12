@@ -108,6 +108,14 @@ def _fmt_duration(value) -> str:
     return "%.3f ns" % (seconds * 1.0e9)
 
 
+def _resonance_mismatch(observed_period_s: Optional[float], reference_period_s: Optional[float]) -> Optional[float]:
+    observed = _valid_float(observed_period_s)
+    reference = _valid_float(reference_period_s)
+    if observed is None or reference is None or observed <= 0.0 or reference <= 0.0:
+        return None
+    return observed / reference
+
+
 def _estimate_sample_dt_seconds(samples: Sequence[Dict[str, object]]) -> Optional[float]:
     timestamps = []
     for sample in samples:
@@ -576,6 +584,19 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]], extra_candidate
     summary["alpha_assessment"] = assess_alpha_monitor(summary)
     summary["trend_data"] = extract_trend_data(samples)
     summary["oscillation_study"] = analyze_p1_oscillation(samples, extra_candidate_keys=extra_candidate_keys)
+    tune_s_period = summary["current"].get("tune_s_period_s")
+    p1_period = (summary.get("oscillation_study") or {}).get("dominant_period_s")
+    summary["ssmb_resonance"] = {
+        "observed_p1_period_s": p1_period,
+        "synchrotron_period_s": tune_s_period,
+        "period_ratio_to_qs": _resonance_mismatch(p1_period, tune_s_period),
+        "message": (
+            "Observed P1 period is many orders slower than the synchrotron period; that points to a slow control / thermal / optics modulation rather than a direct turn-by-turn Qs oscillation."
+            if _resonance_mismatch(p1_period, tune_s_period) not in (None, 0.0)
+            and abs(float(_resonance_mismatch(p1_period, tune_s_period))) > 100.0
+            else "Observed P1 period is being compared live to the synchrotron period for a quick resonance sanity check."
+        ),
+    }
     return summary
 
 

@@ -5,6 +5,7 @@ import collections
 import json
 import math
 import queue
+import signal
 import shutil
 import threading
 import time
@@ -62,6 +63,7 @@ class SSMBGui:
         self.oscillation_window: Optional["tk.Toplevel"] = None
         self.lattice_window: Optional["tk.Toplevel"] = None
         self.bump_lab_window: Optional["tk.Toplevel"] = None
+        self.ssmb_study_window: Optional["tk.Toplevel"] = None
         self.bump_lab_thread: Optional[threading.Thread] = None
         self.bump_lab_stop_event: Optional[threading.Event] = None
         self.lattice_context = None
@@ -72,6 +74,7 @@ class SSMBGui:
         self.selected_lattice_item_name = None
         self.live_spec_lookup = {}
         self.bump_lab_plot_canvases = {}
+        self.ssmb_study_canvases = []
         self.oscillation_selected_candidate_key = None
         self.stage0_stop_event: Optional[threading.Event] = None
         self._build_vars()
@@ -306,6 +309,7 @@ class SSMBGui:
         ttk.Button(button_row, text="Reset Monitor Baseline", command=self._reset_monitor_baseline).pack(side="left")
         ttk.Button(button_row, text="Open Monitor Window", command=self._open_monitor_window).pack(side="left", padx=6)
         ttk.Button(button_row, text="Open Oscillation Study", command=self._open_oscillation_window).pack(side="left", padx=6)
+        ttk.Button(button_row, text="Open SSMB Study", command=self._open_ssmb_study_window).pack(side="left", padx=6)
         ttk.Button(button_row, text="Open Theory Window", command=self._open_theory_window).pack(side="left", padx=6)
         self.monitor_jump_sweep_button = ttk.Button(button_row, text="Go To RF Sweep", command=self._focus_rf_sweep_tab)
         self.monitor_jump_sweep_button.pack(side="left", padx=6)
@@ -1021,6 +1025,7 @@ class SSMBGui:
         button_row.grid(row=0, column=0, sticky="nw")
         ttk.Button(button_row, text="Open Theory Window", command=self._open_theory_window).pack(side="left")
         ttk.Button(button_row, text="Open Oscillation Study", command=self._open_oscillation_window).pack(side="left", padx=6)
+        ttk.Button(button_row, text="Open SSMB Study", command=self._open_ssmb_study_window).pack(side="left", padx=6)
         ttk.Button(button_row, text="Live Monitor Settings…", command=self._open_monitor_settings_window).pack(side="left", padx=6)
         self.monitor_window_jump_sweep_button = ttk.Button(button_row, text="Go To RF Sweep", command=self._focus_rf_sweep_tab)
         self.monitor_window_jump_sweep_button.pack(side="left", padx=6)
@@ -1338,6 +1343,8 @@ class SSMBGui:
             self._draw_section_plot(section)
         if self.theory_window is not None and self.theory_window.winfo_exists():
             self._update_theory_window(summary)
+        if self.ssmb_study_window is not None and self.ssmb_study_window.winfo_exists():
+            self._update_ssmb_study_window(summary)
 
     def _color_text_widget(self, widget: "tk.Text", color_name: str) -> None:
         colors = {"green": "#1b5e20", "yellow": "#8d6e00", "red": "#b71c1c"}
@@ -2284,6 +2291,119 @@ class SSMBGui:
         self.theory_window = None
         self.theory_window_text = None
 
+    def shutdown(self) -> None:
+        try:
+            if self.monitor_stop_event is not None:
+                self.monitor_stop_event.set()
+            if self.bump_lab_stop_event is not None:
+                self.bump_lab_stop_event.set()
+            if self.stage0_stop_event is not None:
+                self.stage0_stop_event.set()
+        except Exception:
+            pass
+        try:
+            self.root.quit()
+        except Exception:
+            pass
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+
+    def _open_ssmb_study_window(self) -> None:
+        if self.ssmb_study_window is not None and self.ssmb_study_window.winfo_exists():
+            self.ssmb_study_window.lift()
+            return
+        window = tk.Toplevel(self.root)
+        window.title("SSMB Oscillation / Resonance Study")
+        window.geometry("1480x980")
+        frame = ttk.Frame(window, padding=10)
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(1, weight=0)
+        frame.rowconfigure(2, weight=1)
+        top = ttk.Frame(frame)
+        top.grid(row=0, column=0, columnspan=2, sticky="ew")
+        ttk.Button(top, text="Open Theory Window", command=self._open_theory_window).pack(side="left")
+        ttk.Button(top, text="Open Oscillation Study", command=self._open_oscillation_window).pack(side="left", padx=6)
+        ttk.Button(top, text="Open Lattice View", command=self._open_lattice_window).pack(side="left", padx=6)
+        text = tk.Text(frame, wrap="word", height=18)
+        text.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 8))
+        text.configure(state="disabled")
+        plots = ttk.Frame(frame)
+        plots.grid(row=2, column=0, columnspan=2, sticky="nsew")
+        plots.columnconfigure(0, weight=1)
+        plots.columnconfigure(1, weight=1)
+        plots.rowconfigure(0, weight=1)
+        plots.rowconfigure(1, weight=1)
+        canvases = []
+        for idx in range(4):
+            canvas = tk.Canvas(plots, bg="white", height=260, highlightthickness=1, highlightbackground="#cfd8dc")
+            canvas.grid(row=idx // 2, column=idx % 2, sticky="nsew", padx=4, pady=4)
+            canvases.append(canvas)
+        self.ssmb_study_window = window
+        self.ssmb_study_text = text
+        self.ssmb_study_canvases = canvases
+        self._update_ssmb_study_window(self.latest_monitor_summary)
+        window.protocol("WM_DELETE_WINDOW", self._close_ssmb_study_window)
+
+    def _close_ssmb_study_window(self) -> None:
+        if self.ssmb_study_window is not None and self.ssmb_study_window.winfo_exists():
+            self.ssmb_study_window.destroy()
+        self.ssmb_study_window = None
+        self.ssmb_study_text = None
+        self.ssmb_study_canvases = []
+
+    def _update_ssmb_study_window(self, summary) -> None:
+        if self.ssmb_study_window is None or not self.ssmb_study_window.winfo_exists():
+            return
+        safe_summary = summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates())
+        current = safe_summary.get("current", {}) or {}
+        sweep = safe_summary.get("rf_sweep_metrics", {}) or {}
+        oscillation = safe_summary.get("oscillation_study", {}) or {}
+        resonance = safe_summary.get("ssmb_resonance", {}) or {}
+        lines = [
+            "SSMB Oscillation / Resonance Study",
+            "",
+            "This window is focused on the actual SSMB experiment observables: P1/P3, RF, δₛ, η, α₀, beam energy, momentum spread, and whether the observed slow oscillation looks compatible with a fast machine resonance or instead with slow control / thermal modulation.",
+            "",
+            "Live observed quantities",
+            "P1 avg / P3 avg: %s / %s" % (current.get("p1_h1_ampl_avg"), current.get("p3_h1_ampl_avg")),
+            "Observed P1 period: %s" % self._format_short_duration(oscillation.get("dominant_period_s")),
+            "Observed P1 frequency: %s Hz" % self._format_plot_value(oscillation.get("dominant_frequency_hz")),
+            "Autocorr period: %s" % self._format_short_duration(oscillation.get("autocorr_period_s")),
+            "Certainty: %s" % oscillation.get("certainty", "n/a"),
+            "",
+            "Derived machine quantities",
+            "δₛ: %s" % self._format_plot_value(current.get("delta_l4_bpm_first_order")),
+            "η: %s" % self._format_plot_value(sweep.get("phase_slip_factor_eta")),
+            "α₀ legacy / BPM: %s / %s" % (self._format_plot_value(current.get("legacy_alpha0_corrected")), self._format_plot_value(sweep.get("alpha0_from_bpm_eta"))),
+            "Beam energy / σδ: %s MeV / %s" % (self._format_plot_value(current.get("beam_energy_from_bpm_mev")), self._format_plot_value(current.get("qpd_l4_sigma_delta_first_order"))),
+            "",
+            "Resonance sanity check",
+            "Synchrotron period from Qs: %s" % self._format_short_duration(resonance.get("synchrotron_period_s")),
+            "Observed P1 period / Qs period ratio: %s" % self._format_plot_value(resonance.get("period_ratio_to_qs")),
+            resonance.get("message", "No resonance interpretation available yet."),
+            "",
+            "Caveat",
+            "This is a live heuristic study. Error bars and certainty here are based on rolling FFT/autocorrelation / correlation strength, not a full offline statistical model.",
+        ]
+        self._set_text_widget(self.ssmb_study_text, lines)
+        trend_data = safe_summary.get("trend_data", {}) or {}
+        plot_defs = [
+            ("P1/P3 vs RF", [("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa"), ("P3 avg", list(trend_data.get("p3_h1_ampl_avg", [])), "#fb8c00"), ("Δf_RF [Hz]", list(trend_data.get("rf_offset_hz", [])), "#1e88e5")]),
+            ("P1 vs δₛ / E", [("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa"), ("δₛ", list(trend_data.get("delta_s", [])), "#43a047"), ("E_BPM [MeV]", list(trend_data.get("beam_energy_mev", [])), "#00897b")]),
+            ("α₀ / η chain", [("α₀ legacy", list(trend_data.get("legacy_alpha0", [])), "#ef6c00"), ("α₀ BPM", list(trend_data.get("bpm_alpha0", [])), "#8e24aa"), ("σδ", list(trend_data.get("sigma_delta", [])), "#6d4c41")]),
+            ("Slow-driver context", [("KW13 temp", list(trend_data.get("climate_kw13_return_temp_c", [])), "#00838f"), ("QPD00 center", list(trend_data.get("qpd_l4_center_x_avg_um", [])), "#6a1b9a"), ("Bump error", list(trend_data.get("bump_orbit_error_mm", [])), "#c2185b")]),
+        ]
+        for canvas, (title, payload) in zip(self.ssmb_study_canvases, plot_defs):
+            canvas.delete("all")
+            width = int(canvas.winfo_width() or 520)
+            height = int(canvas.winfo_height() or 220)
+            self._draw_multi_series(canvas, payload, 10, 10, width - 10, height - 10, max(20, len(payload[0][1]) if payload[0][1] else 20))
+            canvas.create_text(width / 2, 12, anchor="n", text=title, fill="#37474f", font=("Helvetica", 10, "bold"))
+
     def _open_bump_lab_window(self) -> None:
         if self.bump_lab_window is not None and self.bump_lab_window.winfo_exists():
             self.bump_lab_window.lift()
@@ -2738,8 +2858,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
     root = tk.Tk()
-    SSMBGui(root, allow_writes=True, start_safe_mode=not bool(args.unsafe_start))
-    root.mainloop()
+    app = SSMBGui(root, allow_writes=True, start_safe_mode=not bool(args.unsafe_start))
+
+    def handle_sigint(_signum=None, _frame=None):
+        app.shutdown()
+
+    try:
+        signal.signal(signal.SIGINT, handle_sigint)
+    except Exception:
+        pass
+    try:
+        root.protocol("WM_DELETE_WINDOW", app.shutdown)
+    except Exception:
+        pass
+    root.deiconify()
+    try:
+        while True:
+            root.update()
+            root.update_idletasks()
+            time.sleep(0.02)
+    except tk.TclError:
+        return 0
+    except KeyboardInterrupt:
+        app.shutdown()
     return 0
 
 
