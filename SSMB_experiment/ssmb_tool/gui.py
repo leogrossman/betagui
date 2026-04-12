@@ -68,6 +68,7 @@ class SSMBGui:
         self.latest_monitor_summary = None
         self.lattice_device_items = []
         self.selected_lattice_item_name = None
+        self.bump_lab_plot_canvases = {}
         self.stage0_stop_event: Optional[threading.Event] = None
         self._build_vars()
         self._build_ui()
@@ -723,11 +724,11 @@ class SSMBGui:
             return
         window = tk.Toplevel(self.root)
         window.title("SSMB Live Monitor")
-        window.geometry("1560x920")
+        window.geometry("1800x1040")
         outer = ttk.Frame(window, padding=10)
         outer.pack(fill="both", expand=True)
-        outer.columnconfigure(0, weight=5)
-        outer.columnconfigure(1, weight=2)
+        outer.columnconfigure(0, weight=8)
+        outer.columnconfigure(1, weight=3)
         outer.rowconfigure(0, weight=1)
         left = ttk.Frame(outer)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
@@ -742,10 +743,13 @@ class SSMBGui:
         self.monitor_plot_canvases = {}
         self.monitor_cards_container = left
         self.monitor_window_theory_text = None
+        self.monitor_window_rf_state = None
+        self.monitor_window_bump_state = None
         left.columnconfigure(0, weight=1)
         left.columnconfigure(1, weight=1)
-        left.columnconfigure(2, weight=1)
-        right.rowconfigure(2, weight=1)
+        for row in range(4):
+            left.rowconfigure(row, weight=1)
+        right.rowconfigure(3, weight=1)
         right.columnconfigure(0, weight=1)
         button_row = ttk.Frame(right)
         button_row.grid(row=0, column=0, sticky="ew")
@@ -754,16 +758,23 @@ class SSMBGui:
         self.monitor_window_jump_sweep_button = ttk.Button(button_row, text="Go To RF Sweep", command=self._focus_rf_sweep_tab)
         self.monitor_window_jump_sweep_button.pack(side="left", padx=6)
         ttk.Checkbutton(button_row, text="Log y-axis", variable=self.monitor_log_scale_var, command=lambda: self._update_monitor_dashboard(self.latest_monitor_summary)).pack(side="right")
+        state_row = ttk.Frame(right)
+        state_row.grid(row=1, column=0, sticky="ew", pady=(8, 6))
+        ttk.Label(state_row, text="Machine state").pack(side="left")
+        self.monitor_window_rf_state = tk.Label(state_row, text="RF sweep OFF", bg="#607d8b", fg="white", padx=10, pady=4)
+        self.monitor_window_rf_state.pack(side="left", padx=6)
+        self.monitor_window_bump_state = tk.Label(state_row, text="Bump OFF", bg="#2e7d32", fg="white", padx=10, pady=4)
+        self.monitor_window_bump_state.pack(side="left", padx=6)
         helper = ttk.Label(
             right,
             text="Theory and derivations live in the separate Theory window so the monitor plots stay large enough to interpret.",
             wraplength=360,
             justify="left",
         )
-        helper.grid(row=1, column=0, sticky="w", pady=(8, 8))
-        ttk.Label(right, text="Current channel snapshot").grid(row=2, column=0, sticky="w", pady=(0, 0))
+        helper.grid(row=2, column=0, sticky="w", pady=(0, 8))
+        ttk.Label(right, text="Current channel snapshot").grid(row=3, column=0, sticky="w", pady=(0, 0))
         self.monitor_window_channels_text = tk.Text(right, wrap="none", height=24)
-        self.monitor_window_channels_text.grid(row=3, column=0, sticky="nsew")
+        self.monitor_window_channels_text.grid(row=4, column=0, sticky="nsew")
         self.monitor_window_channels_text.configure(state="disabled")
         self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
         self._update_monitor_dashboard(self.latest_monitor_summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates()))
@@ -780,6 +791,8 @@ class SSMBGui:
         self.monitor_window_theory_text = None
         self.monitor_plot_controls = {}
         self.monitor_plot_canvases = {}
+        self.monitor_window_rf_state = None
+        self.monitor_window_bump_state = None
 
     def _focus_rf_sweep_tab(self) -> None:
         notebook = getattr(self, "control_notebook", None)
@@ -798,28 +811,57 @@ class SSMBGui:
             return
         window = tk.Toplevel(self.root)
         window.title("SSMB P1 Oscillation Study")
-        window.geometry("1180x860")
+        window.geometry("1340x930")
         frame = ttk.Frame(window, padding=10)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(1, weight=1)
+        frame.rowconfigure(2, weight=1)
+        top_buttons = ttk.Frame(frame)
+        top_buttons.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        ttk.Button(top_buttons, text="Open Theory Window", command=self._open_theory_window).pack(side="left")
         text = tk.Text(frame, wrap="word", height=16)
-        text.grid(row=0, column=0, columnspan=2, sticky="nsew")
+        text.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
         text.configure(state="disabled")
+        table_frame = ttk.Frame(frame)
+        table_frame.grid(row=1, column=1, sticky="nsew")
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.rowconfigure(0, weight=1)
+        candidate_table = ttk.Treeview(
+            table_frame,
+            columns=("candidate", "score", "corr", "lag", "period", "harmonic", "pairs"),
+            show="headings",
+            height=10,
+        )
+        for col, title, width in (
+            ("candidate", "Candidate", 220),
+            ("score", "Score", 80),
+            ("corr", "r", 70),
+            ("lag", "Lag", 90),
+            ("period", "Period", 90),
+            ("harmonic", "Harmonic", 80),
+            ("pairs", "Pairs", 60),
+        ):
+            candidate_table.heading(col, text=title)
+            candidate_table.column(col, width=width, anchor="center")
+        candidate_table.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=candidate_table.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        candidate_table.configure(yscrollcommand=scrollbar.set)
         plots = ttk.Frame(frame)
-        plots.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(10, 0))
+        plots.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(10, 0))
         plots.columnconfigure(0, weight=1)
         plots.columnconfigure(1, weight=1)
         plots.rowconfigure(0, weight=1)
         plots.rowconfigure(1, weight=1)
         canvases = []
         for idx in range(4):
-            canvas = tk.Canvas(plots, bg="white", height=180, highlightthickness=1, highlightbackground="#cfd8dc")
+            canvas = tk.Canvas(plots, bg="white", height=220, highlightthickness=1, highlightbackground="#cfd8dc")
             canvas.grid(row=idx // 2, column=idx % 2, sticky="nsew", padx=4, pady=4)
             canvases.append(canvas)
         self.oscillation_window = window
         self.oscillation_window_text = text
+        self.oscillation_window_table = candidate_table
         self.oscillation_plot_canvases = canvases
         self._update_oscillation_window(self.latest_monitor_summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates()))
         window.protocol("WM_DELETE_WINDOW", self._close_oscillation_window)
@@ -827,8 +869,9 @@ class SSMBGui:
     def _update_oscillation_window(self, summary) -> None:
         if self.oscillation_window is None or not self.oscillation_window.winfo_exists():
             return
-        safe_summary = summary or summarize_live_monitor([])
+        safe_summary = summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates())
         self._set_text_widget(self.oscillation_window_text, format_oscillation_study(safe_summary))
+        self._update_oscillation_candidate_table(safe_summary)
         self._draw_oscillation_candidate_plots(safe_summary)
 
     def _close_oscillation_window(self) -> None:
@@ -836,7 +879,43 @@ class SSMBGui:
             self.oscillation_window.destroy()
         self.oscillation_window = None
         self.oscillation_window_text = None
+        self.oscillation_window_table = None
         self.oscillation_plot_canvases = []
+
+    def _update_oscillation_candidate_table(self, summary) -> None:
+        table = getattr(self, "oscillation_window_table", None)
+        if table is None:
+            return
+        for item in table.get_children():
+            table.delete(item)
+        candidates = ((summary or {}).get("oscillation_study", {}) or {}).get("candidates", [])
+        for candidate in candidates:
+            table.insert(
+                "",
+                "end",
+                values=(
+                    candidate.get("label", candidate.get("key", "candidate")),
+                    "%.3f" % float(candidate.get("score") or 0.0),
+                    "%.3f" % float(candidate.get("pearson_r") or 0.0),
+                    self._format_short_duration(candidate.get("lag_s")),
+                    self._format_short_duration(candidate.get("candidate_period_s")),
+                    "%.3f" % float(candidate.get("harmonic_similarity") or 0.0),
+                    "%d" % int(candidate.get("pair_count") or 0),
+                ),
+            )
+
+    def _format_short_duration(self, value) -> str:
+        try:
+            seconds = float(value)
+        except (TypeError, ValueError):
+            return "n/a"
+        if abs(seconds) >= 60.0:
+            return "%.2f min" % (seconds / 60.0)
+        if abs(seconds) >= 1.0:
+            return "%.2f s" % seconds
+        if abs(seconds) >= 1.0e-3:
+            return "%.2f ms" % (seconds * 1.0e3)
+        return "%.2f us" % (seconds * 1.0e6)
 
     def _draw_oscillation_candidate_plots(self, summary) -> None:
         canvases = getattr(self, "oscillation_plot_canvases", [])
@@ -886,7 +965,7 @@ class SSMBGui:
                     norm_values = list(values)
                 normalized_payload.append((series_label, norm_values, color))
             self._draw_multi_series(canvas, normalized_payload, 10, 10, width - 10, height - 10, max(10, len(normalized_payload[0][1])))
-            canvas.create_text(16, 14, anchor="nw", text=title, fill="#37474f", font=("Helvetica", 9, "bold"))
+            canvas.create_text(width / 2, 12, anchor="n", text=title, fill="#37474f", font=("Helvetica", 10, "bold"))
 
     def _update_monitor_dashboard(self, summary) -> None:
         if self.monitor_window is None or not self.monitor_window.winfo_exists():
@@ -894,6 +973,7 @@ class SSMBGui:
         if summary is None:
             summary = summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates())
         sections = build_monitor_sections(summary)
+        self._update_monitor_state_badges(summary)
         self._ensure_monitor_cards(sections)
         for section, widgets in self.monitor_section_widgets:
             card = widgets["card"]
@@ -917,6 +997,16 @@ class SSMBGui:
         colors = {"green": "#1b5e20", "yellow": "#8d6e00", "red": "#b71c1c"}
         widget.configure(fg=colors.get(color_name, "#263238"))
 
+    def _update_monitor_state_badges(self, summary) -> None:
+        rf_widget = getattr(self, "monitor_window_rf_state", None)
+        bump_widget = getattr(self, "monitor_window_bump_state", None)
+        if rf_widget is not None:
+            rf_active = bool((summary or {}).get("rf_sweep_detection", {}).get("active"))
+            rf_widget.configure(text="RF sweep ON" if rf_active else "RF sweep OFF", bg="#c62828" if rf_active else "#607d8b")
+        if bump_widget is not None:
+            bump_active = bool((summary or {}).get("bump_state", {}).get("active"))
+            bump_widget.configure(text="Bump ON" if bump_active else "Bump OFF", bg="#c62828" if bump_active else "#2e7d32")
+
     def _ensure_monitor_cards(self, sections) -> None:
         container = getattr(self, "monitor_cards_container", None)
         if container is None:
@@ -933,7 +1023,7 @@ class SSMBGui:
             top = ttk.Frame(card)
             top.grid(row=0, column=0, columnspan=2, sticky="nsew")
             top.columnconfigure(0, weight=1)
-            text = tk.Text(top, wrap="word", height=9, width=34)
+            text = tk.Text(top, wrap="word", height=7, width=40)
             text.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
             text.configure(state="disabled")
             selector_frame = ttk.Frame(top)
@@ -943,9 +1033,9 @@ class SSMBGui:
             ttk.Label(selector_header, text="Plot").pack(side="left")
             help_button = ttk.Button(selector_header, text="?", width=2)
             help_button.pack(side="right")
-            selector = tk.Listbox(selector_frame, selectmode="multiple", exportselection=False, height=5, width=18)
+            selector = tk.Listbox(selector_frame, selectmode="multiple", exportselection=False, height=6, width=28)
             selector.pack(fill="y", expand=False)
-            canvas = tk.Canvas(card, bg="white", width=280, height=120, highlightthickness=1, highlightbackground="#cfd8dc")
+            canvas = tk.Canvas(card, bg="white", width=360, height=170, highlightthickness=1, highlightbackground="#cfd8dc")
             canvas.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
             card.rowconfigure(1, weight=1)
             self.monitor_section_widgets.append(
@@ -1079,7 +1169,7 @@ class SSMBGui:
             interval_s = 0.5
         time_span_s = max(1.0, window_samples * interval_s)
         plot_x0 = x0 + 42
-        plot_y0 = y0 + 34
+        plot_y0 = y0 + 38
         plot_x1 = x1 - 8
         plot_y1 = y1 - 22
         axis_text = "log10 scale" if use_log else ("y / 1e%d" % exponent if scale != 1.0 else "linear scale")
@@ -1585,7 +1675,7 @@ class SSMBGui:
             return
         window = tk.Toplevel(self.root)
         window.title("Experimental Bump Lab")
-        window.geometry("1200x860")
+        window.geometry("1480x920")
         outer = ttk.Frame(window, padding=10)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=0)
@@ -1597,7 +1687,9 @@ class SSMBGui:
         right.grid(row=0, column=1, sticky="nsew")
         right.rowconfigure(1, weight=1)
         right.rowconfigure(3, weight=1)
+        right.rowconfigure(5, weight=1)
         right.columnconfigure(0, weight=1)
+        right.columnconfigure(1, weight=1)
 
         ttk.Label(left, text="Highly experimental bump investigation / controller lab.", foreground="#b71c1c", wraplength=320).grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(left, text="Poll interval [s]").grid(row=1, column=0, sticky="w", pady=(8, 0))
@@ -1625,13 +1717,24 @@ class SSMBGui:
         ttk.Button(button_row, text="Open Theory Window", command=self._open_theory_window).pack(side="left", padx=4)
         row += 1
 
-        ttk.Label(right, text="Experimental bump-lab live summary").grid(row=0, column=0, sticky="w")
+        ttk.Label(right, text="Experimental bump-lab live summary").grid(row=0, column=0, columnspan=2, sticky="w")
         self.bump_lab_summary_text = tk.Text(right, wrap="word", height=18)
-        self.bump_lab_summary_text.grid(row=1, column=0, sticky="nsew")
+        self.bump_lab_summary_text.grid(row=1, column=0, columnspan=2, sticky="nsew")
         self.bump_lab_summary_text.configure(state="disabled")
-        ttk.Label(right, text="Notebook-export source reference").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(right, text="Live bump and undulator-side trends").grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        plot_frame = ttk.Frame(right)
+        plot_frame.grid(row=3, column=0, columnspan=2, sticky="nsew")
+        plot_frame.columnconfigure(0, weight=1)
+        plot_frame.columnconfigure(1, weight=1)
+        plot_frame.rowconfigure(0, weight=1)
+        bump_canvas = tk.Canvas(plot_frame, bg="white", height=210, highlightthickness=1, highlightbackground="#cfd8dc")
+        bump_canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+        und_canvas = tk.Canvas(plot_frame, bg="white", height=210, highlightthickness=1, highlightbackground="#cfd8dc")
+        und_canvas.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
+        self.bump_lab_plot_canvases = {"bump": bump_canvas, "undulator": und_canvas}
+        ttk.Label(right, text="Notebook-export source reference").grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self.bump_lab_source_text = tk.Text(right, wrap="none", height=18)
-        self.bump_lab_source_text.grid(row=3, column=0, sticky="nsew")
+        self.bump_lab_source_text.grid(row=5, column=0, columnspan=2, sticky="nsew")
         self.bump_lab_source_text.configure(state="disabled")
         source_path = SSMB_ROOT / "references" / "OrbitControlL4Bump_test_20250307.py"
         try:
@@ -1649,6 +1752,7 @@ class SSMBGui:
         self.bump_lab_window = None
         self.bump_lab_summary_text = None
         self.bump_lab_source_text = None
+        self.bump_lab_plot_canvases = {}
 
     def _selected_bump_lab_bpms(self):
         return [pv for pv, var in self.bump_lab_bpm_vars.items() if var.get()]
@@ -1664,17 +1768,19 @@ class SSMBGui:
         return result
 
     def _refresh_bump_lab_snapshot(self) -> None:
-        summary = self.latest_monitor_summary or summarize_live_monitor([])
+        summary = self.latest_monitor_summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates())
         self._update_bump_lab({"summary": summary, "mode": "snapshot"})
 
     def _update_bump_lab(self, payload: dict) -> None:
         if self.bump_lab_window is None or not self.bump_lab_window.winfo_exists():
             return
-        summary = payload.get("summary") or self.latest_monitor_summary or summarize_live_monitor([])
+        summary = payload.get("summary") or self.latest_monitor_summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates())
         bump_state = summary.get("bump_state", {})
         current = summary.get("current", {})
         lines = [
             "Mode: %s" % payload.get("mode", "snapshot"),
+            "",
+            "Observe loop = passive polling only. Use it to watch the external bumper script without writing PVs.",
             "",
             "Feedback state: %s" % bump_state.get("state_label", "unknown"),
             "RF ctrl enable: %s" % bump_state.get("rf_frequency_control_enable"),
@@ -1692,12 +1798,43 @@ class SSMBGui:
             "P1 std: %s" % current.get("p1_h1_ampl_dev"),
             "P1avg vs bump |I| slope: %s" % ((summary.get("bump_monitor") or {}).get("p1_avg_vs_bump_strength") or {}).get("slope"),
             "P1avg vs bump error slope: %s" % ((summary.get("bump_monitor") or {}).get("p1_avg_vs_bump_error") or {}).get("slope"),
+            "δs: %s" % current.get("delta_l4_bpm_first_order"),
+            "σδ proxy: %s" % current.get("qpd_l4_sigma_delta_first_order"),
+            "BPMZ1L2RP (undulator-side anchor): %s mm" % current.get("bump_bpm_l2_mm"),
+            "QPD01 center X avg: %s um" % current.get("qpd_l2_center_x_avg_um"),
             "",
             "Interpretation:",
             "The recovered controller is a scalar orbit-lock loop: it drives the average of the 4 selected BPMs toward AKC12VP.",
             "Because BPMZ1L2RP is near the L2 / undulator side and the others are spread through K3 and L4, this is a global closed-orbit constraint, not a local undulator-only correction.",
         ]
         self._set_text_widget(self.bump_lab_summary_text, lines)
+        self._draw_bump_lab_plots(summary)
+
+    def _draw_bump_lab_plots(self, summary) -> None:
+        trend_data = (summary or {}).get("trend_data", {})
+        bump_canvas = (self.bump_lab_plot_canvases or {}).get("bump")
+        und_canvas = (self.bump_lab_plot_canvases or {}).get("undulator")
+        if bump_canvas is not None:
+            width = int(bump_canvas.winfo_width() or 420)
+            height = int(bump_canvas.winfo_height() or 210)
+            payload = [
+                ("Orbit error [mm]", list(trend_data.get("bump_orbit_error_mm", [])), "#c2185b"),
+                ("BPM avg [mm]", list(trend_data.get("bump_bpm_avg_mm", [])), "#00838f"),
+                ("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa"),
+            ]
+            self._draw_multi_series(bump_canvas, payload, 10, 10, width - 10, height - 10, max(20, len(payload[0][1]) if payload[0][1] else 20))
+            bump_canvas.create_text(width / 2, 12, anchor="n", text="Bump loop vs P1", fill="#37474f", font=("Helvetica", 10, "bold"))
+        if und_canvas is not None:
+            width = int(und_canvas.winfo_width() or 420)
+            height = int(und_canvas.winfo_height() or 210)
+            payload = [
+                ("BPMZ1L2 [mm]", list(trend_data.get("bump_bpm_l2_mm", [])), "#1565c0"),
+                ("δs", list(trend_data.get("delta_s", [])), "#43a047"),
+                ("σδ", list(trend_data.get("sigma_delta", [])), "#6d4c41"),
+                ("QPD01 center [um]", list(trend_data.get("qpd_l2_center_x_avg_um", [])), "#8e24aa"),
+            ]
+            self._draw_multi_series(und_canvas, payload, 10, 10, width - 10, height - 10, max(20, len(payload[0][1]) if payload[0][1] else 20))
+            und_canvas.create_text(width / 2, 12, anchor="n", text="Undulator-side anchor and spread proxies", fill="#37474f", font=("Helvetica", 10, "bold"))
 
     def _start_bump_lab_observer(self) -> None:
         if self.bump_lab_stop_event is not None:
@@ -1775,7 +1912,7 @@ class SSMBGui:
                         if old is None:
                             continue
                         adapter.put(pv, float(old) + step * factor)
-                summary = self.latest_monitor_summary or summarize_live_monitor([])
+                summary = self.latest_monitor_summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates())
                 self.queue.put({"kind": "bump_lab_update", "summary": summary, "mode": "controller" if write_enabled else "observe"})
                 if self.bump_lab_stop_event.wait(interval):
                     break

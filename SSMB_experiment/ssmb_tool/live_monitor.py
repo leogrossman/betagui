@@ -628,6 +628,30 @@ def extract_trend_data(samples: Sequence[Dict[str, object]]) -> Dict[str, List[O
             )
             for sample in history
         ],
+        "bump_bpm_k1_mm": [
+            _valid_float(
+                _summarize_bump_state(sample.get("channels", {})).get("bpm_values_mm", {}).get("l4_bump_orbit_bpm_k1")
+            )
+            for sample in history
+        ],
+        "bump_bpm_l2_mm": [
+            _valid_float(
+                _summarize_bump_state(sample.get("channels", {})).get("bpm_values_mm", {}).get("l4_bump_orbit_bpm_l2")
+            )
+            for sample in history
+        ],
+        "bump_bpm_k3_mm": [
+            _valid_float(
+                _summarize_bump_state(sample.get("channels", {})).get("bpm_values_mm", {}).get("l4_bump_orbit_bpm_k3")
+            )
+            for sample in history
+        ],
+        "bump_bpm_l4_mm": [
+            _valid_float(
+                _summarize_bump_state(sample.get("channels", {})).get("bpm_values_mm", {}).get("l4_bump_orbit_bpm_l4")
+            )
+            for sample in history
+        ],
         "p1_h1_ampl": [_valid_float(sample.get("channels", {}).get("p1_h1_ampl", {}).get("value")) for sample in history],
         "p1_h1_ampl_avg": [_valid_float(sample.get("channels", {}).get("p1_h1_ampl_avg", {}).get("value")) for sample in history],
         "p1_h1_ampl_dev": [_valid_float(sample.get("channels", {}).get("p1_h1_ampl_dev", {}).get("value")) for sample in history],
@@ -666,7 +690,7 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 ("Nonlinear BPMs", ", ".join(current.get("nonlinear_bpms") or []) or "none"),
             ],
             "equations": [],
-            "note": "This section is available even when no RF sweep is running.",
+            "note": "This section is available even when no RF sweep is running. RF sweep and bump state are the two top-level live condition flags for the experiment.",
             "default_trend": "beam_current",
             "trend_options": ["beam_current", "rf_offset_hz", "bump_strength_a"],
         },
@@ -695,7 +719,7 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
             ],
             "note": "This is a global orbit-lock loop. BPMZ1L2RP is near the L2/undulator side, while the other feedback BPMs are spread through K3 and L4, so the bump constrains a ring-wide closed-orbit family rather than only the undulator center.",
             "default_trend": "bump_orbit_error_mm",
-            "trend_options": ["bump_orbit_error_mm", "bump_bpm_avg_mm", "bump_strength_a", "p1_h1_ampl_avg", "p1_h1_ampl_dev"],
+            "trend_options": ["bump_orbit_error_mm", "bump_bpm_avg_mm", "bump_strength_a", "bump_bpm_l2_mm", "bump_bpm_k3_mm", "bump_bpm_l4_mm", "p1_h1_ampl_avg", "p1_h1_ampl_dev"],
         },
         {
             "key": "coherent_light",
@@ -763,7 +787,7 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
             ],
             "note": "Designed for quasi-periodic, non-sinusoidal P1 motion. Confidence rises once the monitor history spans at least ~2 cycles; before that, treat rankings as provisional.",
             "default_trend": "p1_h1_ampl_avg",
-            "trend_options": ["p1_h1_ampl_avg", "bump_orbit_error_mm", "bump_strength_a", "qpd_l4_center_x_avg_um", "climate_kw13_return_temp_c", "climate_sr_temp_c", "rf_offset_hz", "delta_s", "p3_h1_ampl_avg"],
+            "trend_options": ["p1_h1_ampl_avg", "bump_orbit_error_mm", "bump_strength_a", "bump_bpm_l2_mm", "qpd_l4_center_x_avg_um", "climate_kw13_return_temp_c", "climate_sr_temp_c", "rf_offset_hz", "delta_s", "p3_h1_ampl_avg"],
         },
         {
             "key": "energy_momentum",
@@ -782,9 +806,9 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 "E ≈ E₀ · (1 + δₛ)",
                 "σₓ² ≈ βₓεₓ + (ηₓσδ)²",
             ],
-            "note": "This is the practical energy/spread chain for L4: BPMs for centroid, QPD00 for spread proxy.",
+            "note": "This is the practical energy/spread chain for L4: BPMs for centroid, QPD00 for spread proxy. Compare with BPMZ1L2RP and QPD01 to see what the undulator-side region is doing.",
             "default_trend": "delta_s",
-            "trend_options": ["delta_s", "beam_energy_mev", "sigma_delta", "rf_offset_hz"],
+            "trend_options": ["delta_s", "beam_energy_mev", "sigma_delta", "rf_offset_hz", "bump_bpm_l2_mm", "qpd_l2_center_x_avg_um"],
         },
         {
             "key": "alpha_phase_slip",
