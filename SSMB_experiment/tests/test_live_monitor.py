@@ -1,9 +1,12 @@
+import math
 import unittest
 
 from SSMB_experiment.ssmb_tool.live_monitor import (
+    analyze_p1_oscillation,
     build_monitor_sections,
     build_theory_sections,
     detect_rf_sweep_active,
+    format_oscillation_study,
     summarize_live_monitor,
     trend_definitions,
 )
@@ -195,6 +198,34 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         self.assertIn("bump_orbit_error_mm", summary["trend_data"])
         self.assertIn("p1_h1_ampl_avg", trend_definitions())
         self.assertIn("climate_kw13_return_temp_c", trend_definitions())
+
+    def test_p1_oscillation_study_finds_period_and_candidate(self):
+        samples = []
+        dt_s = 1.0
+        period_s = 40.0
+        for index in range(160):
+            phase = 2.0 * math.pi * index * dt_s / period_s
+            p1 = 0.05 + 0.01 * math.sin(phase)
+            climate_temp = 29.5 - 0.4 * math.sin(phase + 0.1)
+            qpd_center = 450.0 + 20.0 * math.sin(phase * 2.0)
+            samples.append(
+                {
+                    "timestamp_epoch_s": 1_000_000.0 + index * dt_s,
+                    "sample_index": index,
+                    "channels": {
+                        "p1_h1_ampl_avg": {"value": p1},
+                        "climate_kw13_return_temp_c": {"value": climate_temp},
+                        "qpd_l4_center_x_avg_um": {"value": qpd_center},
+                    },
+                    "derived": {},
+                }
+            )
+        analysis = analyze_p1_oscillation(samples)
+        self.assertTrue(analysis["available"])
+        self.assertAlmostEqual(analysis["dominant_period_s"], period_s, delta=5.0)
+        self.assertEqual((analysis["top_candidate"] or {}).get("key"), "climate_kw13_return_temp_c")
+        lines = format_oscillation_study({"oscillation_study": analysis})
+        self.assertTrue(any("Dominant P1 period" in line for line in lines))
 
 
 if __name__ == "__main__":

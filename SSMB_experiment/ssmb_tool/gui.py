@@ -17,6 +17,7 @@ from .live_monitor import (
     build_theory_sections,
     format_channel_snapshot,
     format_monitor_summary,
+    format_oscillation_study,
     summarize_live_monitor,
     trend_definitions,
 )
@@ -52,9 +53,10 @@ class SSMBGui:
         self.worker: Optional[threading.Thread] = None
         self.monitor_thread: Optional[threading.Thread] = None
         self.monitor_stop_event: Optional[threading.Event] = None
-        self.monitor_history = collections.deque(maxlen=120)
+        self.monitor_history = collections.deque(maxlen=2400)
         self.monitor_window: Optional["tk.Toplevel"] = None
         self.theory_window: Optional["tk.Toplevel"] = None
+        self.oscillation_window: Optional["tk.Toplevel"] = None
         self.lattice_window: Optional["tk.Toplevel"] = None
         self.bump_lab_window: Optional["tk.Toplevel"] = None
         self.bump_lab_thread: Optional[threading.Thread] = None
@@ -98,7 +100,7 @@ class SSMBGui:
         self.samples_per_point_var = tk.StringVar(value="1")
         self.sample_spacing_var = tk.StringVar(value="0.0")
         self.monitor_interval_var = tk.StringVar(value="0.5")
-        self.rolling_window_var = tk.StringVar(value="120")
+        self.rolling_window_var = tk.StringVar(value="600")
         self.bump_lab_poll_var = tk.StringVar(value="0.5")
         self.bump_lab_bpm_vars = {
             "BPMZ1K1RP:rdX": tk.BooleanVar(value=True),
@@ -281,6 +283,7 @@ class SSMBGui:
         self.stop_monitor_button.state(["disabled"])
         ttk.Button(button_row, text="Reset Monitor Baseline", command=self._reset_monitor_baseline).pack(side="left")
         ttk.Button(button_row, text="Open Monitor Window", command=self._open_monitor_window).pack(side="left", padx=6)
+        ttk.Button(button_row, text="Open Oscillation Study", command=self._open_oscillation_window).pack(side="left", padx=6)
         ttk.Button(button_row, text="Open Theory Window", command=self._open_theory_window).pack(side="left", padx=6)
         ttk.Button(button_row, text="Open Lattice View", command=self._open_lattice_window).pack(side="left")
         ttk.Button(button_row, text="Open Experimental Bump Lab", command=self._open_bump_lab_window).pack(side="left", padx=6)
@@ -579,6 +582,8 @@ class SSMBGui:
                 if channel_widget is not None:
                     self._set_text_widget(channel_widget, channel_lines)
                 self._update_monitor_dashboard(payload.get("summary"))
+            if self.oscillation_window is not None and self.oscillation_window.winfo_exists():
+                self._update_oscillation_window(payload.get("summary"))
             self._refresh_lattice_view()
         except Exception as exc:
             self._append_log("Live monitor render failed: %s" % exc)
@@ -706,6 +711,7 @@ class SSMBGui:
         self.monitor_window_theory_text = tk.Text(summary_frame, wrap="word", height=18)
         self.monitor_window_theory_text.pack(fill="both", expand=True)
         self.monitor_window_theory_text.configure(state="disabled")
+        ttk.Button(right, text="Open Oscillation Study", command=self._open_oscillation_window).grid(row=1, column=0, sticky="e", pady=(8, 0))
         ttk.Button(right, text="Open Theory Window", command=self._open_theory_window).grid(row=1, column=0, sticky="w", pady=(8, 0))
         ttk.Label(right, text="Current channel snapshot").grid(row=2, column=0, sticky="w", pady=(8, 0))
         self.monitor_window_channels_text = tk.Text(right, wrap="none", height=18)
@@ -726,6 +732,34 @@ class SSMBGui:
         self.monitor_window_theory_text = None
         self.monitor_plot_controls = {}
         self.monitor_plot_canvases = {}
+
+    def _open_oscillation_window(self) -> None:
+        if self.oscillation_window is not None and self.oscillation_window.winfo_exists():
+            self.oscillation_window.lift()
+            return
+        window = tk.Toplevel(self.root)
+        window.title("SSMB P1 Oscillation Study")
+        window.geometry("820x760")
+        frame = ttk.Frame(window, padding=10)
+        frame.pack(fill="both", expand=True)
+        text = tk.Text(frame, wrap="word")
+        text.pack(fill="both", expand=True)
+        text.configure(state="disabled")
+        self.oscillation_window = window
+        self.oscillation_window_text = text
+        self._update_oscillation_window(self.latest_monitor_summary or summarize_live_monitor([]))
+        window.protocol("WM_DELETE_WINDOW", self._close_oscillation_window)
+
+    def _update_oscillation_window(self, summary) -> None:
+        if self.oscillation_window is None or not self.oscillation_window.winfo_exists():
+            return
+        self._set_text_widget(self.oscillation_window_text, format_oscillation_study(summary or summarize_live_monitor([])))
+
+    def _close_oscillation_window(self) -> None:
+        if self.oscillation_window is not None and self.oscillation_window.winfo_exists():
+            self.oscillation_window.destroy()
+        self.oscillation_window = None
+        self.oscillation_window_text = None
 
     def _update_monitor_dashboard(self, summary) -> None:
         if self.monitor_window is None or not self.monitor_window.winfo_exists():

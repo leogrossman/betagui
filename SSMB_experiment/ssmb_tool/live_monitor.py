@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import math
 from typing import Dict, List, Optional, Sequence
+
+import numpy as np
 
 from .analyze_session import _linear_fit, alpha0_from_eta, fit_slip_factor
 
@@ -10,6 +13,10 @@ RF_SWEEP_ACTIVE_THRESHOLD_KHZ = 0.002
 RF_SWEEP_ACTIVE_MIN_POINTS = 4
 BUMP_CORRECTOR_ACTIVE_THRESHOLD_A = 0.002
 ALPHA_CONTAMINATION_THRESHOLD = 5.0e-5
+OSCILLATION_MIN_POINTS = 32
+OSCILLATION_MIN_CYCLES_FOR_MEDIUM = 1.5
+OSCILLATION_MIN_CYCLES_FOR_HIGH = 2.5
+OSCILLATION_MAX_LAG_FRACTION = 0.25
 
 TREND_DEFINITIONS: Dict[str, Dict[str, object]] = {
     "rf_offset_hz": {"label": "Δf_RF [Hz]", "color": "#1e88e5"},
@@ -36,6 +43,22 @@ TREND_DEFINITIONS: Dict[str, Dict[str, object]] = {
     "bump_bpm_avg_mm": {"label": "⟨x_bump BPM⟩ [mm]", "color": "#00838f"},
     "bump_orbit_error_mm": {"label": "x_ref - ⟨x⟩ [mm]", "color": "#c2185b"},
 }
+
+OSCILLATION_CANDIDATE_KEYS = (
+    "bump_orbit_error_mm",
+    "bump_bpm_avg_mm",
+    "bump_strength_a",
+    "rf_offset_hz",
+    "delta_s",
+    "qpd_l4_center_x_avg_um",
+    "qpd_l2_center_x_avg_um",
+    "climate_kw13_return_temp_c",
+    "climate_sr_temp_c",
+    "climate_sr_temp1_c",
+    "tune_y",
+    "tune_s",
+    "p3_h1_ampl_avg",
+)
 
 
 def _valid_float(value) -> Optional[float]:
@@ -67,6 +90,196 @@ def _fmt_duration(value) -> str:
     if abs_s >= 1.0e-6:
         return "%.3f µs" % (seconds * 1.0e6)
     return "%.3f ns" % (seconds * 1.0e9)
+
+
+def _estimate_sample_dt_seconds(samples: Sequence[Dict[str, object]]) -> Optional[float]:
+    timestamps = []
+    for sample in samples:
+        ts = _valid_float(sample.get("timestamp_epoch_s"))
+        if ts is not None:
+            timestamps.append(ts)
+    if len(timestamps) >= 2:
+        diffs = [b - a for a, b in zip(timestamps[:-1], timestamps[1:]) if b > a]
+        if diffs:
+            return float(np.median(np.asarray(diffs, dtype=float)))
+    indices = []
+    for sample in samples:
+        idx = _valid_float(sample.get("sample_index"))
+        if idx is not None:
+            indices.append(idx)
+    if len(indices) >= 2:
+        return 1.0
+    return None
+
+
+def _extract_series(samples: Sequence[Dict[str, object]], key: str) -> List[Optional[float]]:
+    series: List[Optional[float]] = []
+    for sample in samples:
+        derived = sample.get("derived", {})
+        channels = sample.get("channels", {})
+        if key in ("bump_strength_a", "bump_bpm_avg_mm", "bump_orbit_error_mm"):
+            bump = _summarize_bump_state(channels)
+            if key == "bump_strength_a":
+                series.append(_valid_float(bump.get("max_abs_corrector_a")))
+            elif key == "bump_bpm_avg_mm":
+                series.append(_valid_float(bump.get("bpm_avg_mm")))
+            else:
+                series.append(_valid_float(bump.get("orbit_error_mm")))
+        elif key in derived:
+            series.append(_valid_float(derived.get(key)))
+        elif key in channels:
+            series.append(_valid_float(channels.get(key, {}).get("value")))
+        else:
+            series.append(None)
+    return series
+
+
+def _dominant_period(values: Sequence[Optional[float]], dt_s: Optional[float]) -> Dict[str, object]:
+    dt = _valid_float(dt_s)
+    if dt is None or dt <= 0.0:
+        return {"available": False, "reason": "missing_dt"}
+    valid = [(idx, float(value)) for idx, value in enumerate(values) if isinstance(value, (int, float))]
+    if len(valid) < OSCILLATION_MIN_POINTS:
+        return {"available": False, "reason": "not_enough_points", "sample_count": len(valid)}
+    indices = np.asarray([idx for idx, _ in valid], dtype=float)
+    y = np.asarray([value for _idx, value in valid], dtype=float)
+    if np.nanstd(y) <= 0.0:
+        return {"available": False, "reason": "flat_signal", "sample_count": len(valid)}
+    if len(y) >= 3:
+        coeffs = np.polyfit(indices, y, 1)
+        y = y - np.polyval(coeffs, indices)
+    else:
+        y = y - np.mean(y)
+    window = np.hanning(len(y)) if len(y) >= 8 else np.ones(len(y))
+    y_windowed = y * window
+    spectrum = np.abs(np.fft.rfft(y_windowed)) ** 2
+    freqs = np.fft.rfftfreq(len(y_windowed), d=dt)
+    total_span_s = len(y_windowed) * dt
+    valid_mask = freqs > 0.0
+    valid_mask &= freqs >= (1.0 / max(total_span_s * 0.9, dt))
+    valid_mask &= freqs <= (1.0 / max(4.0 * dt, dt))
+    if not np.any(valid_mask):
+        return {"available": False, "reason": "no_valid_band", "sample_count": len(valid)}
+    valid_indices = np.where(valid_mask)[0]
+    peak_idx = valid_indices[int(np.argmax(spectrum[valid_indices]))]
+    peak_power = float(spectrum[peak_idx])
+    band_power = float(np.sum(spectrum[valid_indices]))
+    frequency_hz = float(freqs[peak_idx])
+    if frequency_hz <= 0.0:
+        return {"available": False, "reason": "invalid_frequency", "sample_count": len(valid)}
+    period_s = 1.0 / frequency_hz
+    cycles_seen = total_span_s / period_s if period_s > 0.0 else 0.0
+    confidence = peak_power / band_power if band_power > 0.0 else 0.0
+    return {
+        "available": True,
+        "sample_count": len(valid),
+        "period_s": period_s,
+        "frequency_hz": frequency_hz,
+        "frequency_mhz": frequency_hz * 1.0e3,
+        "peak_power_fraction": confidence,
+        "cycles_seen": cycles_seen,
+        "span_s": total_span_s,
+    }
+
+
+def _align_valid_pairs(a_values: Sequence[Optional[float]], b_values: Sequence[Optional[float]]):
+    pairs = [(float(a), float(b)) for a, b in zip(a_values, b_values) if isinstance(a, (int, float)) and isinstance(b, (int, float))]
+    if len(pairs) < 4:
+        return None, None
+    a = np.asarray([item[0] for item in pairs], dtype=float)
+    b = np.asarray([item[1] for item in pairs], dtype=float)
+    return a, b
+
+
+def _harmonic_similarity(period_a_s: Optional[float], period_b_s: Optional[float]) -> float:
+    pa = _valid_float(period_a_s)
+    pb = _valid_float(period_b_s)
+    if pa is None or pb is None or pa <= 0.0 or pb <= 0.0:
+        return 0.0
+    ratio = pa / pb
+    harmonic_ratios = (1.0, 2.0, 0.5, 3.0, 1.0 / 3.0)
+    best = min(abs(math.log(ratio / target)) for target in harmonic_ratios)
+    return max(0.0, 1.0 - best / math.log(2.0))
+
+
+def analyze_p1_oscillation(samples: Sequence[Dict[str, object]]) -> Dict[str, object]:
+    dt_s = _estimate_sample_dt_seconds(samples)
+    p1_values = _extract_series(samples, "p1_h1_ampl_avg")
+    p1_period = _dominant_period(p1_values, dt_s)
+    if not p1_period.get("available"):
+        return {
+            "available": False,
+            "reason": p1_period.get("reason", "insufficient_data"),
+            "dt_s": dt_s,
+            "sample_count": p1_period.get("sample_count", 0),
+            "candidate_count": 0,
+            "candidates": [],
+        }
+    p1_array = np.asarray([value for value in p1_values if isinstance(value, (int, float))], dtype=float)
+    p1_drift_fit = None
+    if dt_s is not None and len(p1_array) >= 3:
+        x = np.arange(len(p1_array), dtype=float) * dt_s
+        p1_drift_fit = _linear_fit(x.tolist(), p1_array.tolist())
+    candidates = []
+    for key in OSCILLATION_CANDIDATE_KEYS:
+        values = _extract_series(samples, key)
+        a, b = _align_valid_pairs(p1_values, values)
+        if a is None or b is None:
+            continue
+        if np.std(a) <= 0.0 or np.std(b) <= 0.0:
+            continue
+        corr = float(np.corrcoef(a, b)[0, 1])
+        az = (a - np.mean(a)) / np.std(a)
+        bz = (b - np.mean(b)) / np.std(b)
+        max_lag = max(1, int(len(az) * OSCILLATION_MAX_LAG_FRACTION))
+        corr_seq = np.correlate(az, bz, mode="full") / len(az)
+        center = len(corr_seq) // 2
+        start = max(0, center - max_lag)
+        stop = min(len(corr_seq), center + max_lag + 1)
+        local = corr_seq[start:stop]
+        best_local_idx = int(np.argmax(np.abs(local)))
+        best_corr = float(local[best_local_idx])
+        best_lag_samples = (start + best_local_idx) - center
+        candidate_period = _dominant_period(values, dt_s)
+        period_similarity = _harmonic_similarity(candidate_period.get("period_s"), p1_period.get("period_s"))
+        score = 0.45 * abs(corr) + 0.35 * abs(best_corr) + 0.20 * period_similarity
+        candidates.append(
+            {
+                "key": key,
+                "label": trend_definitions().get(key, {}).get("label", key),
+                "pearson_r": corr,
+                "xcorr_peak": best_corr,
+                "lag_samples": best_lag_samples,
+                "lag_s": None if dt_s is None else best_lag_samples * dt_s,
+                "candidate_period_s": candidate_period.get("period_s") if candidate_period.get("available") else None,
+                "harmonic_similarity": period_similarity,
+                "score": score,
+            }
+        )
+    candidates.sort(key=lambda item: item["score"], reverse=True)
+    cycles_seen = _valid_float(p1_period.get("cycles_seen")) or 0.0
+    certainty = "low"
+    if cycles_seen >= OSCILLATION_MIN_CYCLES_FOR_HIGH and (p1_period.get("peak_power_fraction") or 0.0) >= 0.35:
+        certainty = "high"
+    elif cycles_seen >= OSCILLATION_MIN_CYCLES_FOR_MEDIUM and (p1_period.get("peak_power_fraction") or 0.0) >= 0.2:
+        certainty = "medium"
+    top = candidates[0] if candidates else None
+    return {
+        "available": True,
+        "dt_s": dt_s,
+        "sample_count": p1_period.get("sample_count"),
+        "dominant_period_s": p1_period.get("period_s"),
+        "dominant_frequency_hz": p1_period.get("frequency_hz"),
+        "dominant_frequency_mhz": p1_period.get("frequency_mhz"),
+        "peak_power_fraction": p1_period.get("peak_power_fraction"),
+        "cycles_seen": cycles_seen,
+        "span_s": p1_period.get("span_s"),
+        "certainty": certainty,
+        "top_candidate": top,
+        "candidate_count": len(candidates),
+        "candidates": candidates[:8],
+        "p1_drift_slope_per_s": None if p1_drift_fit is None else p1_drift_fit.get("slope"),
+    }
 
 
 def detect_rf_sweep_active(samples: Sequence[Dict[str, object]]) -> Dict[str, object]:
@@ -233,6 +446,7 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
     }
     summary["alpha_assessment"] = assess_alpha_monitor(summary)
     summary["trend_data"] = extract_trend_data(samples)
+    summary["oscillation_study"] = analyze_p1_oscillation(samples)
     return summary
 
 
@@ -331,6 +545,7 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
     bump_monitor = summary.get("bump_monitor", {})
     environment = summary.get("environment_monitor", {})
     alpha = summary.get("alpha_assessment", {})
+    oscillation = summary.get("oscillation_study", {})
     sections = [
         {
             "key": "machine_state",
@@ -422,6 +637,29 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
             "trend_options": ["climate_kw13_return_temp_c", "climate_sr_temp_c", "climate_sr_temp1_c", "qpd_l4_center_x_avg_um", "qpd_l2_center_x_avg_um", "p1_h1_ampl_avg"],
         },
         {
+            "key": "p1_oscillation",
+            "title": "P1 Oscillation Study",
+            "color": {"high": "green", "medium": "yellow"}.get(oscillation.get("certainty"), "red" if oscillation.get("available") else "yellow"),
+            "rows": [
+                ("Dominant period", _fmt_duration(oscillation.get("dominant_period_s"))),
+                ("Frequency", "%s Hz" % _fmt(oscillation.get("dominant_frequency_hz"))),
+                ("Samples / span", "%s / %s" % (_fmt(oscillation.get("sample_count")), _fmt_duration(oscillation.get("span_s")))),
+                ("Cycles seen", _fmt(oscillation.get("cycles_seen"))),
+                ("Spectral confidence", _fmt(oscillation.get("peak_power_fraction"))),
+                ("Certainty", oscillation.get("certainty", "waiting")),
+                ("Top candidate", ((oscillation.get("top_candidate") or {}).get("label")) or "n/a"),
+                ("Top candidate lag", _fmt_duration((oscillation.get("top_candidate") or {}).get("lag_s"))),
+                ("Top candidate r", _fmt((oscillation.get("top_candidate") or {}).get("pearson_r"))),
+            ],
+            "equations": [
+                "Use rolling FFT/autocorrelation on P1avg to estimate dominant period",
+                "Rank candidate channels by Pearson correlation, lagged cross-correlation, and harmonic-period match",
+            ],
+            "note": "Good for the slow ~5 minute effect. Confidence rises once the monitor history spans at least ~2 cycles; before that, treat candidate rankings as provisional.",
+            "default_trend": "p1_h1_ampl_avg",
+            "trend_options": ["p1_h1_ampl_avg", "bump_orbit_error_mm", "bump_strength_a", "qpd_l4_center_x_avg_um", "climate_kw13_return_temp_c", "climate_sr_temp_c", "rf_offset_hz", "delta_s", "p3_h1_ampl_avg"],
+        },
+        {
             "key": "energy_momentum",
             "title": "Energy And Momentum",
             "color": "green",
@@ -498,6 +736,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
     sweep = summary.get("rf_sweep_metrics", {})
     bump_monitor = summary.get("bump_monitor", {})
     environment = summary.get("environment_monitor", {})
+    oscillation = summary.get("oscillation_study", {})
     return [
         {
             "title": "1. Raw Instruments",
@@ -586,6 +825,22 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
                 ),
             ],
         },
+        {
+            "title": "7. P1 Oscillation Study",
+            "equations": [
+                "Estimate dominant P1avg period from rolling FFT/autocorrelation",
+                "Compare candidate channels using correlation, lag, and harmonic-period match",
+            ],
+            "lines": [
+                "This is designed for the slow ~5 minute problem without requiring a separate heavyweight offline run.",
+                "Current dominant P1 period: %s with certainty %s" % (_fmt_duration(oscillation.get("dominant_period_s")), oscillation.get("certainty", "waiting")),
+                "Current top candidate: %s, lag = %s, r = %s" % (
+                    ((oscillation.get("top_candidate") or {}).get("label")) or "n/a",
+                    _fmt_duration((oscillation.get("top_candidate") or {}).get("lag_s")),
+                    _fmt((oscillation.get("top_candidate") or {}).get("pearson_r")),
+                ),
+            ],
+        },
     ]
 
 
@@ -598,6 +853,7 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
     sweep_state = summary.get("rf_sweep_detection", {})
     sweep_metrics = summary.get("rf_sweep_metrics", {})
     bump_monitor = summary.get("bump_monitor", {})
+    oscillation = summary.get("oscillation_study", {})
     lines = [
         "SSMB Live Monitor",
         "",
@@ -633,6 +889,8 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
                 _fmt(current.get("climate_sr_temp_c")),
                 _fmt(current.get("climate_sr_temp1_c")),
             ),
+            "P1 oscillation period / certainty: %s / %s" % (_fmt_duration(oscillation.get("dominant_period_s")), oscillation.get("certainty", "waiting")),
+            "P1 top candidate: %s" % ((((oscillation.get("top_candidate") or {}).get("label")) or "n/a")),
             "Tunes (x, y, s): %s, %s, %s" % (
                 _fmt(current.get("tune_x_unitless")),
                 _fmt(current.get("tune_y_unitless")),
@@ -683,6 +941,8 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
                 "P1avg vs bump error slope: %s" % _fmt((bump_monitor.get("p1_avg_vs_bump_error") or {}).get("slope")),
                 "P1avg vs KW13 temp slope: %s" % _fmt((summary.get("environment_monitor", {}).get("p1_avg_vs_kw13_temp") or {}).get("slope")),
                 "P1avg vs QPD00 center slope: %s" % _fmt((summary.get("environment_monitor", {}).get("p1_avg_vs_qpd00_center") or {}).get("slope")),
+                "P1 dominant period: %s" % _fmt_duration(oscillation.get("dominant_period_s")),
+                "P1 top candidate lag: %s" % _fmt_duration((oscillation.get("top_candidate") or {}).get("lag_s")),
                 "Qx vs delta slope: %s" % _fmt((sweep_metrics.get("qx_vs_delta") or {}).get("slope")),
                 "Qy vs delta slope: %s" % _fmt((sweep_metrics.get("qy_vs_delta") or {}).get("slope")),
                 "Qs vs delta slope: %s" % _fmt((sweep_metrics.get("qs_vs_delta") or {}).get("slope")),
@@ -709,6 +969,59 @@ def format_channel_snapshot(sample: Dict[str, object]) -> List[str]:
             lines.append("%s = [waveform len=%d]" % (label, len(value)))
         else:
             lines.append("%s = %s    (%s)" % (label, value, payload.get("pv")))
+    return lines
+
+
+def format_oscillation_study(summary: Dict[str, object]) -> List[str]:
+    osc = summary.get("oscillation_study", {}) or {}
+    lines = ["P1 Oscillation Study", ""]
+    if not osc.get("available"):
+        lines.extend(
+            [
+                "Not enough stable history yet for a confident oscillation study.",
+                "Reason: %s" % osc.get("reason", "waiting"),
+                "",
+                "Guidance:",
+                "- For a ~5 minute effect, keep the live monitor running for at least 10 minutes for medium/high confidence.",
+                "- The ranking is computed from P1avg against bump, RF/delta, camera-center, temperature, tune, and P3 candidates.",
+            ]
+        )
+        return lines
+    lines.extend(
+        [
+            "Dominant P1 period: %s" % _fmt_duration(osc.get("dominant_period_s")),
+            "Dominant P1 frequency: %s Hz" % _fmt(osc.get("dominant_frequency_hz")),
+            "Samples / span: %s / %s" % (_fmt(osc.get("sample_count")), _fmt_duration(osc.get("span_s"))),
+            "Cycles seen: %s" % _fmt(osc.get("cycles_seen")),
+            "Spectral confidence: %s" % _fmt(osc.get("peak_power_fraction")),
+            "Overall certainty: %s" % osc.get("certainty", "n/a"),
+            "P1 drift slope: %s per s" % _fmt(osc.get("p1_drift_slope_per_s")),
+            "",
+            "Top candidates:",
+        ]
+    )
+    for idx, candidate in enumerate(osc.get("candidates", []), start=1):
+        lines.append(
+            "%d. %s | score=%s | r=%s | lag=%s | harmonic=%s | period=%s"
+            % (
+                idx,
+                candidate.get("label", candidate.get("key", "candidate")),
+                _fmt(candidate.get("score")),
+                _fmt(candidate.get("pearson_r")),
+                _fmt_duration(candidate.get("lag_s")),
+                _fmt(candidate.get("harmonic_similarity")),
+                _fmt_duration(candidate.get("candidate_period_s")),
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "Interpretation:",
+            "- High score with small lag and similar/harmonic period is the strongest live clue.",
+            "- A temperature or QPD-center candidate suggests diagnostics/environment drift.",
+            "- A bump-error or bump-current candidate suggests the orbit-lock loop may be driving the oscillation.",
+        ]
+    )
     return lines
 
 
