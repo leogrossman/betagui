@@ -1403,12 +1403,12 @@ class SSMBGui:
         side.grid(row=0, column=1, sticky="ns")
         selector_header = ttk.Frame(side)
         selector_header.grid(row=0, column=0, sticky="ew")
-        ttk.Label(selector_header, text="Plot").pack(side="left")
+        ttk.Label(selector_header, text="Plot (dbl-click toggles overlay)").pack(side="left")
         help_button = ttk.Button(selector_header, text="?", width=2)
         help_button.pack(side="right")
         settings_button = ttk.Button(selector_header, text="⚙", width=2)
         settings_button.pack(side="right", padx=(0, 4))
-        selector = ttk.Treeview(side, columns=("enabled", "metric", "value"), show="headings", height=8, selectmode="extended")
+        selector = ttk.Treeview(side, columns=("enabled", "metric", "value"), show="headings", height=8, selectmode="browse")
         selector.heading("enabled", text="Use")
         selector.heading("metric", text="Metric")
         selector.heading("value", text="Latest")
@@ -1891,6 +1891,7 @@ class SSMBGui:
                     values=("[x]" if key in current_keys else "[ ]", trend_definitions()[key]["label"], self._format_plot_value(latest)),
                 )
             selector.bind("<<TreeviewSelect>>", lambda _event, key=section["key"], opts=options, tree=selector: self._on_monitor_plot_selected(key, opts, tree))
+            selector.bind("<Double-1>", lambda event, key=section["key"], opts=options, tree=selector: self._on_monitor_plot_toggle(key, opts, tree, event))
             widgets["selector_options"] = list(options)
         else:
             for key in options:
@@ -1900,7 +1901,7 @@ class SSMBGui:
                 latest = values[-1] if values else None
                 selector.set(key, "enabled", "[x]" if key in current_keys else "[ ]")
                 selector.set(key, "value", self._format_plot_value(latest))
-        desired_plot_selection = tuple(current_keys)
+        desired_plot_selection = (current_keys[0],) if current_keys else ()
         if tuple(selector.selection()) != desired_plot_selection:
             self._updating_monitor_plot_selector = True
             try:
@@ -1949,11 +1950,46 @@ class SSMBGui:
         if not selected and options:
             selected = [options[0]]
             tree.selection_set(options[0])
-        self.monitor_plot_controls[section_key] = selected
+        current = list(self.monitor_plot_controls.get(section_key) or [])
+        focused = selected[0] if selected else None
+        if focused:
+            current = [key for key in current if key in options]
+            if focused in current:
+                current = [focused] + [key for key in current if key != focused]
+            else:
+                current = [focused]
+        if not current and options:
+            current = [options[0]]
+        self.monitor_plot_controls[section_key] = current
         for key in options:
             if tree.exists(key):
-                tree.set(key, "enabled", "[x]" if key in selected else "[ ]")
+                tree.set(key, "enabled", "[x]" if key in current else "[ ]")
         self._update_monitor_dashboard(self.latest_monitor_summary)
+
+    def _on_monitor_plot_toggle(self, section_key: str, options: Sequence[str], tree, event) -> str:
+        row_id = tree.identify_row(event.y)
+        if not row_id or row_id not in options:
+            return "break"
+        current = list(self.monitor_plot_controls.get(section_key) or [])
+        if row_id in current:
+            if len(current) > 1:
+                current = [key for key in current if key != row_id]
+        else:
+            current.append(row_id)
+        current = [key for key in current if key in options]
+        if not current and options:
+            current = [options[0]]
+        self.monitor_plot_controls[section_key] = current
+        self._updating_monitor_plot_selector = True
+        try:
+            tree.selection_set((row_id,))
+        finally:
+            self._updating_monitor_plot_selector = False
+        for key in options:
+            if tree.exists(key):
+                tree.set(key, "enabled", "[x]" if key in current else "[ ]")
+        self._update_monitor_dashboard(self.latest_monitor_summary)
+        return "break"
 
     def _show_monitor_section_help(self, section: dict) -> None:
         lines = [section.get("title", "Section"), ""]
