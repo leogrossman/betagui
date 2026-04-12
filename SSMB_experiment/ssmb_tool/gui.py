@@ -1100,6 +1100,14 @@ class SSMBGui:
         self._set_text_widget(self.monitor_channels_text, channel_lines)
         try:
             self._update_rf_sweep_jump_label(payload.get("summary"))
+            if self.monitor_window is not None and self.monitor_window.winfo_exists():
+                if self.monitor_window_summary_text is not None:
+                    self._set_text_widget(self.monitor_window_summary_text, summary_lines)
+                if self.monitor_window_channels_text is not None:
+                    self._set_text_widget(self.monitor_window_channels_text, channel_lines)
+                self._queue_monitor_dashboard_render(payload.get("summary"))
+            elif self.monitor_overview_window is not None and self.monitor_overview_window.winfo_exists():
+                self._queue_monitor_dashboard_render(payload.get("summary"))
             if self.oscillation_window is not None and self.oscillation_window.winfo_exists():
                 self._update_oscillation_window(self._ensure_extended_monitor_summary() or payload.get("summary"))
             self._refresh_lattice_view()
@@ -1119,10 +1127,15 @@ class SSMBGui:
         self._dashboard_render_scheduled = False
         summary = self._pending_dashboard_summary
         self._pending_dashboard_summary = None
-        if self.monitor_window is None or not self.monitor_window.winfo_exists():
+        has_monitor = self.monitor_window is not None and self.monitor_window.winfo_exists()
+        has_overview = self.monitor_overview_window is not None and self.monitor_overview_window.winfo_exists()
+        if not has_monitor and not has_overview:
             return
         started = time.monotonic()
-        self._update_monitor_dashboard(summary)
+        if has_monitor:
+            self._update_monitor_dashboard(summary)
+        if has_overview:
+            self._update_monitor_overview(summary)
         self._last_dashboard_render_monotonic = time.monotonic()
         elapsed = self._last_dashboard_render_monotonic - started
         if elapsed > 0.25:
