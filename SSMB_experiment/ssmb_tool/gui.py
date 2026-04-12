@@ -414,23 +414,26 @@ class SSMBGui:
                 message = self.queue.get_nowait()
             except queue.Empty:
                 break
-            if isinstance(message, dict):
-                if message.get("kind") == "bpm_status":
-                    self._update_bpm_status(message)
-                elif message.get("kind") == "manual_stage0_done":
-                    self.stage0_stop_event = None
-                    self.start_manual_button.state(["!disabled"])
-                    self.stop_manual_button.state(["disabled"])
-                    self._append_log("Manual logging task finalized.")
-                elif message.get("kind") == "monitor_update":
-                    self._update_live_monitor(message)
-                elif message.get("kind") == "monitor_done":
-                    self.monitor_stop_event = None
-                    self.start_monitor_button.state(["!disabled"])
-                    self.stop_monitor_button.state(["disabled"])
-                    self._append_log("Live monitor stopped.")
-            else:
-                self._append_log(str(message))
+            try:
+                if isinstance(message, dict):
+                    if message.get("kind") == "bpm_status":
+                        self._update_bpm_status(message)
+                    elif message.get("kind") == "manual_stage0_done":
+                        self.stage0_stop_event = None
+                        self.start_manual_button.state(["!disabled"])
+                        self.stop_manual_button.state(["disabled"])
+                        self._append_log("Manual logging task finalized.")
+                    elif message.get("kind") == "monitor_update":
+                        self._update_live_monitor(message)
+                    elif message.get("kind") == "monitor_done":
+                        self.monitor_stop_event = None
+                        self.start_monitor_button.state(["!disabled"])
+                        self.stop_monitor_button.state(["disabled"])
+                        self._append_log("Live monitor stopped.")
+                else:
+                    self._append_log(str(message))
+            except Exception as exc:
+                self._append_log("GUI update failed: %s" % exc)
         self.root.after(100, self._drain_queue)
 
     def _emit(self, message: str) -> None:
@@ -477,15 +480,18 @@ class SSMBGui:
         self.latest_monitor_summary = payload.get("summary")
         self._set_text_widget(self.monitor_summary_text, summary_lines)
         self._set_text_widget(self.monitor_channels_text, channel_lines)
-        if self.monitor_window is not None and self.monitor_window.winfo_exists():
-            summary_widget = getattr(self, "monitor_window_summary_text", None)
-            channel_widget = getattr(self, "monitor_window_channels_text", None)
-            if summary_widget is not None:
-                self._set_text_widget(summary_widget, summary_lines)
-            if channel_widget is not None:
-                self._set_text_widget(channel_widget, channel_lines)
-            self._update_monitor_dashboard(payload.get("summary"))
-        self._refresh_lattice_view()
+        try:
+            if self.monitor_window is not None and self.monitor_window.winfo_exists():
+                summary_widget = getattr(self, "monitor_window_summary_text", None)
+                channel_widget = getattr(self, "monitor_window_channels_text", None)
+                if summary_widget is not None:
+                    self._set_text_widget(summary_widget, summary_lines)
+                if channel_widget is not None:
+                    self._set_text_widget(channel_widget, channel_lines)
+                self._update_monitor_dashboard(payload.get("summary"))
+            self._refresh_lattice_view()
+        except Exception as exc:
+            self._append_log("Live monitor render failed: %s" % exc)
 
     def _run_in_worker(self, target, *args) -> None:
         if self.worker is not None and self.worker.is_alive():
@@ -604,6 +610,7 @@ class SSMBGui:
         left.columnconfigure(0, weight=1)
         left.columnconfigure(1, weight=1)
         right.rowconfigure(3, weight=1)
+        right.columnconfigure(0, weight=1)
         summary_frame = ttk.Labelframe(right, text="Theory And Value Pipeline", padding=8)
         summary_frame.grid(row=0, column=0, sticky="nsew")
         self.monitor_window_theory_text = tk.Text(summary_frame, wrap="word", height=18)
@@ -615,7 +622,7 @@ class SSMBGui:
         self.monitor_window_channels_text.grid(row=3, column=0, sticky="nsew")
         self.monitor_window_channels_text.configure(state="disabled")
         self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
-        self._update_monitor_dashboard(self.latest_monitor_summary)
+        self._update_monitor_dashboard(self.latest_monitor_summary or summarize_live_monitor([]))
         window.protocol("WM_DELETE_WINDOW", self._close_monitor_window)
 
     def _close_monitor_window(self) -> None:
@@ -631,8 +638,10 @@ class SSMBGui:
         self.monitor_plot_canvases = {}
 
     def _update_monitor_dashboard(self, summary) -> None:
-        if self.monitor_window is None or not self.monitor_window.winfo_exists() or summary is None:
+        if self.monitor_window is None or not self.monitor_window.winfo_exists():
             return
+        if summary is None:
+            summary = summarize_live_monitor([])
         sections = build_monitor_sections(summary)
         self._ensure_monitor_cards(sections)
         for section, widgets in self.monitor_section_widgets:
@@ -658,7 +667,8 @@ class SSMBGui:
             for line in theory_section.get("lines", []):
                 theory_lines.append("  " + line)
             theory_lines.append("")
-        self._set_text_widget(self.monitor_window_theory_text, theory_lines)
+        if self.monitor_window_theory_text is not None:
+            self._set_text_widget(self.monitor_window_theory_text, theory_lines)
         if self.theory_window is not None and self.theory_window.winfo_exists():
             self._update_theory_window(summary)
 
