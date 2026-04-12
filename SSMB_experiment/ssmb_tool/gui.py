@@ -1158,10 +1158,10 @@ class SSMBGui:
             "Quick SSMB phase scan with laser ON and external bump %s. Compare RF -> delta_s/eta/alpha0/P1/P3 while checking source-region BPM x/y stability and QPD center drift."
             % bump_note
         )
-        self.delta_min_hz_var.set("-20")
-        self.delta_max_hz_var.set("20")
-        self.points_var.set("21")
-        self.settle_var.set("1.0")
+        self.delta_min_hz_var.set("-10")
+        self.delta_max_hz_var.set("10")
+        self.points_var.set("9")
+        self.settle_var.set("0.5")
         self.samples_per_point_var.set("10")
         self.sample_spacing_var.set("1.0")
         self._toggle_heavy_mode()
