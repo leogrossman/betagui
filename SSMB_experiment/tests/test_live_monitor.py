@@ -254,6 +254,27 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         self.assertIn("bump_orbit_error_mm", analysis["checked_candidate_keys"])
         self.assertIn("p1_h1_ampl_avg", analysis["checked_candidate_keys"])
 
+    def test_summarize_live_monitor_can_skip_oscillation_for_fast_path(self):
+        samples = [
+            {
+                "timestamp_epoch_s": 3_000_000.0 + index,
+                "sample_index": index,
+                "channels": {
+                    "p1_h1_ampl_avg": {"value": 0.05 + 0.001 * index},
+                    "beam_energy_mev": {"value": 250.0},
+                },
+                "derived": {
+                    "rf_readback": 499688.387 + 1.0e-4 * index,
+                    "tune_s_unitless": 0.013,
+                },
+            }
+            for index in range(12)
+        ]
+        summary = summarize_live_monitor(samples, include_oscillation=False)
+        self.assertEqual(summary["oscillation_study"]["reason"], "disabled_for_fast_monitor_path")
+        self.assertFalse(summary["oscillation_study"]["available"])
+        self.assertIn("trend_data", summary)
+
 
 if __name__ == "__main__":
     unittest.main()

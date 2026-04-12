@@ -42,6 +42,11 @@ except ImportError:  # pragma: no cover - depends on host GUI packages
 HISTORY_TAIL_READ_BYTES = 2 * 1024 * 1024
 HISTORY_COMPACT_BYTES = 8 * 1024 * 1024
 LIVE_MONITOR_EXCLUDED_TAGS = {"ring", "quadrupole", "sextupole", "octupole"}
+LIVE_MONITOR_PLOT_WINDOW_S = 60.0
+DETAIL_PLOT_WINDOW_S = 60.0
+LONG_STUDY_PLOT_WINDOW_S = 600.0
+DEFAULT_PLOT_MAX_POINTS = 320
+LONG_STUDY_PLOT_MAX_POINTS = 480
 
 
 def _parse_text_mapping(text: str) -> dict[str, str]:
@@ -67,6 +72,16 @@ def _filter_live_monitor_specs(specs, extra_labels: Sequence[str]):
             continue
         filtered.append(spec)
     return filtered
+
+
+def _downsample_tail(values, max_points: int):
+    if max_points <= 0 or len(values) <= max_points:
+        return list(values)
+    step = max(1, int(math.ceil(len(values) / float(max_points))))
+    sampled = list(values[::step])
+    if sampled[-1] != values[-1]:
+        sampled.append(values[-1])
+    return sampled
 
 
 class SSMBGui:
@@ -198,7 +213,7 @@ class SSMBGui:
         self.sample_spacing_var = tk.StringVar(value="0.0")
         self.monitor_interval_var = tk.StringVar(value="0.5")
         self.monitor_history_span_var = tk.StringVar(value="600")
-        self.rolling_window_var = tk.StringVar(value="600")
+        self.rolling_window_var = tk.StringVar(value="120")
         self.monitor_log_scale_var = tk.BooleanVar(value=False)
         self.monitor_candidate_keys_var = tk.StringVar(value="")
         self.oscillation_ignore_rf_var = tk.BooleanVar(value=False)
@@ -457,6 +472,33 @@ class SSMBGui:
         except Exception:
             return 600.0
 
+    def _monitor_interval_seconds(self) -> float:
+        try:
+            return max(0.01, float(self.monitor_interval_var.get()))
+        except Exception:
+            return 0.5
+
+    def _window_samples_for_seconds(self, seconds: float) -> int:
+        interval = self._monitor_interval_seconds()
+        return max(10, int(math.ceil(max(interval, seconds) / interval)))
+
+    def _prepare_plot_series(self, values, *, window_seconds: float, max_points: int):
+        if not values:
+            return []
+        window_samples = self._window_samples_for_seconds(window_seconds)
+        clipped = list(values[-window_samples:])
+        return _downsample_tail(clipped, max_points)
+
+    def _should_compute_extended_analysis(self) -> bool:
+        for name in ("oscillation_window", "ssmb_study_window"):
+            window = getattr(self, name, None)
+            try:
+                if window is not None and window.winfo_exists():
+                    return True
+            except Exception:
+                continue
+        return False
+
     def _trim_monitor_history(self) -> None:
         if not self.monitor_history:
             return
@@ -698,8 +740,7 @@ class SSMBGui:
             self.monitor_history_span_var.set(monitor_history_span_var.get().strip() or self.monitor_history_span_var.get())
             try:
                 interval = max(0.01, float(self.monitor_interval_var.get()))
-                span = max(30.0, float(self.monitor_history_span_var.get()))
-                self.rolling_window_var.set(str(max(10, int(span / interval))))
+                self.rolling_window_var.set(str(max(10, int(math.ceil(LIVE_MONITOR_PLOT_WINDOW_S / interval)))))
             except Exception:
                 pass
             selected = list(table.selection())
@@ -1002,7 +1043,7 @@ class SSMBGui:
                     self._set_text_widget(channel_widget, channel_lines)
                 self._update_monitor_dashboard(payload.get("summary"))
             if self.oscillation_window is not None and self.oscillation_window.winfo_exists():
-                self._update_oscillation_window(payload.get("summary"))
+                self._update_oscillation_window(self._ensure_extended_monitor_summary() or payload.get("summary"))
             self._refresh_lattice_view()
         except Exception as exc:
             self._append_log("Live monitor render failed: %s" % exc)
@@ -1082,7 +1123,11 @@ class SSMBGui:
                 self.monitor_history.append(sample)
                 self._trim_monitor_history()
                 self._append_monitor_history_cache(sample)
-                summary = summarize_live_monitor(list(self.monitor_history), extra_candidate_keys=self._extra_oscillation_candidates())
+                summary = summarize_live_monitor(
+                    list(self.monitor_history),
+                    extra_candidate_keys=self._extra_oscillation_candidates(),
+                    include_oscillation=self._should_compute_extended_analysis(),
+                )
                 self.queue.put(
                     {
                         "kind": "monitor_update",
@@ -1114,6 +1159,19 @@ class SSMBGui:
             extra_fields={"phase": "live_monitor"},
             derived_context=derived_context,
         )
+
+    def _ensure_extended_monitor_summary(self):
+        summary = self.latest_monitor_summary
+        osc = (summary or {}).get("oscillation_study", {}) or {}
+        if osc.get("reason") != "disabled_for_fast_monitor_path":
+            return summary
+        summary = summarize_live_monitor(
+            list(self.monitor_history),
+            extra_candidate_keys=self._extra_oscillation_candidates(),
+            include_oscillation=True,
+        )
+        self.latest_monitor_summary = summary
+        return summary
 
     def _open_monitor_window(self) -> None:
         if self.monitor_window is not None and self.monitor_window.winfo_exists():
@@ -1294,7 +1352,10 @@ class SSMBGui:
         button_row.grid(row=0, column=1, sticky="e")
         ttk.Button(button_row, text="Open Selected In Lattice", command=self._open_selected_oscillation_candidate_in_lattice).pack(side="right")
         self.oscillation_plot_canvases = canvases
-        self._update_oscillation_window(self.latest_monitor_summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates()))
+        self._update_oscillation_window(
+            self._ensure_extended_monitor_summary()
+            or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates())
+        )
         window.protocol("WM_DELETE_WINDOW", self._close_oscillation_window)
 
     def _update_oscillation_window(self, summary) -> None:
@@ -1409,7 +1470,10 @@ class SSMBGui:
         if selected_candidate is None and osc.get("candidates"):
             selected_candidate = osc.get("candidates", [None])[2] if len(osc.get("candidates", [])) >= 3 else osc.get("candidates", [None])[-1]
         plot_defs = [
-            ("P1 avg only", [("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa")]),
+            (
+                "P1 avg only",
+                [("P1 avg", self._prepare_plot_series(list(trend_data.get("p1_h1_ampl_avg", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa")],
+            ),
         ]
         top_candidates = list(osc.get("candidates", []))[:2]
         comparison_candidates = top_candidates + [selected_candidate]
@@ -1435,12 +1499,12 @@ class SSMBGui:
             meta = trend_definitions().get(key, {"color": "#455a64"})
             plot_defs.append(
                 (
-                    "P1 vs %s" % label,
-                    [
-                        ("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa"),
-                        (label, list(trend_data.get(key, [])), meta["color"]),
-                    ],
-                )
+                        "P1 vs %s" % label,
+                        [
+                        ("P1 avg", self._prepare_plot_series(list(trend_data.get("p1_h1_ampl_avg", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa"),
+                        (label, self._prepare_plot_series(list(trend_data.get(key, [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), meta["color"]),
+                        ],
+                    )
             )
         for canvas, (title, payload) in zip(canvases, plot_defs):
             canvas.delete("all")
@@ -1461,7 +1525,15 @@ class SSMBGui:
                 else:
                     norm_values = list(values)
                 normalized_payload.append((series_label, norm_values, color))
-            self._draw_multi_series(canvas, normalized_payload, 10, 10, width - 10, height - 10, max(10, len(normalized_payload[0][1])))
+            self._draw_multi_series(
+                canvas,
+                normalized_payload,
+                10,
+                10,
+                width - 10,
+                height - 10,
+                max(10, self._window_samples_for_seconds(LONG_STUDY_PLOT_WINDOW_S)),
+            )
             canvas.create_text(width / 2, 12, anchor="n", text=title, fill="#37474f", font=("Helvetica", 10, "bold"))
 
     def _update_monitor_dashboard(self, summary) -> None:
@@ -1490,7 +1562,7 @@ class SSMBGui:
         if self.theory_window is not None and self.theory_window.winfo_exists():
             self._update_theory_window(summary)
         if self.ssmb_study_window is not None and self.ssmb_study_window.winfo_exists():
-            self._update_ssmb_study_window(summary)
+            self._update_ssmb_study_window(self._ensure_extended_monitor_summary() or summary)
 
     def _color_text_widget(self, widget: "tk.Text", color_name: str) -> None:
         colors = {"green": "#1b5e20", "yellow": "#8d6e00", "red": "#b71c1c"}
@@ -1701,10 +1773,7 @@ class SSMBGui:
         width = int(canvas.winfo_width() or 280)
         height = int(canvas.winfo_height() or 120)
         settings = self.monitor_plot_settings.get(section["key"], {})
-        try:
-            default_samples = max(10, int(float(self.rolling_window_var.get())))
-        except Exception:
-            default_samples = 120
+        default_samples = self._window_samples_for_seconds(LIVE_MONITOR_PLOT_WINDOW_S)
         window_samples = max(10, int(settings.get("window_samples", default_samples)))
         fixed_window = bool(settings.get("fixed_window", True))
         series_payload = []
@@ -1712,6 +1781,7 @@ class SSMBGui:
             values = list(trend_data.get(metric, []))
             if fixed_window:
                 values = values[-window_samples:]
+            values = _downsample_tail(values, DEFAULT_PLOT_MAX_POINTS)
             meta = trend_definitions().get(metric, {"label": metric, "color": "#455a64"})
             series_payload.append((meta["label"], values, meta["color"]))
         self._draw_multi_series(canvas, series_payload, 10, 10, width - 10, height - 10, window_samples, use_log_override=settings.get("log_y"))

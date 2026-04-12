@@ -404,7 +404,11 @@ def detect_rf_sweep_active(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
     }
 
 
-def summarize_live_monitor(samples: Sequence[Dict[str, object]], extra_candidate_keys: Optional[Sequence[str]] = None) -> Dict[str, object]:
+def summarize_live_monitor(
+    samples: Sequence[Dict[str, object]],
+    extra_candidate_keys: Optional[Sequence[str]] = None,
+    include_oscillation: bool = True,
+) -> Dict[str, object]:
     latest = samples[-1] if samples else {}
     derived = latest.get("derived", {})
     channels = latest.get("channels", {})
@@ -585,7 +589,24 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]], extra_candidate
     summary["temperature_state"] = _summarize_temperature_state(summary)
     summary["alpha_assessment"] = assess_alpha_monitor(summary)
     summary["trend_data"] = extract_trend_data(samples)
-    summary["oscillation_study"] = analyze_p1_oscillation(samples, extra_candidate_keys=extra_candidate_keys)
+    if include_oscillation:
+        summary["oscillation_study"] = analyze_p1_oscillation(samples, extra_candidate_keys=extra_candidate_keys)
+    else:
+        checked_keys = list(OSCILLATION_CANDIDATE_KEYS)
+        for key in extra_candidate_keys or ():
+            if key and key not in checked_keys:
+                checked_keys.append(key)
+        summary["oscillation_study"] = {
+            "available": False,
+            "provisional": True,
+            "reason": "disabled_for_fast_monitor_path",
+            "checked_candidate_keys": checked_keys,
+            "candidates": [],
+            "candidate_count": 0,
+            "sample_count": len(samples),
+            "dt_s": dt_estimate,
+            "certainty": "n/a",
+        }
     tune_s_period = summary["current"].get("tune_s_period_s")
     p1_period = (summary.get("oscillation_study") or {}).get("dominant_period_s")
     summary["ssmb_resonance"] = {
@@ -688,7 +709,7 @@ def assess_alpha_monitor(summary: Dict[str, object]) -> Dict[str, object]:
 
 
 def extract_trend_data(samples: Sequence[Dict[str, object]]) -> Dict[str, List[Optional[float]]]:
-    history = list(samples)[-120:]
+    history = list(samples)
     bpm_alpha_series = []
     alpha_difference_series = []
     for sample in history:

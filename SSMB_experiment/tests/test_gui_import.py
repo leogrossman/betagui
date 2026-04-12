@@ -52,6 +52,15 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         self.assertIn("climate_kw13_return_temp_c", labels)
         self.assertIn("qpd_l4_sigma_x", labels)
 
+    def test_downsample_tail_keeps_last_point(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        values = list(range(1000))
+        sampled = gui._downsample_tail(values, 100)
+        self.assertLessEqual(len(sampled), 101)
+        self.assertEqual(sampled[-1], values[-1])
+        self.assertEqual(sampled[0], values[0])
+
 
 if __name__ == "__main__":
     unittest.main()
