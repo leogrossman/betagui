@@ -11,6 +11,12 @@ This page is for a fresh checkout on a development machine.
 - EPICS CLI tools for live or twin work:
   `cainfo`, `caget`, `camonitor`, `caput`
 
+For the current development environment in this repo:
+
+- pyenv env name: `betagui`
+- Python version: `3.9.0`
+- package pins are in [requirements-dev.txt](../requirements-dev.txt)
+
 ## pyenv
 
 Install Python 3.9 if needed:
@@ -33,11 +39,24 @@ pyenv local betagui
 
 This repo already includes [.python-version](../.python-version).
 
+## macOS Notes
+
+If you want the GUI on macOS, make sure the pyenv build has Tk support.
+
+Typical Homebrew prerequisites:
+
+```bash
+brew install pyenv pyenv-virtualenv tcl-tk
+```
+
+Then build Python 3.9.0 with the Homebrew Tcl/Tk available in your shell
+environment before creating the `betagui` virtualenv.
+
 ## Python Packages
 
 ```bash
 python3 -m pip install --upgrade pip
-python3 -m pip install numpy matplotlib pyepics
+python3 -m pip install -r requirements-dev.txt
 ```
 
 `tkinter` must also be available for the GUI launchers.
@@ -49,6 +68,7 @@ runtime, but they still require this Python environment.
 
 ```bash
 python3 --version
+pyenv version-name
 python3 -m py_compile control_room/betagui.py control_room/betagui_cli.py development/betagui.py
 python3 -m unittest tests.smoke_test_import tests.test_control_room_entrypoints tests.test_measure_cli tests.test_output_regression tests.test_mock_measurement tests.test_matrix_io
 ```
