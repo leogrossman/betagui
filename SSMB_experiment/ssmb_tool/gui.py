@@ -104,6 +104,8 @@ class SSMBGui:
         self._dashboard_render_scheduled = False
         self._last_dashboard_render_monotonic = 0.0
         self.monitor_window: Optional["tk.Toplevel"] = None
+        self.monitor_dashboard_sections = []
+        self.monitor_active_section_key = None
         self.theory_window: Optional["tk.Toplevel"] = None
         self.oscillation_window: Optional["tk.Toplevel"] = None
         self.lattice_window: Optional["tk.Toplevel"] = None
@@ -1284,8 +1286,9 @@ class SSMBGui:
         top.columnconfigure(1, weight=1)
         left = ttk.Frame(outer)
         left.grid(row=1, column=0, sticky="nsew")
-        left.columnconfigure(0, weight=1)
+        left.columnconfigure(0, weight=0)
         left.columnconfigure(1, weight=1)
+        left.rowconfigure(0, weight=1)
         self.monitor_window = window
         self.monitor_window_summary_text = None
         self.monitor_section_widgets = []
@@ -1296,10 +1299,6 @@ class SSMBGui:
         self.monitor_window_theory_text = None
         self.monitor_window_rf_state = None
         self.monitor_window_bump_state = None
-        left.columnconfigure(0, weight=1)
-        left.columnconfigure(1, weight=1)
-        for row in range(4):
-            left.rowconfigure(row, weight=1)
         top_left = ttk.Frame(top)
         top_left.grid(row=0, column=0, sticky="nsew")
         top_left.columnconfigure(0, weight=1)
@@ -1370,6 +1369,48 @@ class SSMBGui:
         else:
             self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
             self._set_text_widget(self.monitor_window_summary_text, self.monitor_summary_text.get("1.0", "end").splitlines())
+        section_list_frame = ttk.Frame(left)
+        section_list_frame.grid(row=0, column=0, sticky="nsw", padx=(0, 8))
+        section_list_frame.rowconfigure(1, weight=1)
+        ttk.Label(section_list_frame, text="Sections").grid(row=0, column=0, sticky="w")
+        section_tree = ttk.Treeview(section_list_frame, columns=("title",), show="headings", height=10, selectmode="browse")
+        section_tree.heading("title", text="Section")
+        section_tree.column("title", width=210, anchor="w")
+        section_tree.grid(row=1, column=0, sticky="nsw")
+        section_tree.bind("<<TreeviewSelect>>", self._on_monitor_section_selected)
+        detail = ttk.Labelframe(left, text="Monitor Section", padding=8)
+        detail.grid(row=0, column=1, sticky="nsew")
+        detail.columnconfigure(0, weight=1)
+        detail.rowconfigure(0, weight=1)
+        body = ttk.Frame(detail)
+        body.grid(row=0, column=0, sticky="nsew")
+        body.columnconfigure(0, weight=1)
+        body.columnconfigure(1, weight=0)
+        body.rowconfigure(0, weight=1)
+        canvas = tk.Canvas(body, bg="white", width=960, height=420, highlightthickness=1, highlightbackground="#cfd8dc")
+        canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        side = ttk.Frame(body)
+        side.grid(row=0, column=1, sticky="ns")
+        selector_header = ttk.Frame(side)
+        selector_header.grid(row=0, column=0, sticky="ew")
+        ttk.Label(selector_header, text="Plot").pack(side="left")
+        help_button = ttk.Button(selector_header, text="?", width=2)
+        help_button.pack(side="right")
+        settings_button = ttk.Button(selector_header, text="⚙", width=2)
+        settings_button.pack(side="right", padx=(0, 4))
+        selector = ttk.Treeview(side, columns=("enabled", "metric", "value"), show="headings", height=8, selectmode="extended")
+        selector.heading("enabled", text="Use")
+        selector.heading("metric", text="Metric")
+        selector.heading("value", text="Latest")
+        selector.column("enabled", width=44, anchor="center")
+        selector.column("metric", width=180, anchor="w")
+        selector.column("value", width=96, anchor="e")
+        selector.grid(row=1, column=0, sticky="ns")
+        text = tk.Text(detail, wrap="word", height=4, width=100)
+        text.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        text.configure(state="disabled")
+        self.monitor_section_tree = section_tree
+        self.monitor_section_widgets = [({"key": ""}, {"card": detail, "text": text, "help_button": help_button, "settings_button": settings_button, "selector": selector, "canvas": canvas})]
         if self.latest_monitor_summary is not None:
             self._refresh_monitor_window_snapshot()
         try:
@@ -1391,6 +1432,9 @@ class SSMBGui:
         self.monitor_window_channels_text = None
         self.monitor_cards_container = None
         self.monitor_section_widgets = []
+        self.monitor_dashboard_sections = []
+        self.monitor_active_section_key = None
+        self.monitor_section_tree = None
         self.monitor_window_theory_text = None
         self.monitor_plot_controls = {}
         self.monitor_plot_canvases = {}
@@ -1709,21 +1753,7 @@ class SSMBGui:
         sections = build_monitor_sections(summary)
         self._update_monitor_state_badges(summary)
         self._ensure_monitor_cards(sections)
-        for section, widgets in self.monitor_section_widgets:
-            card = widgets["card"]
-            text_widget = widgets["text"]
-            card.configure(text=section["title"])
-            lines = []
-            for label, value in section.get("rows", []):
-                lines.append("%s: %s" % (label, value))
-            if section.get("equations"):
-                lines.extend(["", "Equations:"])
-                lines.extend(section["equations"])
-            if section.get("note"):
-                lines.extend(["", section["note"]])
-            self._set_text_widget(text_widget, lines)
-            self._color_text_widget(text_widget, section.get("color", "green"))
-            self._draw_section_plot(section)
+        self._render_active_monitor_section()
         if self.theory_window is not None and self.theory_window.winfo_exists():
             self._update_theory_window(summary)
         if self.ssmb_study_window is not None and self.ssmb_study_window.winfo_exists():
@@ -1769,99 +1799,98 @@ class SSMBGui:
         return "%.4g" % numeric
 
     def _ensure_monitor_cards(self, sections) -> None:
-        container = getattr(self, "monitor_cards_container", None)
-        if container is None:
+        selector_tree = getattr(self, "monitor_section_tree", None)
+        if selector_tree is None:
             return
-        existing = len(self.monitor_section_widgets)
-        for idx in range(existing, len(sections)):
-            row = idx // 2
-            col = idx % 2
-            container.rowconfigure(row, weight=1)
-            card = ttk.Labelframe(container, text="Section", padding=8)
-            card.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
-            card.columnconfigure(0, weight=1)
-            card.rowconfigure(0, weight=1)
-            body = ttk.Frame(card)
-            body.grid(row=0, column=0, sticky="nsew")
-            body.columnconfigure(0, weight=1)
-            body.columnconfigure(1, weight=0)
-            body.rowconfigure(0, weight=1)
-            canvas = tk.Canvas(body, bg="white", width=860, height=320, highlightthickness=1, highlightbackground="#cfd8dc")
-            canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-            side = ttk.Frame(body)
-            side.grid(row=0, column=1, sticky="ns")
-            selector_header = ttk.Frame(side)
-            selector_header.grid(row=0, column=0, sticky="ew")
-            ttk.Label(selector_header, text="Plot").pack(side="left")
-            help_button = ttk.Button(selector_header, text="?", width=2)
-            help_button.pack(side="right")
-            settings_button = ttk.Button(selector_header, text="⚙", width=2)
-            settings_button.pack(side="right", padx=(0, 4))
-            selector = ttk.Treeview(side, columns=("enabled", "metric", "value"), show="headings", height=5, selectmode="extended")
-            selector.heading("enabled", text="Use")
-            selector.heading("metric", text="Metric")
-            selector.heading("value", text="Latest")
-            selector.column("enabled", width=44, anchor="center")
-            selector.column("metric", width=160, anchor="w")
-            selector.column("value", width=88, anchor="e")
-            selector.grid(row=1, column=0, sticky="ns")
-            text = tk.Text(card, wrap="word", height=2, width=80)
-            text.grid(row=1, column=0, sticky="ew", pady=(6, 0))
-            text.configure(state="disabled")
-            self.monitor_section_widgets.append(
-                (
-                    sections[idx],
-                    {
-                        "card": card,
-                        "text": text,
-                        "help_button": help_button,
-                        "settings_button": settings_button,
-                        "selector": selector,
-                        "canvas": canvas,
-                    },
-                )
-            )
-        updated = []
-        for idx, section in enumerate(sections):
-            widgets = self.monitor_section_widgets[idx][1]
-            selector = widgets["selector"]
-            options = section.get("trend_options", [])
-            current_keys = self.monitor_plot_controls.get(section["key"])
-            if not current_keys:
-                current_keys = [section.get("default_trend")] if section.get("default_trend") else []
-            current_keys = [key for key in current_keys if key in options]
-            if not current_keys and options:
-                current_keys = [options[0]]
-            self.monitor_plot_controls[section["key"]] = current_keys
-            trend_data = (self.latest_monitor_summary or {}).get("trend_data", {})
-            previous_options = widgets.get("selector_options", [])
-            if list(previous_options) != list(options):
-                for item in selector.get_children():
-                    selector.delete(item)
-                for key in options:
-                    values = [value for value in trend_data.get(key, []) if isinstance(value, (int, float))]
-                    latest = values[-1] if values else None
-                    selector.insert(
-                        "",
-                        "end",
-                        iid=key,
-                        values=("[x]" if key in current_keys else "[ ]", trend_definitions()[key]["label"], self._format_plot_value(latest)),
-                    )
-                selector.bind("<<TreeviewSelect>>", lambda _event, key=section["key"], opts=options, tree=selector: self._on_monitor_plot_selected(key, opts, tree))
-                widgets["selector_options"] = list(options)
+        self.monitor_dashboard_sections = list(sections)
+        existing_ids = set(selector_tree.get_children())
+        desired_ids = [section["key"] for section in sections]
+        for item_id in existing_ids - set(desired_ids):
+            selector_tree.delete(item_id)
+        for section in sections:
+            item_id = section["key"]
+            if selector_tree.exists(item_id):
+                selector_tree.set(item_id, "title", section["title"])
             else:
-                for key in options:
-                    if not selector.exists(key):
-                        continue
-                    values = [value for value in trend_data.get(key, []) if isinstance(value, (int, float))]
-                    latest = values[-1] if values else None
-                    selector.set(key, "enabled", "[x]" if key in current_keys else "[ ]")
-                    selector.set(key, "value", self._format_plot_value(latest))
-            selector.selection_set(tuple(current_keys))
-            widgets["help_button"].configure(command=lambda sec=section: self._show_monitor_section_help(sec))
-            widgets["settings_button"].configure(command=lambda sec=section: self._open_monitor_plot_settings(sec))
-            updated.append((section, widgets))
-        self.monitor_section_widgets = updated
+                selector_tree.insert("", "end", iid=item_id, values=(section["title"],))
+        if self.monitor_active_section_key not in desired_ids:
+            self.monitor_active_section_key = desired_ids[0] if desired_ids else None
+        if self.monitor_active_section_key is not None and selector_tree.exists(self.monitor_active_section_key):
+            selector_tree.selection_set((self.monitor_active_section_key,))
+            selector_tree.focus(self.monitor_active_section_key)
+        if not self.monitor_section_widgets:
+            return
+        section = next((item for item in sections if item["key"] == self.monitor_active_section_key), sections[0] if sections else None)
+        if section is None:
+            return
+        widgets = self.monitor_section_widgets[0][1]
+        selector = widgets["selector"]
+        options = section.get("trend_options", [])
+        current_keys = self.monitor_plot_controls.get(section["key"])
+        if not current_keys:
+            current_keys = [section.get("default_trend")] if section.get("default_trend") else []
+        current_keys = [key for key in current_keys if key in options]
+        if not current_keys and options:
+            current_keys = [options[0]]
+        self.monitor_plot_controls[section["key"]] = current_keys
+        trend_data = (self.latest_monitor_summary or {}).get("trend_data", {})
+        previous_options = widgets.get("selector_options", [])
+        if list(previous_options) != list(options):
+            for item in selector.get_children():
+                selector.delete(item)
+            options = section.get("trend_options", [])
+            for key in options:
+                values = [value for value in trend_data.get(key, []) if isinstance(value, (int, float))]
+                latest = values[-1] if values else None
+                selector.insert(
+                    "",
+                    "end",
+                    iid=key,
+                    values=("[x]" if key in current_keys else "[ ]", trend_definitions()[key]["label"], self._format_plot_value(latest)),
+                )
+            selector.bind("<<TreeviewSelect>>", lambda _event, key=section["key"], opts=options, tree=selector: self._on_monitor_plot_selected(key, opts, tree))
+            widgets["selector_options"] = list(options)
+        else:
+            for key in options:
+                if not selector.exists(key):
+                    continue
+                values = [value for value in trend_data.get(key, []) if isinstance(value, (int, float))]
+                latest = values[-1] if values else None
+                selector.set(key, "enabled", "[x]" if key in current_keys else "[ ]")
+                selector.set(key, "value", self._format_plot_value(latest))
+        selector.selection_set(tuple(current_keys))
+        widgets["help_button"].configure(command=lambda sec=section: self._show_monitor_section_help(sec))
+        widgets["settings_button"].configure(command=lambda sec=section: self._open_monitor_plot_settings(sec))
+        self.monitor_section_widgets = [(section, widgets)]
+
+    def _render_active_monitor_section(self) -> None:
+        if not self.monitor_section_widgets:
+            return
+        section, widgets = self.monitor_section_widgets[0]
+        card = widgets["card"]
+        text_widget = widgets["text"]
+        card.configure(text=section["title"])
+        lines = []
+        for label, value in section.get("rows", []):
+            lines.append("%s: %s" % (label, value))
+        if section.get("equations"):
+            lines.extend(["", "Equations:"])
+            lines.extend(section["equations"])
+        if section.get("note"):
+            lines.extend(["", section["note"]])
+        self._set_text_widget(text_widget, lines)
+        self._color_text_widget(text_widget, section.get("color", "green"))
+        self._draw_section_plot(section)
+
+    def _on_monitor_section_selected(self, _event=None) -> None:
+        tree = getattr(self, "monitor_section_tree", None)
+        if tree is None:
+            return
+        selection = tree.selection()
+        if not selection:
+            return
+        self.monitor_active_section_key = selection[0]
+        self._update_monitor_dashboard(self.latest_monitor_summary)
 
     def _on_monitor_plot_selected(self, section_key: str, options: Sequence[str], tree) -> None:
         selected = [item for item in tree.selection() if item in options]
