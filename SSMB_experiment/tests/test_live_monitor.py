@@ -167,9 +167,12 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         self.assertTrue(any(label == "Qₛ source" and value == "cumz4x003gp:tuneSyn" for label, value in tune_section["rows"]))
         light_section = [section for section in sections if section["title"] == "Coherent Light Monitor"][0]
         self.assertTrue(any(label == "P1 avg" for label, _value in light_section["rows"]))
+        self.assertTrue(any(label == "Beam stability" for label, _value in light_section["rows"]))
         bump_section = [section for section in sections if section["title"] == "Bump Feedback / Orbit Lock"][0]
         self.assertTrue(any(label == "⟨x⟩ of 4 bump BPMs" for label, _value in bump_section["rows"]))
         self.assertIn("x̄ = (x_K1 + x_L2 + x_K3 + x_L4) / 4", bump_section["equations"])
+        machine_section = [section for section in sections if section["title"] == "Machine State"][0]
+        self.assertTrue(any(label == "Sweep beam stability" for label, _value in machine_section["rows"]))
 
     def test_theory_sections_and_trend_catalog_exist(self):
         samples = [
@@ -220,6 +223,9 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         raw_section = [section for section in theory if section["title"] == "1. Raw Instruments"][0]
         self.assertTrue(any("TUNEZRP:measX" in line for line in raw_section["lines"]))
         self.assertTrue(any("KLIMAC1CP:coolKW13:rdRetTemp" in line for line in raw_section["lines"]))
+        self.assertTrue(any("No verified live cavity pickup" in line for line in raw_section["lines"]))
+        spread_section = [section for section in theory if section["title"] == "6. Spread And Coherent-Light Observables"][0]
+        self.assertTrue(any("arrival phase relative to the laser" in line for line in spread_section["lines"]))
         env_section = [section for section in build_monitor_sections(summary) if section["title"] == "Camera Centers And Temperature"][0]
         self.assertTrue(any(label == "QPD00 center X avg" for label, _value in env_section["rows"]))
         self.assertIn("delta_s", summary["trend_data"])

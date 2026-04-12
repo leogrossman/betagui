@@ -588,6 +588,7 @@ def summarize_live_monitor(
         "p1_avg_vs_qpd01_center": _fit_channel_against_p1avg(samples, "qpd_l2_center_x_avg_um") if include_extended else None,
     }
     summary["temperature_state"] = _summarize_temperature_state(summary)
+    summary["beam_stability"] = _beam_stability_state(summary)
     summary["alpha_assessment"] = assess_alpha_monitor(summary) if include_extended else {
         "legacy_alpha0": (summary.get("current") or {}).get("legacy_alpha0_corrected"),
         "bpm_alpha0": None,
@@ -678,6 +679,35 @@ def _bump_quality_score(summary: Dict[str, object]) -> Dict[str, object]:
     score = max(0.0, 100.0 - penalties)
     status = "good" if score >= 75.0 else "watch" if score >= 45.0 else "poor"
     return {"score": score, "status": status}
+
+
+def _beam_stability_state(summary: Dict[str, object]) -> Dict[str, object]:
+    current = summary.get("current", {}) or {}
+    sweep_active = bool((summary.get("rf_sweep_detection") or {}).get("active"))
+    orbit_error = abs(_valid_float(current.get("bump_orbit_error_mm")) or 0.0)
+    l2_offset = abs(_valid_float(current.get("bump_bpm_l2_mm")) or 0.0)
+    qpd01_center = abs(_valid_float(current.get("qpd_l2_center_x_avg_um")) or 0.0)
+    nonlinear = bool(current.get("nonlinear_bpms"))
+    stable = (orbit_error < 0.5) and (l2_offset < 1.0) and (qpd01_center < 1200.0) and not nonlinear
+    if not sweep_active:
+        status = "idle"
+        message = "RF sweep is not active, so beam-stability verification is idle."
+    elif stable:
+        status = "stable"
+        message = "Beam position appears stable during the RF sweep; the bump is likely holding the source-region orbit well enough for phase-scan interpretation."
+    else:
+        status = "unstable"
+        message = "Beam position is not staying stable during the RF sweep. Treat P1 changes cautiously until the bump/undulator-side orbit is under control."
+    return {
+        "active": sweep_active,
+        "status": status,
+        "stable": stable,
+        "orbit_error_mm": orbit_error,
+        "l2_offset_mm": l2_offset,
+        "qpd01_center_x_um": qpd01_center,
+        "nonlinear_bpms_present": nonlinear,
+        "message": message,
+    }
 
 
 def assess_alpha_monitor(summary: Dict[str, object]) -> Dict[str, object]:
@@ -807,6 +837,7 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
     alpha = summary.get("alpha_assessment", {})
     oscillation = summary.get("oscillation_study", {})
     temp_state = summary.get("temperature_state", {})
+    beam_stability = summary.get("beam_stability", {})
     sections = [
         {
             "key": "machine_state",
@@ -820,6 +851,7 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 ("RF offset", "%s Hz" % _fmt(current.get("rf_offset_hz"))),
                 ("RF sweep detected", "ON" if summary.get("rf_sweep_detection", {}).get("active") else "OFF/idle"),
                 ("L4 bump", "%s" % bump.get("state_label", "unknown")),
+                ("Sweep beam stability", beam_stability.get("status", "n/a")),
                 ("Temperature state", "UNSTABLE" if temp_state.get("unstable") else "stable"),
                 ("Temp deviation", "%s C" % _fmt(temp_state.get("max_deviation_c"))),
                 ("Bump max |I|", "%s A" % _fmt(bump.get("max_abs_corrector_a"))),
@@ -873,12 +905,14 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 ("P3 avg", _fmt(current.get("p3_h1_ampl_avg"))),
                 ("dP1/dδ", _fmt((sweep.get("p1_vs_delta") or {}).get("slope"))),
                 ("dP1/dfRF", _fmt((sweep.get("p1_vs_rf") or {}).get("slope"))),
+                ("Beam stability", beam_stability.get("status", "n/a")),
             ],
             "equations": [
                 "P1 = coherent-light harmonic observable measured during the RF sweep",
                 "Track P1(f_RF) and P1(δₛ) together with α₀ and η",
+                "Interpret P1 changes as arrival-phase / microbunching changes only if the source-region orbit stays stable during the RF sweep",
             ],
-            "note": "For this experiment, P1 versus f_RF is the key observable. Compare it against BPM-derived δₛ and phase-slip fits.",
+            "note": "For this experiment, P1 versus f_RF is the key observable. The bump is being used to control the beam arrival phase relative to the laser while keeping the source-region orbit stable enough that P1 changes can be interpreted as changing microbunching/phase condition rather than simple beam-position drift.",
             "default_trend": "p1_h1_ampl_avg",
             "trend_options": ["p1_h1_ampl_avg", "p1_h1_ampl", "p1_h1_ampl_dev", "p3_h1_ampl", "p3_h1_ampl_avg", "rf_offset_hz", "delta_s"],
         },
@@ -962,13 +996,14 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 ("Legacy - BPM", _fmt(alpha.get("difference"))),
                 ("η (phase slip)", _fmt(sweep.get("phase_slip_factor_eta"))),
                 ("Bump contamination", "likely" if alpha.get("contamination_likely") else "not evident"),
+                ("Beam stability", beam_stability.get("status", "n/a")),
             ],
             "equations": [
                 "Δf_RF / f_RF ≈ -η · δₛ",
                 "α₀ = η + 1/γ²",
                 "α₀,legacy ∝ Qₛ² · E / (f_RF² · U_cav)",
             ],
-            "note": alpha.get("message"),
+            "note": alpha.get("message") + " For the SSMB experiment, α₀ matters because it controls how RF detuning maps into momentum and therefore into arrival-phase offset relative to the laser.",
             "default_trend": "alpha_difference",
             "trend_options": ["alpha_difference", "bpm_alpha0", "legacy_alpha0", "delta_s", "rf_offset_hz"],
         },
@@ -1012,6 +1047,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
     bump_monitor = summary.get("bump_monitor", {})
     environment = summary.get("environment_monitor", {})
     oscillation = summary.get("oscillation_study", {})
+    beam_stability = summary.get("beam_stability", {})
     return [
         {
             "title": "1. Raw Instruments",
@@ -1022,6 +1058,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
                 "Coherent-light observables: SCOPE1ZULP:h1p1:* and h1p3:*",
                 "Environment candidates: KLIMAC1CP:coolKW13:rdRetTemp, KLIMAC1CP:sr:rdTemp, KLIMAC1CP:sr:rd1Temp",
                 "RF references: MCLKHGP:setFrq, MCLKHGP:rdFrq499",
+                "No verified live cavity pickup / beam-phase / beam-loading PV is currently in the inventory; phase must therefore be inferred indirectly from RF, δₛ, η, and P1/P3.",
                 "Tunes: Qx from TUNEZRP:measX, Qy from TUNEZRP:measY, Qs from cumz4x003gp:tuneSyn",
                 "Bump-state context: HS1P2K3RP, HS3P1L4RP, HS3P2L4RP, HS1P1K1RP, AKC10VP",
             ],
@@ -1035,6 +1072,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             ],
             "lines": [
                 "The recovered notebook shows a scalar orbit-lock loop, not a feed-forward RF-to-bump table.",
+                "Operationally, the bump is being used so that during the RF ramp the beam arrives with a shifted phase offset relative to the laser while the source-region orbit is kept stable enough for that phase scan to be interpretable.",
                 "Because BPMZ1L2RP is in L2 near the undulator side, the loop helps keep the source-region orbit centered, but the resulting closed orbit is still global.",
                 "Current live bump state: %s, orbit error = %s mm, P1avg-vs-bump slope = %s" % (
                     bump.get("state_label", "unknown"),
@@ -1053,6 +1091,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             "lines": [
                 "Raw data: horizontal L4 BPM offsets relative to the stored baseline.",
                 "Meaning: synchronous off-momentum state occupied during the RF sweep.",
+                "Changing RF changes δₛ, which changes the beam arrival phase relative to the laser at the interaction point.",
                 "Current live value: δₛ = %s" % _fmt(current.get("delta_l4_bpm_first_order")),
             ],
         },
@@ -1065,6 +1104,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             "lines": [
                 "Raw data: RF readback plus reconstructed δₛ history.",
                 "Fit performed only when enough RF motion is detected.",
+                "For the SSMB study, η is the key link between RF detuning and arrival-phase evolution through the controlled machine state.",
                 "Current live fit: η = %s" % _fmt(sweep.get("phase_slip_factor_eta")),
             ],
         },
@@ -1077,6 +1117,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             "lines": [
                 "Preferred chain: BPMs → δₛ → η → α₀.",
                 "Legacy shortcut uses tune_s, RF, voltage, and energy only, so it misses bump contamination and nonlinear beam-state effects.",
+                "Optimizing α₀ experimentally means choosing a machine state where a practical RF sweep gives enough arrival-phase leverage for the laser interaction while keeping orbit/source stability under control.",
                 "Current live values: α₀,legacy = %s, α₀,BPM = %s" % (
                     _fmt(current.get("legacy_alpha0_corrected")),
                     _fmt(sweep.get("alpha0_from_bpm_eta")),
@@ -1089,15 +1130,18 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
                 "σₓ² ≈ βₓ εₓ + (ηₓ σδ)²",
                 "σ_E ≈ E₀ · σδ",
                 "P1 = P1(f_RF) or P1(δₛ)",
+                "Interpretation target: P1 = P1(Δφ_beam-laser)",
             ],
             "lines": [
                 "QPD00ZL4RP provides the first-order spread proxy through σx in a dispersive region.",
                 "P1 is the main SSMB observable; compare P1(f_RF), P1(δₛ), and P1 versus bump, camera-center, and temperature activity against α₀ and bump state.",
+                "The working physics hypothesis is that the RF ramp changes δₛ, which changes arrival phase relative to the laser, and that this shifts the microbunching condition seen in P1/P3.",
                 "Bump status now: %s, max |I| = %s A" % (bump.get("state_label", "unknown"), _fmt(bump.get("max_abs_corrector_a"))),
                 "Current env slopes: P1avg-vs-KW13 temp = %s, P1avg-vs-QPD00 center = %s" % (
                     _fmt((environment.get("p1_avg_vs_kw13_temp") or {}).get("slope")),
                     _fmt((environment.get("p1_avg_vs_qpd00_center") or {}).get("slope")),
                 ),
+                "Beam stability during sweep: %s" % (beam_stability.get("message") or "n/a"),
             ],
         },
         {

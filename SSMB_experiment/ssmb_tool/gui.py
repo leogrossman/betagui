@@ -3024,10 +3024,11 @@ class SSMBGui:
         sweep = safe_summary.get("rf_sweep_metrics", {}) or {}
         oscillation = safe_summary.get("oscillation_study", {}) or {}
         resonance = safe_summary.get("ssmb_resonance", {}) or {}
+        beam_stability = safe_summary.get("beam_stability", {}) or {}
         lines = [
             "SSMB Oscillation / Resonance Study",
             "",
-            "This window is focused on the actual SSMB experiment observables: P1/P3, RF, δₛ, η, α₀, beam energy, momentum spread, and whether the observed slow oscillation looks compatible with a fast machine resonance or instead with slow control / thermal modulation.",
+            "This window is focused on the actual SSMB experiment observables: P1/P3, RF, δₛ, η, α₀, beam energy, momentum spread, and whether the observed light changes are consistent with changing beam-laser phase offset during the RF ramp.",
             "",
             "Live observed quantities",
             "P1 avg / P3 avg: %s / %s" % (current.get("p1_h1_ampl_avg"), current.get("p3_h1_ampl_avg")),
@@ -3041,11 +3042,17 @@ class SSMBGui:
             "η: %s" % self._format_plot_value(sweep.get("phase_slip_factor_eta")),
             "α₀ legacy / BPM: %s / %s" % (self._format_plot_value(current.get("legacy_alpha0_corrected")), self._format_plot_value(sweep.get("alpha0_from_bpm_eta"))),
             "Beam energy / σδ: %s MeV / %s" % (self._format_plot_value(current.get("beam_energy_from_bpm_mev")), self._format_plot_value(current.get("qpd_l4_sigma_delta_first_order"))),
+            "Beam stability during sweep: %s" % (beam_stability.get("status") or "n/a"),
+            beam_stability.get("message", "Beam-stability assessment unavailable."),
             "",
             "Resonance sanity check",
             "Synchrotron period from Qs: %s" % self._format_short_duration(resonance.get("synchrotron_period_s")),
             "Observed P1 period / Qs period ratio: %s" % self._format_plot_value(resonance.get("period_ratio_to_qs")),
             resonance.get("message", "No resonance interpretation available yet."),
+            "",
+            "Phase interpretation",
+            "Working hypothesis: RF ramp -> δₛ -> arrival-phase offset relative to laser -> changed microbunching condition -> P1/P3 response.",
+            "Direct live beam-phase / beam-loading monitor: not yet verified in the current PV inventory. Right now the best phase-sensitive chain is indirect: RF, δₛ, η, α₀, plus P1/P3.",
             "",
             "Caveat",
             "This is a live heuristic study. Error bars and certainty here are based on rolling FFT/autocorrelation / correlation strength, not a full offline statistical model.",
