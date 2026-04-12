@@ -362,6 +362,9 @@ def write_session_outputs(
     logger.write_json("metadata.json", metadata)
     _write_csv(logger.session_dir / "samples.csv", csv_rows)
     logger.log("Wrote %d samples." % len(samples))
+    if missing_counts:
+        top_missing = sorted(missing_counts.items(), key=lambda item: item[1], reverse=True)[:8]
+        logger.log("Missing PV summary: %s" % ", ".join("%s=%d" % (label, count) for label, count in top_missing))
     logger.log("Outputs: metadata.json, samples.jsonl, samples.csv, session.log")
     return logger.session_dir
 
@@ -374,6 +377,23 @@ def estimate_sample_bytes(specs: Sequence[ChannelSpec]) -> int:
         else:
             total += 256
     return total
+
+
+def estimate_sample_breakdown(specs: Sequence[ChannelSpec]) -> List[Dict[str, object]]:
+    rows: List[Dict[str, object]] = []
+    for spec in specs:
+        rows.append(
+            {
+                "label": spec.label,
+                "pv": spec.pv,
+                "kind": spec.kind,
+                "bytes_per_sample": 64 * 1024 if spec.kind == "waveform" else 256,
+                "required": spec.required,
+                "unit": spec.unit,
+            }
+        )
+    rows.sort(key=lambda item: int(item["bytes_per_sample"]), reverse=True)
+    return rows
 
 
 def estimate_passive_session_bytes(specs: Sequence[ChannelSpec], duration_seconds: float, sample_hz: float) -> int:

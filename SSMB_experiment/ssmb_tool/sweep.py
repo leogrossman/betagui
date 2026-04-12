@@ -332,6 +332,10 @@ def run_rf_sweep_session(runtime_config: SweepRuntimeConfig, adapter=None, progr
     metadata["partial_sample_count"] = len(samples)
     logger.write_json("metadata.json", metadata)
     session_dir = write_session_outputs(logger, metadata, samples)
+    missing_counts = metadata.get("missing_pvs", {}) or {}
+    if missing_counts:
+        top_missing = sorted(missing_counts.items(), key=lambda item: item[1], reverse=True)[:8]
+        logger.log("Missing PV summary: %s" % ", ".join("%s=%d" % (label, count) for label, count in top_missing))
     if pending_exception is not None:
         raise pending_exception
     return session_dir

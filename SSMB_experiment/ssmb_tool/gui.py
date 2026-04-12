@@ -26,7 +26,7 @@ from .live_monitor import (
     summarize_live_monitor,
     trend_definitions,
 )
-from .log_now import BPM_NONLINEAR_MM, BPM_WARNING_MM, build_specs, estimate_passive_session_bytes, inventory_overview_lines, run_stage0_logger
+from .log_now import BPM_NONLINEAR_MM, BPM_WARNING_MM, build_specs, estimate_passive_session_bytes, estimate_sample_breakdown, inventory_overview_lines, run_stage0_logger
 from .sweep import RF_PV_NAME, SweepRuntimeConfig, build_plan_from_hz, estimate_sweep_session_bytes, preview_lines, run_rf_sweep_session
 
 try:  # pragma: no cover - depends on host GUI packages
@@ -40,6 +40,7 @@ except ImportError:  # pragma: no cover - depends on host GUI packages
 
 
 HISTORY_TAIL_READ_BYTES = 2 * 1024 * 1024
+HISTORY_COMPACT_BYTES = 8 * 1024 * 1024
 
 
 def _parse_text_mapping(text: str) -> dict[str, str]:
@@ -81,6 +82,7 @@ class SSMBGui:
         self.ssmb_study_canvases = []
         self.oscillation_selected_candidate_key = None
         self.stage0_stop_event: Optional[threading.Event] = None
+        self._monitor_cache_append_count = 0
         self._build_vars()
         self._build_ui()
         self._apply_profile()
@@ -93,6 +95,19 @@ class SSMBGui:
         self._load_monitor_history_cache()
         self._debug("startup: opening live monitor window")
         self._open_monitor_window()
+        try:
+            self.root.deiconify()
+            self.root.lift()
+            self.root.focus_force()
+        except Exception as exc:
+            self._debug("root focus/lift failed: %s" % exc)
+        try:
+            if self.monitor_window is not None and self.monitor_window.winfo_exists():
+                self.monitor_window.deiconify()
+                self.monitor_window.lift()
+                self.monitor_window.focus_force()
+        except Exception as exc:
+            self._debug("monitor window focus/lift failed: %s" % exc)
         self._debug("startup: gui ready")
 
     def _build_vars(self) -> None:
@@ -407,6 +422,21 @@ class SSMBGui:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(sample, ensure_ascii=True) + "\n")
+        self._monitor_cache_append_count += 1
+        if self._monitor_cache_append_count % 50 == 0:
+            self._compact_monitor_history_cache_if_needed()
+
+    def _compact_monitor_history_cache_if_needed(self) -> None:
+        path = self._monitor_history_path()
+        try:
+            if not path.exists() or path.stat().st_size < HISTORY_COMPACT_BYTES:
+                return
+            with path.open("w", encoding="utf-8") as stream:
+                for sample in self.monitor_history:
+                    stream.write(json.dumps(sample, ensure_ascii=True) + "\n")
+            self._debug("compacted live monitor cache to %d recent samples" % len(self.monitor_history))
+        except Exception as exc:
+            self._debug("monitor history cache compaction failed: %s" % exc)
 
     def _load_monitor_history_cache(self) -> None:
         path = self._monitor_history_path()
@@ -1089,6 +1119,12 @@ class SSMBGui:
         self.monitor_window_channels_text.configure(state="disabled")
         self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
         self._update_monitor_dashboard(self.latest_monitor_summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates()))
+        try:
+            window.deiconify()
+            window.lift()
+            window.focus_force()
+        except Exception as exc:
+            self._debug("open monitor window focus/lift failed: %s" % exc)
         window.protocol("WM_DELETE_WINDOW", self._close_monitor_window)
 
     def _close_monitor_window(self) -> None:
@@ -2731,14 +2767,19 @@ class SSMBGui:
         lines = inventory_overview_lines(specs)
         try:
             estimate_bytes = estimate_passive_session_bytes(specs, config.duration_seconds, config.sample_hz)
+            heavy_channels = estimate_sample_breakdown(specs)[:8]
             disk = shutil.disk_usage(config.output_root if config.output_root.exists() else config.output_root.parent)
             lines.extend(
                 [
                     "",
                     "Estimated passive-session size: %.2f MB" % (estimate_bytes / (1024.0 * 1024.0)),
                     "Free space at output root: %.2f GB" % (disk.free / (1024.0 * 1024.0 * 1024.0)),
+                    "",
+                    "Heaviest logged channels per sample:",
                 ]
             )
+            for item in heavy_channels:
+                lines.append("- %s | %s | %.1f kB/sample" % (item["label"], item["kind"], float(item["bytes_per_sample"]) / 1024.0))
         except Exception:
             pass
         self._set_inventory_text(lines)
