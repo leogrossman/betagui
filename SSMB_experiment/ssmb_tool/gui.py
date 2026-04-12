@@ -33,9 +33,10 @@ def _parse_text_mapping(text: str) -> dict[str, str]:
 
 
 class SSMBGui:
-    def __init__(self, root: "tk.Tk", allow_writes: bool = False):
+    def __init__(self, root: "tk.Tk", allow_writes: bool = True, start_safe_mode: bool = False):
         self.root = root
         self.allow_writes = allow_writes
+        self.start_safe_mode = start_safe_mode
         self.queue: "queue.Queue[object]" = queue.Queue()
         self.worker: Optional[threading.Thread] = None
         self.stage0_stop_event: Optional[threading.Event] = None
@@ -59,7 +60,7 @@ class SSMBGui:
         self.include_sextupole_var = tk.BooleanVar(value=True)
         self.include_octupole_var = tk.BooleanVar(value=True)
         self.heavy_mode_var = tk.BooleanVar(value=False)
-        self.safe_mode_var = tk.BooleanVar(value=True)
+        self.safe_mode_var = tk.BooleanVar(value=self.start_safe_mode)
         self.log_profile_var = tk.StringVar(value="ssmb_standard")
 
         self.center_rf_var = tk.StringVar(value="")
@@ -188,7 +189,7 @@ class SSMBGui:
 
     def _build_sweep_tab(self, frame: "ttk.Frame") -> None:
         row = 0
-        info = "Direct RF sweep in Hz around the current or entered RF PV value. Writes are disabled unless the GUI was started with --allow-writes."
+        info = "Direct RF sweep in Hz around the current or entered RF PV value. Writes are allowed by default, but they are blocked whenever the Safe / read-only mode checkbox is enabled."
         ttk.Label(frame, text=info, wraplength=360, justify="left").grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 8))
         row += 1
         preset_row = ttk.Frame(frame)
@@ -578,7 +579,8 @@ class SSMBGui:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="GUI for SSMB Stage 0 logging and conservative RF sweeps.")
-    parser.add_argument("--allow-writes", action="store_true", help="Enable the RF sweep execution button. Stage 0 logging remains read-only.")
+    parser.add_argument("--safe-mode", action="store_true", help="Start with Safe / read-only mode enabled so RF writes are blocked until you manually turn them back on.")
+    parser.add_argument("--allow-writes", action="store_true", help="Deprecated compatibility flag. Writes are enabled by default unless --safe-mode is used.")
     return parser
 
 
@@ -588,7 +590,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
     root = tk.Tk()
-    SSMBGui(root, allow_writes=args.allow_writes)
+    SSMBGui(root, allow_writes=True, start_safe_mode=bool(args.safe_mode))
     root.mainloop()
     return 0
 

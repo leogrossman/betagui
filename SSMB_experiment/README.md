@@ -90,7 +90,7 @@ In the control room, prefer the machine's local Python and the checked-out repo
 directly. Do not rely on `pyenv` there unless you explicitly need it as a
 fallback.
 
-Recommended passive / read-only startup:
+Recommended standard startup:
 
 ```bash
 cd SSMB_experiment
@@ -98,24 +98,26 @@ export MPLCONFIGDIR="$PWD/.ssmb_local/mplconfig"
 python3 ssmb_experiment_gui.py
 ```
 
-Write-capable RF sweep mode:
+Safer passive / read-only startup:
 
 ```bash
 cd SSMB_experiment
 export MPLCONFIGDIR="$PWD/.ssmb_local/mplconfig"
-python3 ssmb_experiment_gui.py --allow-writes
+python3 ssmb_experiment_gui.py --safe-mode
 ```
 
 Notes:
 
-- the GUI starts in `Safe / read-only mode` by default
+- the standard launch starts write-capable
+- use `--safe-mode` if you want the GUI to come up with writes blocked
 - passive logging does not write any PVs
 - RF sweep writes stay blocked until:
-  - the GUI was started with `--allow-writes`
   - `Safe / read-only mode` is turned off
   - the write confirmation popup is accepted
 - the confirmation dialog shows the exact planned RF PV writes before anything
   is sent
+- even in standard write-capable startup, the `Safe / read-only mode` checkbox in
+  the GUI can be used at any time to block writes again
 
 ## Environment Notes
 
@@ -150,7 +152,8 @@ Use the GUI presets and labels for three main jobs:
 
 3. RF sweep with rich logging
    Run one RF sweep with bump OFF, and one with bump ON if time allows.
-   Writes only happen if you start the GUI with `--allow-writes` and confirm.
+   Writes only happen if `Safe / read-only mode` is off and you confirm the
+   planned PV commands.
 
 ## RF Sweep Preset
 
