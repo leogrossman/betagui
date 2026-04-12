@@ -33,7 +33,7 @@ def _parse_text_mapping(text: str) -> dict[str, str]:
 
 
 class SSMBGui:
-    def __init__(self, root: "tk.Tk", allow_writes: bool = True, start_safe_mode: bool = False):
+    def __init__(self, root: "tk.Tk", allow_writes: bool = True, start_safe_mode: bool = True):
         self.root = root
         self.allow_writes = allow_writes
         self.start_safe_mode = start_safe_mode
@@ -189,7 +189,7 @@ class SSMBGui:
 
     def _build_sweep_tab(self, frame: "ttk.Frame") -> None:
         row = 0
-        info = "Direct RF sweep in Hz around the current or entered RF PV value. Writes are allowed by default, but they are blocked whenever the Safe / read-only mode checkbox is enabled."
+        info = "Direct RF sweep in Hz around the current or entered RF PV value. The program starts with writes blocked, and RF writes only become available after you turn off Safe / read-only mode in the GUI."
         ttk.Label(frame, text=info, wraplength=360, justify="left").grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 8))
         row += 1
         preset_row = ttk.Frame(frame)
@@ -579,8 +579,9 @@ class SSMBGui:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="GUI for SSMB Stage 0 logging and conservative RF sweeps.")
-    parser.add_argument("--safe-mode", action="store_true", help="Start with Safe / read-only mode enabled so RF writes are blocked until you manually turn them back on.")
-    parser.add_argument("--allow-writes", action="store_true", help="Deprecated compatibility flag. Writes are enabled by default unless --safe-mode is used.")
+    parser.add_argument("--safe-mode", action="store_true", help="Compatibility flag. The GUI already starts with Safe / read-only mode enabled by default.")
+    parser.add_argument("--unsafe-start", action="store_true", help="Start with Safe / read-only mode disabled. RF writes still require explicit confirmation in the GUI.")
+    parser.add_argument("--allow-writes", action="store_true", help="Deprecated compatibility flag. The GUI can enable writes from inside the window when Safe / read-only mode is turned off.")
     return parser
 
 
@@ -590,7 +591,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
     root = tk.Tk()
-    SSMBGui(root, allow_writes=True, start_safe_mode=bool(args.safe_mode))
+    SSMBGui(root, allow_writes=True, start_safe_mode=not bool(args.unsafe_start))
     root.mainloop()
     return 0
 

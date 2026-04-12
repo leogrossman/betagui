@@ -108,8 +108,13 @@ python3 ssmb_experiment_gui.py --safe-mode
 
 Notes:
 
-- the standard launch starts write-capable
-- use `--safe-mode` if you want the GUI to come up with writes blocked
+- the standard launch starts with `Safe / read-only mode` enabled
+- to actually write RF commands, you must first turn off `Safe / read-only mode`
+  inside the GUI
+- `--safe-mode` is kept as a compatibility flag and behaves the same as the
+  standard launch
+- if you ever want the GUI to open with writes immediately available, use:
+  `python3 ssmb_experiment_gui.py --unsafe-start`
 - passive logging does not write any PVs
 - RF sweep writes stay blocked until:
   - `Safe / read-only mode` is turned off

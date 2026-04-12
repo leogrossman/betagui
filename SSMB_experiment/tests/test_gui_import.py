@@ -12,7 +12,7 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
 
         parser = gui.build_arg_parser()
         args = parser.parse_args([])
-        self.assertFalse(args.safe_mode)
+        self.assertFalse(args.unsafe_start)
 
     def test_gui_parser_accepts_safe_mode_flag(self):
         import SSMB_experiment.ssmb_tool.gui as gui
@@ -20,6 +20,13 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         parser = gui.build_arg_parser()
         args = parser.parse_args(["--safe-mode"])
         self.assertTrue(args.safe_mode)
+
+    def test_gui_parser_accepts_unsafe_start_flag(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        parser = gui.build_arg_parser()
+        args = parser.parse_args(["--unsafe-start"])
+        self.assertTrue(args.unsafe_start)
 
 
 if __name__ == "__main__":
