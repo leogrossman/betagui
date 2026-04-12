@@ -54,6 +54,17 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         self.assertTrue(result["active"])
         self.assertGreater(result["rf_span_khz"], 0.002)
 
+    def test_detect_rf_sweep_active_can_trigger_from_small_ramp_trend(self):
+        samples = [
+            {"derived": {"rf_readback": 499688.38770}},
+            {"derived": {"rf_readback": 499688.38798}},
+            {"derived": {"rf_readback": 499688.38823}},
+            {"derived": {"rf_readback": 499688.38847}},
+        ]
+        result = detect_rf_sweep_active(samples)
+        self.assertTrue(result["active"])
+        self.assertIn(result["reason"], ("rf_step", "rf_slope", "rf_span"))
+
     def test_summarize_live_monitor_produces_sweep_metrics_when_rf_moves(self):
         samples = []
         for index, rf in enumerate((499688.38770, 499688.38870, 499688.38970, 499688.39070), start=1):

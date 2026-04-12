@@ -312,6 +312,24 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         )
         self.assertEqual(keys, ["bpm_alpha0", "legacy_alpha0", "delta_s"])
 
+    def test_ssmb_quantity_selection_updates_focus_key(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        class FakeTable:
+            def selection(self):
+                return ("eta",)
+
+        app = object.__new__(gui.SSMBGui)
+        app.ssmb_study_table = FakeTable()
+        app.ssmb_study_quantity_key = None
+        app.latest_monitor_summary = {}
+        app._update_ssmb_study_window = mock.Mock()
+
+        gui.SSMBGui._on_ssmb_study_quantity_selected(app)
+
+        self.assertEqual(app.ssmb_study_quantity_key, "eta")
+        app._update_ssmb_study_window.assert_called_once()
+
     def test_monitor_window_render_smoke(self):
         import SSMB_experiment.ssmb_tool.gui as gui
         from SSMB_experiment.ssmb_tool.live_monitor import format_channel_snapshot, format_monitor_summary, summarize_live_monitor

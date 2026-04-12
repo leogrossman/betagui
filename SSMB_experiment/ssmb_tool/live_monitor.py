@@ -9,7 +9,9 @@ from .analyze_session import _linear_fit, alpha0_from_eta, fit_slip_factor
 
 SPEED_OF_LIGHT_M_PER_S = 299792458.0
 MLS_CIRCUMFERENCE_M = 48.0
-RF_SWEEP_ACTIVE_THRESHOLD_KHZ = 0.002
+RF_SWEEP_ACTIVE_THRESHOLD_KHZ = 0.001
+RF_SWEEP_ACTIVE_STEP_THRESHOLD_KHZ = 0.00025
+RF_SWEEP_ACTIVE_SLOPE_THRESHOLD_KHZ_PER_SAMPLE = 0.0002
 RF_SWEEP_ACTIVE_MIN_POINTS = 4
 BUMP_CORRECTOR_ACTIVE_THRESHOLD_A = 0.002
 ALPHA_CONTAMINATION_THRESHOLD = 5.0e-5
@@ -395,12 +397,34 @@ def detect_rf_sweep_active(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
         if rf_value is not None:
             rf_values.append(rf_value)
     if len(rf_values) < RF_SWEEP_ACTIVE_MIN_POINTS:
-        return {"active": False, "reason": "not_enough_points", "rf_span_khz": 0.0}
+        return {"active": False, "reason": "not_enough_points", "rf_span_khz": 0.0, "rf_step_khz": 0.0, "rf_slope_khz_per_sample": 0.0}
     rf_span = max(rf_values) - min(rf_values)
+    diffs = [abs(b - a) for a, b in zip(rf_values[:-1], rf_values[1:])]
+    max_step = max(diffs) if diffs else 0.0
+    slope = 0.0
+    if len(rf_values) >= 2:
+        x = np.arange(len(rf_values), dtype=float)
+        coeffs = np.polyfit(x, np.asarray(rf_values, dtype=float), 1)
+        slope = abs(float(coeffs[0]))
+    active = (
+        rf_span >= RF_SWEEP_ACTIVE_THRESHOLD_KHZ
+        or max_step >= RF_SWEEP_ACTIVE_STEP_THRESHOLD_KHZ
+        or slope >= RF_SWEEP_ACTIVE_SLOPE_THRESHOLD_KHZ_PER_SAMPLE
+    )
+    if rf_span >= RF_SWEEP_ACTIVE_THRESHOLD_KHZ:
+        reason = "rf_span"
+    elif max_step >= RF_SWEEP_ACTIVE_STEP_THRESHOLD_KHZ:
+        reason = "rf_step"
+    elif slope >= RF_SWEEP_ACTIVE_SLOPE_THRESHOLD_KHZ_PER_SAMPLE:
+        reason = "rf_slope"
+    else:
+        reason = "span_too_small"
     return {
-        "active": rf_span >= RF_SWEEP_ACTIVE_THRESHOLD_KHZ,
-        "reason": "rf_span" if rf_span >= RF_SWEEP_ACTIVE_THRESHOLD_KHZ else "span_too_small",
+        "active": active,
+        "reason": reason,
         "rf_span_khz": rf_span,
+        "rf_step_khz": max_step,
+        "rf_slope_khz_per_sample": slope,
     }
 
 
@@ -887,7 +911,8 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 ("RF readback", "%s kHz" % _fmt(current.get("rf_readback_khz"))),
                 ("RF rdFrq499", "%s kHz" % _fmt(current.get("rf_readback_499mhz_khz"))),
                 ("RF offset", "%s Hz" % _fmt(current.get("rf_offset_hz"))),
-                ("RF sweep detected", "ON" if summary.get("rf_sweep_detection", {}).get("active") else "OFF/idle"),
+                ("RF sweep detected", "ON (%s)" % (summary.get("rf_sweep_detection", {}).get("reason") or "n/a") if summary.get("rf_sweep_detection", {}).get("active") else "OFF/idle"),
+                ("RF max step", "%s kHz" % _fmt(summary.get("rf_sweep_detection", {}).get("rf_step_khz"))),
                 ("L4 bump", "%s" % bump.get("state_label", "unknown")),
                 ("Sweep beam stability", beam_stability.get("status", "n/a")),
                 ("Phase-scan quality", "%s / %.0f" % ((phase_quality.get("status") or "n/a"), float(phase_quality.get("score") or 0.0))),

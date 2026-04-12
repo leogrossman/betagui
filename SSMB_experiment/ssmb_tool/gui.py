@@ -138,6 +138,8 @@ class SSMBGui:
         self.bump_lab_plot_canvases = {}
         self.ssmb_study_canvases = []
         self.ssmb_study_table = None
+        self.ssmb_study_quantity_key = None
+        self.ssmb_study_quantity_help_window: Optional["tk.Toplevel"] = None
         self.oscillation_selected_candidate_key = None
         self.stage0_stop_event: Optional[threading.Event] = None
         self._monitor_cache_append_count = 0
@@ -3025,6 +3027,8 @@ class SSMBGui:
         table.column("derived", width=360, anchor="w")
         table.column("current", width=120, anchor="e")
         table.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 6))
+        table.bind("<<TreeviewSelect>>", self._on_ssmb_study_quantity_selected)
+        table.bind("<Double-1>", self._on_ssmb_study_quantity_double_click)
         text = tk.Text(frame, wrap="word", height=10)
         text.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 8))
         text.configure(state="disabled")
@@ -3052,7 +3056,228 @@ class SSMBGui:
         self.ssmb_study_window = None
         self.ssmb_study_text = None
         self.ssmb_study_table = None
+        self.ssmb_study_quantity_key = None
         self.ssmb_study_canvases = []
+
+    def _ssmb_study_quantity_defs(self):
+        return {
+            "delta_s": {
+                "label": "δₛ",
+                "raw": "L4 BPM offsets [mm]",
+                "derived": "Weighted dispersive BPM reconstruction",
+                "current": lambda current, sweep, osc, res, quality: self._format_plot_value(current.get("delta_l4_bpm_first_order")),
+                "plot_keys": ["delta_s", "rf_offset_hz", "beam_energy_mev"],
+                "theory": [
+                    "Definition",
+                    "δₛ is the synchronous momentum offset occupied during the RF sweep.",
+                    "",
+                    "Raw data pipeline",
+                    "1. Measure horizontal BPM positions in L4: BPMZ3L4RP, BPMZ4L4RP, BPMZ5L4RP, BPMZ6L4RP.",
+                    "2. Subtract the stored reference orbit x_ref at each BPM.",
+                    "3. Project the resulting Δx onto the model dispersion D_x to infer δₛ.",
+                    "",
+                    "Equation",
+                    "Δx_i = x_i - x_{i,ref}",
+                    "Δx_i ≈ D_{x,i} · δₛ",
+                    "δₛ ≈ (Σ_i w_i D_{x,i} Δx_i) / (Σ_i w_i D_{x,i}²)",
+                    "",
+                    "Uncertainty",
+                    "Main contributors: BPM noise, bad BPMs, bump contamination, and model-dispersion mismatch.",
+                    "With bump on, trust δₛ most when the beam-stability / phase-scan quality checks are green.",
+                ],
+            },
+            "eta": {
+                "label": "η",
+                "raw": "RF readback [kHz] + δₛ",
+                "derived": "Fit phase-slip factor from RF-vs-δₛ",
+                "current": lambda current, sweep, osc, res, quality: self._format_plot_value(sweep.get("phase_slip_factor_eta")),
+                "plot_keys": ["rf_offset_hz", "delta_s", "bpm_alpha0"],
+                "theory": [
+                    "Definition",
+                    "η is the effective phase-slip factor sampled by the controlled machine state during the RF sweep.",
+                    "",
+                    "Raw data pipeline",
+                    "1. Reconstruct δₛ from the L4 BPM chain.",
+                    "2. Measure RF readback over the sweep.",
+                    "3. Fit RF detuning against reconstructed δₛ.",
+                    "",
+                    "Equation",
+                    "-Δf_RF / f_RF ≈ η · δₛ",
+                    "η = -(1/f_RF) · d f_RF / dδₛ",
+                    "",
+                    "Uncertainty",
+                    "Main contributors: short sweep span, poor δₛ reconstruction, and orbit instability when bump control is not holding the source-region orbit.",
+                ],
+            },
+            "alpha0_bpm": {
+                "label": "α₀ BPM",
+                "raw": "η + beam energy",
+                "derived": "Preferred BPM-based α₀",
+                "current": lambda current, sweep, osc, res, quality: self._format_plot_value(sweep.get("alpha0_from_bpm_eta")),
+                "plot_keys": ["bpm_alpha0", "legacy_alpha0", "delta_s"],
+                "theory": [
+                    "Definition",
+                    "Preferred live momentum-compaction estimate from the BPM/phase-slip chain.",
+                    "",
+                    "Equation",
+                    "α₀ = η + 1/γ²",
+                    "",
+                    "Why preferred",
+                    "This route uses the reconstructed occupied beam state δₛ, so it is much more meaningful than the old RF/tune shortcut when bump and dispersion are mixed.",
+                    "",
+                    "Uncertainty",
+                    "Driven by the η fit quality and the energy calibration used for γ.",
+                ],
+            },
+            "alpha0_legacy": {
+                "label": "α₀ legacy",
+                "raw": "Qs, RF, cavity V, beam E",
+                "derived": "Old shortcut cross-check",
+                "current": lambda current, sweep, osc, res, quality: self._format_plot_value(current.get("legacy_alpha0_corrected")),
+                "plot_keys": ["legacy_alpha0", "bpm_alpha0", "alpha_difference"],
+                "theory": [
+                    "Definition",
+                    "Legacy shortcut shown only as a comparison / contamination check.",
+                    "",
+                    "Equation",
+                    "α₀,legacy ∝ Qₛ² · E / (f_RF² · U_cav)",
+                    "",
+                    "Caveat",
+                    "This does not reconstruct δₛ and can be badly biased when the bump modifies the closed-orbit family during the RF sweep.",
+                ],
+            },
+            "beam_energy": {
+                "label": "Beam energy",
+                "raw": "δₛ",
+                "derived": "Centroid energy from BPM-reconstructed momentum offset",
+                "current": lambda current, sweep, osc, res, quality: "%s MeV" % self._format_plot_value(current.get("beam_energy_from_bpm_mev")),
+                "plot_keys": ["beam_energy_mev", "delta_s", "rf_offset_hz"],
+                "theory": [
+                    "Equation",
+                    "E ≈ E0 · (1 + δₛ)",
+                    "",
+                    "Meaning",
+                    "This is the centroid energy inferred from the BPM-based momentum reconstruction, not a direct spectrometer readout.",
+                ],
+            },
+            "sigma_delta": {
+                "label": "σδ",
+                "raw": "QPD00 σx in L4",
+                "derived": "First-order momentum-spread proxy",
+                "current": lambda current, sweep, osc, res, quality: self._format_plot_value(current.get("qpd_l4_sigma_delta_first_order")),
+                "plot_keys": ["sigma_delta", "qpd_l4_sigma_x_mm", "qpd_l4_sigma_y_mm"],
+                "theory": [
+                    "Equation",
+                    "σx² ≈ βx εx + (ηx σδ)²",
+                    "σE ≈ E0 · σδ",
+                    "",
+                    "Meaning",
+                    "This is a first-order spread proxy from QPD00 in a dispersive region, not a full longitudinal phase-space measurement.",
+                ],
+            },
+            "p1_p3": {
+                "label": "P1/P3",
+                "raw": "Scope harmonic monitors",
+                "derived": "Optical SSMB observable",
+                "current": lambda current, sweep, osc, res, quality: "%s / %s" % (self._format_plot_value(current.get("p1_h1_ampl_avg")), self._format_plot_value(current.get("p3_h1_ampl_avg"))),
+                "plot_keys": ["p1_h1_ampl_avg", "p3_h1_ampl_avg", "delta_s"],
+                "theory": [
+                    "Interpretation target",
+                    "P1/P3 respond to the microbunching / phase condition at the interaction region.",
+                    "",
+                    "Working hypothesis",
+                    "RF ramp -> δₛ -> beam arrival-phase offset relative to laser -> changed microbunching condition -> P1/P3 response.",
+                    "",
+                    "Caveat",
+                    "Do not over-interpret P1/P3 unless the source-region orbit is stable and the phase-scan quality gate is green.",
+                ],
+            },
+            "p1_period": {
+                "label": "P1 period",
+                "raw": "P1 time series",
+                "derived": "Rolling FFT/autocorrelation period estimate",
+                "current": lambda current, sweep, osc, res, quality: self._format_short_duration(osc.get("dominant_period_s")),
+                "plot_keys": ["p1_h1_ampl_avg", "climate_kw13_return_temp_c", "bump_orbit_error_mm"],
+                "theory": [
+                    "Meaning",
+                    "This tracks the dominant slow oscillation period in P1.",
+                    "",
+                    "Method",
+                    "Use rolling FFT and autocorrelation without assuming a perfect sine wave.",
+                    "",
+                    "Use",
+                    "Compare against thermal drift, bump activity, RF drift, and the synchrotron-period sanity check.",
+                ],
+            },
+            "phase_quality": {
+                "label": "Phase-scan quality",
+                "raw": "RF, BPM/QPD stability, fit presence",
+                "derived": "Live gating score",
+                "current": lambda current, sweep, osc, res, quality: "%s / %s" % ((quality.get("status") or "n/a"), self._format_plot_value(quality.get("score"))),
+                "plot_keys": ["delta_s", "bump_orbit_error_mm", "climate_kw13_return_temp_c"],
+                "theory": [
+                    "Meaning",
+                    "This is a practical live gate for whether P1/P3 can be interpreted primarily as beam-laser phase evolution.",
+                    "",
+                    "Checks",
+                    "RF sweep active, beam stability stable, temperature stable, P1 vs δₛ fit present, BPM α₀ fit present.",
+                ],
+            },
+            "resonance_ratio": {
+                "label": "P1/Qs ratio",
+                "raw": "P1 period + Qs",
+                "derived": "Resonance sanity check",
+                "current": lambda current, sweep, osc, res, quality: self._format_plot_value(res.get("period_ratio_to_qs")),
+                "plot_keys": ["p1_h1_ampl_avg", "tune_s", "rf_offset_hz"],
+                "theory": [
+                    "Meaning",
+                    "Compare the observed slow P1 period with the synchrotron period from Qs.",
+                    "",
+                    "Use",
+                    "If the ratio is huge, the current oscillation is likely a slow control / thermal / optics effect rather than a direct synchrotron-timescale resonance.",
+                ],
+            },
+        }
+
+    def _on_ssmb_study_quantity_selected(self, _event=None) -> None:
+        table = getattr(self, "ssmb_study_table", None)
+        if table is None:
+            return
+        selection = table.selection()
+        if not selection:
+            return
+        self.ssmb_study_quantity_key = selection[0]
+        self._update_ssmb_study_window(self.latest_monitor_summary)
+
+    def _on_ssmb_study_quantity_double_click(self, _event=None) -> None:
+        table = getattr(self, "ssmb_study_table", None)
+        if table is None:
+            return
+        selection = table.selection()
+        if not selection:
+            return
+        self._open_ssmb_quantity_help(selection[0])
+
+    def _open_ssmb_quantity_help(self, key: str) -> None:
+        defs = self._ssmb_study_quantity_defs()
+        payload = defs.get(key)
+        if payload is None:
+            return
+        if self.ssmb_study_quantity_help_window is not None and self.ssmb_study_quantity_help_window.winfo_exists():
+            self.ssmb_study_quantity_help_window.destroy()
+        window = tk.Toplevel(self.root)
+        window.title("%s theory" % payload["label"])
+        self._place_window_on_screen(window, 820, 760, x=130, y=110, relative_to_root=True)
+        text = tk.Text(window, wrap="word")
+        text.pack(fill="both", expand=True, padx=10, pady=10)
+        self._set_text_widget(text, payload.get("theory", []))
+        self.ssmb_study_quantity_help_window = window
+        window.protocol("WM_DELETE_WINDOW", lambda: self._close_ssmb_quantity_help())
+
+    def _close_ssmb_quantity_help(self) -> None:
+        if self.ssmb_study_quantity_help_window is not None and self.ssmb_study_quantity_help_window.winfo_exists():
+            self.ssmb_study_quantity_help_window.destroy()
+        self.ssmb_study_quantity_help_window = None
 
     def _update_ssmb_study_window(self, summary) -> None:
         if self.ssmb_study_window is None or not self.ssmb_study_window.winfo_exists():
@@ -3064,34 +3289,49 @@ class SSMBGui:
         resonance = safe_summary.get("ssmb_resonance", {}) or {}
         beam_stability = safe_summary.get("beam_stability", {}) or {}
         phase_quality = safe_summary.get("phase_scan_quality", {}) or {}
+        sweep_detection = safe_summary.get("rf_sweep_detection", {}) or {}
+        quantity_defs = self._ssmb_study_quantity_defs()
         if self.ssmb_study_table is not None and self.ssmb_study_table.winfo_exists():
             rows = [
-                ("δₛ", "L4 BPM offsets", "Fit δₛ from BPMZ3L4RP..BPMZ6L4RP using dispersive response", self._format_plot_value(current.get("delta_l4_bpm_first_order"))),
-                ("η", "RF readback + δₛ history", "Fit η from -Δf_RF/f_RF versus δₛ", self._format_plot_value(sweep.get("phase_slip_factor_eta"))),
-                ("α₀ BPM", "η + beam energy", "α₀ = η + 1/γ²", self._format_plot_value(sweep.get("alpha0_from_bpm_eta"))),
-                ("α₀ legacy", "Qs, RF, cavity V, beam E", "Old shortcut cross-check only", self._format_plot_value(current.get("legacy_alpha0_corrected"))),
-                ("Beam energy", "δₛ", "E ≈ E0 · (1 + δₛ)", self._format_plot_value(current.get("beam_energy_from_bpm_mev"))),
-                ("σδ", "QPD00 σx in L4", "First-order spread proxy in dispersive region", self._format_plot_value(current.get("qpd_l4_sigma_delta_first_order"))),
-                ("P1/P3", "scope harmonic monitors", "Optical SSMB observable versus RF, δₛ, and phase-scan quality", "%s / %s" % (self._format_plot_value(current.get("p1_h1_ampl_avg")), self._format_plot_value(current.get("p3_h1_ampl_avg")))),
+                ("delta_s", quantity_defs["delta_s"]),
+                ("eta", quantity_defs["eta"]),
+                ("alpha0_bpm", quantity_defs["alpha0_bpm"]),
+                ("alpha0_legacy", quantity_defs["alpha0_legacy"]),
+                ("beam_energy", quantity_defs["beam_energy"]),
+                ("sigma_delta", quantity_defs["sigma_delta"]),
+                ("p1_p3", quantity_defs["p1_p3"]),
+                ("p1_period", quantity_defs["p1_period"]),
+                ("phase_quality", quantity_defs["phase_quality"]),
+                ("resonance_ratio", quantity_defs["resonance_ratio"]),
             ]
             existing = set(self.ssmb_study_table.get_children())
             desired = set()
-            for quantity, raw, derived, current_value in rows:
-                iid = quantity
+            for iid, payload in rows:
                 desired.add(iid)
-                values = (quantity, raw, derived, current_value)
+                values = (
+                    payload["label"],
+                    payload["raw"],
+                    payload["derived"],
+                    payload["current"](current, sweep, oscillation, resonance, phase_quality),
+                )
                 if self.ssmb_study_table.exists(iid):
                     self.ssmb_study_table.item(iid, values=values)
                 else:
                     self.ssmb_study_table.insert("", "end", iid=iid, values=values)
             for iid in existing - desired:
                 self.ssmb_study_table.delete(iid)
+            if self.ssmb_study_quantity_key not in desired:
+                self.ssmb_study_quantity_key = "delta_s"
+            if self.ssmb_study_quantity_key and self.ssmb_study_table.exists(self.ssmb_study_quantity_key):
+                if tuple(self.ssmb_study_table.selection()) != (self.ssmb_study_quantity_key,):
+                    self.ssmb_study_table.selection_set((self.ssmb_study_quantity_key,))
         lines = [
             "SSMB Oscillation / Resonance Study",
             "",
             "This window is focused on the actual SSMB experiment observables: P1/P3, RF, δₛ, η, α₀, beam energy, momentum spread, and whether the observed light changes are consistent with changing beam-laser phase offset during the RF ramp.",
             "",
             "Live observed quantities",
+            "RF sweep detected: %s" % ("ON (%s)" % (sweep_detection.get("reason") or "n/a") if sweep_detection.get("active") else "OFF/idle"),
             "P1 avg / P3 avg: %s / %s" % (current.get("p1_h1_ampl_avg"), current.get("p3_h1_ampl_avg")),
             "Observed P1 period: %s" % self._format_short_duration(oscillation.get("dominant_period_s")),
             "Observed P1 frequency: %s Hz" % self._format_plot_value(oscillation.get("dominant_frequency_hz")),
@@ -3131,17 +3371,31 @@ class SSMBGui:
             "Working hypothesis: RF ramp -> δₛ -> arrival-phase offset relative to laser -> changed microbunching condition -> P1/P3 response.",
             "Direct live beam-phase / beam-loading monitor: not yet verified in the current PV inventory. Right now the best phase-sensitive chain is indirect: RF, δₛ, η, α₀, plus P1/P3.",
             "With bump on, keep using the derived BPM/QPD chain, but only trust the phase interpretation when the stability and quality checks above stay green.",
+            "Beam loading is not directly measured with a verified cavity sampler PV here yet. The best live heuristic proxies are charge/current stability versus RF/cavity signals and any correlation of energy / δₛ jitter with beam-current jitter.",
             "",
             "Caveat",
             "This is a live heuristic study. Error bars and certainty here are based on rolling FFT/autocorrelation / correlation strength, not a full offline statistical model.",
         ]
         self._set_text_widget(self.ssmb_study_text, lines)
         trend_data = safe_summary.get("trend_data", {}) or {}
+        selected_quantity = quantity_defs.get(self.ssmb_study_quantity_key or "delta_s", quantity_defs["delta_s"])
+        selected_payload = []
+        for metric in selected_quantity.get("plot_keys", []):
+            if metric not in trend_data:
+                continue
+            meta = trend_definitions().get(metric, {"label": metric, "color": "#455a64"})
+            selected_payload.append(
+                (
+                    meta["label"],
+                    self._prepare_plot_series(list(trend_data.get(metric, [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS),
+                    meta["color"],
+                )
+            )
         plot_defs = [
             ("P1/P3 vs RF", [("P1 avg", self._prepare_plot_series(list(trend_data.get("p1_h1_ampl_avg", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa"), ("P3 avg", self._prepare_plot_series(list(trend_data.get("p3_h1_ampl_avg", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#fb8c00"), ("Δf_RF [Hz]", self._prepare_plot_series(list(trend_data.get("rf_offset_hz", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#1e88e5")]),
             ("P1 vs δₛ / E", [("P1 avg", self._prepare_plot_series(list(trend_data.get("p1_h1_ampl_avg", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa"), ("δₛ", self._prepare_plot_series(list(trend_data.get("delta_s", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#43a047"), ("E_BPM [MeV]", self._prepare_plot_series(list(trend_data.get("beam_energy_mev", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#00897b")]),
             ("α₀ / η chain", [("α₀ legacy", self._prepare_plot_series(list(trend_data.get("legacy_alpha0", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#ef6c00"), ("α₀ BPM", self._prepare_plot_series(list(trend_data.get("bpm_alpha0", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa"), ("σδ", self._prepare_plot_series(list(trend_data.get("sigma_delta", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#6d4c41")]),
-            ("Slow-driver context", [("KW13 temp", self._prepare_plot_series(list(trend_data.get("climate_kw13_return_temp_c", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#00838f"), ("QPD00 center", self._prepare_plot_series(list(trend_data.get("qpd_l4_center_x_avg_um", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#6a1b9a"), ("Bump error", self._prepare_plot_series(list(trend_data.get("bump_orbit_error_mm", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#c2185b")]),
+            ((selected_quantity.get("label") or "Selected quantity") + " detail", selected_payload),
         ]
         for canvas, (title, payload) in zip(self.ssmb_study_canvases, plot_defs):
             canvas.delete("all")
