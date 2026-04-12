@@ -1946,13 +1946,27 @@ class SSMBGui:
         if self._updating_monitor_plot_selector:
             return
         selected = [item for item in tree.selection() if item in options]
-        if not selected and options:
-            selected = [options[0]]
-            tree.selection_set(options[0])
-        self.monitor_plot_controls[section_key] = selected
+        if not selected:
+            return
+        clicked = selected[-1]
+        current = list(self.monitor_plot_controls.get(section_key) or [])
+        if clicked in current:
+            if len(current) > 1:
+                current = [item for item in current if item != clicked]
+        else:
+            current.append(clicked)
+        current = [item for item in current if item in options]
+        if not current and options:
+            current = [options[0]]
+        self.monitor_plot_controls[section_key] = current
+        self._updating_monitor_plot_selector = True
+        try:
+            tree.selection_set(tuple(current))
+        finally:
+            self._updating_monitor_plot_selector = False
         for key in options:
             if tree.exists(key):
-                tree.set(key, "enabled", "[x]" if key in selected else "[ ]")
+                tree.set(key, "enabled", "[x]" if key in current else "[ ]")
         self._update_monitor_dashboard(self.latest_monitor_summary)
 
     def _show_monitor_section_help(self, section: dict) -> None:
