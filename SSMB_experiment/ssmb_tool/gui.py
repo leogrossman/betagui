@@ -1100,14 +1100,6 @@ class SSMBGui:
         self._set_text_widget(self.monitor_channels_text, channel_lines)
         try:
             self._update_rf_sweep_jump_label(payload.get("summary"))
-            if self.monitor_window is not None and self.monitor_window.winfo_exists():
-                if self.monitor_window_summary_text is not None:
-                    self._set_text_widget(self.monitor_window_summary_text, summary_lines)
-                if self.monitor_window_channels_text is not None:
-                    self._set_text_widget(self.monitor_window_channels_text, channel_lines)
-                self._queue_monitor_dashboard_render(payload.get("summary"))
-            elif self.monitor_overview_window is not None and self.monitor_overview_window.winfo_exists():
-                self._queue_monitor_dashboard_render(payload.get("summary"))
             if self.oscillation_window is not None and self.oscillation_window.winfo_exists():
                 self._update_oscillation_window(self._ensure_extended_monitor_summary() or payload.get("summary"))
             self._refresh_lattice_view()
@@ -1346,7 +1338,6 @@ class SSMBGui:
         ttk.Button(button_row, text="Open Theory Window", command=self._open_theory_window).pack(side="left")
         ttk.Button(button_row, text="Open Oscillation Study", command=self._open_oscillation_window).pack(side="left", padx=6)
         ttk.Button(button_row, text="Open SSMB Study", command=self._open_ssmb_study_window).pack(side="left", padx=6)
-        ttk.Button(button_row, text="Open Overview Window", command=self._open_monitor_overview_window).pack(side="left", padx=6)
         ttk.Button(button_row, text="Live Monitor Settings…", command=self._open_monitor_settings_window).pack(side="left", padx=6)
         self.monitor_window_jump_sweep_button = ttk.Button(button_row, text="Go To RF Sweep", command=self._focus_rf_sweep_tab)
         self.monitor_window_jump_sweep_button.pack(side="left", padx=6)
@@ -1424,19 +1415,18 @@ class SSMBGui:
         body.columnconfigure(0, weight=1)
         body.columnconfigure(1, weight=0)
         body.rowconfigure(0, weight=1)
-        body.rowconfigure(1, weight=0)
         canvas = tk.Canvas(body, bg="white", width=960, height=420, highlightthickness=1, highlightbackground="#cfd8dc")
         canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         side = ttk.Frame(body)
-        side.grid(row=0, column=1, rowspan=2, sticky="ns")
+        side.grid(row=0, column=1, sticky="ns")
         selector_header = ttk.Frame(side)
         selector_header.grid(row=0, column=0, sticky="ew")
-        ttk.Label(selector_header, text="Plot metrics").pack(side="left")
+        ttk.Label(selector_header, text="Plot").pack(side="left")
         help_button = ttk.Button(selector_header, text="?", width=2)
         help_button.pack(side="right")
         settings_button = ttk.Button(selector_header, text="⚙", width=2)
         settings_button.pack(side="right", padx=(0, 4))
-        selector = ttk.Treeview(side, columns=("enabled", "metric", "value"), show="headings", height=10, selectmode="extended")
+        selector = ttk.Treeview(side, columns=("enabled", "metric", "value"), show="headings", height=8, selectmode="extended")
         selector.heading("enabled", text="Use")
         selector.heading("metric", text="Metric")
         selector.heading("value", text="Latest")
@@ -1444,8 +1434,8 @@ class SSMBGui:
         selector.column("metric", width=180, anchor="w")
         selector.column("value", width=96, anchor="e")
         selector.grid(row=1, column=0, sticky="ns")
-        text = tk.Text(side, wrap="word", height=8, width=40)
-        text.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        text = tk.Text(detail, wrap="word", height=4, width=100)
+        text.grid(row=1, column=0, sticky="ew", pady=(6, 0))
         text.configure(state="disabled")
         self.monitor_section_tree = section_tree
         self.monitor_section_widgets = [({"key": ""}, {"card": detail, "text": text, "help_button": help_button, "settings_button": settings_button, "selector": selector, "canvas": canvas})]
@@ -1548,28 +1538,15 @@ class SSMBGui:
             "",
             "Start Live Monitor or reload a recent history cache.",
         ]
-        text_started = time.monotonic()
         if self.monitor_window_summary_text is not None:
             self._set_text_widget(self.monitor_window_summary_text, summary_lines)
         if self.monitor_window_channels_text is not None:
             self._set_text_widget(self.monitor_window_channels_text, channel_lines)
-        text_elapsed = time.monotonic() - text_started
         started = time.monotonic()
         self._update_monitor_dashboard(summary)
-        dashboard_elapsed = time.monotonic() - started
-        overview_window = getattr(self, "monitor_overview_window", None)
-        if overview_window is not None and overview_window.winfo_exists():
-            overview_started = time.monotonic()
-            self._update_monitor_overview(summary)
-            overview_elapsed = time.monotonic() - overview_started
-        else:
-            overview_elapsed = 0.0
-        total_elapsed = text_elapsed + dashboard_elapsed + overview_elapsed
-        if total_elapsed > 0.25:
-            self._debug(
-                "monitor window snapshot render took %.3f s (text=%.3f dashboard=%.3f overview=%.3f)"
-                % (total_elapsed, text_elapsed, dashboard_elapsed, overview_elapsed)
-            )
+        elapsed = time.monotonic() - started
+        if elapsed > 0.25:
+            self._debug("monitor window snapshot render took %.3f s" % elapsed)
 
     def _reload_monitor_window_from_cache(self) -> None:
         if self.monitor_window is None or not self.monitor_window.winfo_exists():

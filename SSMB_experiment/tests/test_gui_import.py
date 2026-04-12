@@ -109,37 +109,6 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         app._refresh_lattice_view.assert_called_once()
         app._queue_monitor_dashboard_render.assert_not_called()
 
-    def test_update_live_monitor_queues_dashboard_render_when_monitor_window_open(self):
-        import SSMB_experiment.ssmb_tool.gui as gui
-
-        class _Exists:
-            def winfo_exists(self):
-                return True
-
-        app = object.__new__(gui.SSMBGui)
-        app.latest_monitor_sample = None
-        app.latest_monitor_summary = None
-        app.monitor_summary_text = mock.Mock()
-        app.monitor_channels_text = mock.Mock()
-        app.monitor_window = _Exists()
-        app.monitor_window_summary_text = mock.Mock()
-        app.monitor_window_channels_text = mock.Mock()
-        app.monitor_overview_window = None
-        app.oscillation_window = None
-        app._set_text_widget = mock.Mock()
-        app._update_rf_sweep_jump_label = mock.Mock()
-        app._refresh_lattice_view = mock.Mock()
-        app._queue_monitor_dashboard_render = mock.Mock()
-        app._append_log = mock.Mock()
-        payload = {
-            "summary_lines": ["a"],
-            "channel_lines": ["b"],
-            "sample": {"sample_index": 1},
-            "summary": {"current": {}},
-        }
-        gui.SSMBGui._update_live_monitor(app, payload)
-        app._queue_monitor_dashboard_render.assert_called_once_with(payload["summary"])
-
     def test_refresh_monitor_window_snapshot_updates_widgets_and_dashboard(self):
         import SSMB_experiment.ssmb_tool.gui as gui
 
