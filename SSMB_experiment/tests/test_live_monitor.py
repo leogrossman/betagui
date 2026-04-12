@@ -8,6 +8,7 @@ from SSMB_experiment.ssmb_tool.live_monitor import (
     build_theory_sections,
     detect_rf_sweep_active,
     format_oscillation_study,
+    _phase_scan_quality,
     summarize_live_monitor,
     trend_definitions,
 )
@@ -173,6 +174,9 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         self.assertIn("x̄ = (x_K1 + x_L2 + x_K3 + x_L4) / 4", bump_section["equations"])
         machine_section = [section for section in sections if section["title"] == "Machine State"][0]
         self.assertTrue(any(label == "Sweep beam stability" for label, _value in machine_section["rows"]))
+        self.assertTrue(any(label == "Phase-scan quality" for label, _value in machine_section["rows"]))
+        alpha_quality_row = [value for label, value in alpha_section["rows"] if label == "Phase-scan quality"]
+        self.assertTrue(alpha_quality_row)
 
     def test_theory_sections_and_trend_catalog_exist(self):
         samples = [
@@ -220,11 +224,12 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         summary = summarize_live_monitor(samples)
         theory = build_theory_sections(summary)
         self.assertTrue(any(section["title"] == "2. Bump-Controlled Orbit Family" for section in theory))
+        self.assertTrue(any(section["title"] == "3. Phase-Scan Quality Gate" for section in theory))
         raw_section = [section for section in theory if section["title"] == "1. Raw Instruments"][0]
         self.assertTrue(any("TUNEZRP:measX" in line for line in raw_section["lines"]))
         self.assertTrue(any("KLIMAC1CP:coolKW13:rdRetTemp" in line for line in raw_section["lines"]))
         self.assertTrue(any("No verified live cavity pickup" in line for line in raw_section["lines"]))
-        spread_section = [section for section in theory if section["title"] == "6. Spread And Coherent-Light Observables"][0]
+        spread_section = [section for section in theory if section["title"] == "7. Spread And Coherent-Light Observables"][0]
         self.assertTrue(any("arrival phase relative to the laser" in line for line in spread_section["lines"]))
         env_section = [section for section in build_monitor_sections(summary) if section["title"] == "Camera Centers And Temperature"][0]
         self.assertTrue(any(label == "QPD00 center X avg" for label, _value in env_section["rows"]))
@@ -233,6 +238,21 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         self.assertIn("bump_orbit_error_mm", summary["trend_data"])
         self.assertIn("p1_h1_ampl_avg", trend_definitions())
         self.assertIn("climate_kw13_return_temp_c", trend_definitions())
+
+    def test_phase_scan_quality_ready_when_all_conditions_present(self):
+        summary = {
+            "rf_sweep_detection": {"active": True},
+            "beam_stability": {"stable": True},
+            "temperature_state": {"unstable": False},
+            "rf_sweep_metrics": {
+                "p1_vs_delta": {"slope": 123.0},
+                "alpha0_from_bpm_eta": 2.0e-5,
+            },
+        }
+        quality = _phase_scan_quality(summary)
+        self.assertEqual(quality["status"], "ready")
+        self.assertEqual(len(quality["checks"]), 5)
+        self.assertTrue(all(check["ok"] for check in quality["checks"]))
 
     def test_p1_oscillation_study_finds_period_and_candidate(self):
         samples = []

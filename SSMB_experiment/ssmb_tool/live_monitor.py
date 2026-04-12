@@ -589,6 +589,7 @@ def summarize_live_monitor(
     }
     summary["temperature_state"] = _summarize_temperature_state(summary)
     summary["beam_stability"] = _beam_stability_state(summary)
+    summary["phase_scan_quality"] = _phase_scan_quality(summary)
     summary["alpha_assessment"] = assess_alpha_monitor(summary) if include_extended else {
         "legacy_alpha0": (summary.get("current") or {}).get("legacy_alpha0_corrected"),
         "bpm_alpha0": None,
@@ -706,6 +707,42 @@ def _beam_stability_state(summary: Dict[str, object]) -> Dict[str, object]:
         "l2_offset_mm": l2_offset,
         "qpd01_center_x_um": qpd01_center,
         "nonlinear_bpms_present": nonlinear,
+        "message": message,
+    }
+
+
+def _phase_scan_quality(summary: Dict[str, object]) -> Dict[str, object]:
+    sweep = (summary.get("rf_sweep_detection") or {})
+    beam_stability = (summary.get("beam_stability") or {})
+    temp_state = (summary.get("temperature_state") or {})
+    rf_metrics = (summary.get("rf_sweep_metrics") or {})
+
+    checks = [
+        ("RF sweep active", bool(sweep.get("active"))),
+        ("Beam stability stable", bool(beam_stability.get("stable"))),
+        ("Temperature stable", not bool(temp_state.get("unstable"))),
+        ("P1 vs δₛ fit present", (rf_metrics.get("p1_vs_delta") or {}).get("slope") is not None),
+        ("α₀ BPM fit present", rf_metrics.get("alpha0_from_bpm_eta") is not None),
+    ]
+    passed = sum(1 for _label, ok in checks if ok)
+    score = 100.0 * passed / float(len(checks) or 1)
+    if passed == len(checks):
+        status = "ready"
+        color = "green"
+        message = "Phase scan quality is strong: RF sweep, source-region stability, and BPM-based phase-slip / α₀ inference are all present."
+    elif passed >= 3:
+        status = "usable"
+        color = "yellow"
+        message = "Phase scan is partly usable, but one or more supporting conditions are missing. Interpret P1/P3 cautiously."
+    else:
+        status = "poor"
+        color = "red"
+        message = "Phase scan quality is poor. The current scan is not yet well constrained enough to interpret P1/P3 primarily as beam-laser phase evolution."
+    return {
+        "score": score,
+        "status": status,
+        "color": color,
+        "checks": [{"label": label, "ok": ok} for label, ok in checks],
         "message": message,
     }
 
@@ -838,6 +875,7 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
     oscillation = summary.get("oscillation_study", {})
     temp_state = summary.get("temperature_state", {})
     beam_stability = summary.get("beam_stability", {})
+    phase_quality = summary.get("phase_scan_quality", {})
     sections = [
         {
             "key": "machine_state",
@@ -852,6 +890,7 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 ("RF sweep detected", "ON" if summary.get("rf_sweep_detection", {}).get("active") else "OFF/idle"),
                 ("L4 bump", "%s" % bump.get("state_label", "unknown")),
                 ("Sweep beam stability", beam_stability.get("status", "n/a")),
+                ("Phase-scan quality", "%s / %.0f" % ((phase_quality.get("status") or "n/a"), float(phase_quality.get("score") or 0.0))),
                 ("Temperature state", "UNSTABLE" if temp_state.get("unstable") else "stable"),
                 ("Temp deviation", "%s C" % _fmt(temp_state.get("max_deviation_c"))),
                 ("Bump max |I|", "%s A" % _fmt(bump.get("max_abs_corrector_a"))),
@@ -989,12 +1028,13 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
         {
             "key": "alpha_phase_slip",
             "title": "α₀ And Phase Slip",
-            "color": alpha.get("color", "yellow"),
+            "color": phase_quality.get("color", alpha.get("color", "yellow")),
             "rows": [
                 ("Legacy α₀", _fmt(alpha.get("legacy_alpha0"))),
                 ("BPM α₀", _fmt(alpha.get("bpm_alpha0"))),
                 ("Legacy - BPM", _fmt(alpha.get("difference"))),
                 ("η (phase slip)", _fmt(sweep.get("phase_slip_factor_eta"))),
+                ("Phase-scan quality", "%s / %.0f" % ((phase_quality.get("status") or "n/a"), float(phase_quality.get("score") or 0.0))),
                 ("Bump contamination", "likely" if alpha.get("contamination_likely") else "not evident"),
                 ("Beam stability", beam_stability.get("status", "n/a")),
             ],
@@ -1003,7 +1043,7 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 "α₀ = η + 1/γ²",
                 "α₀,legacy ∝ Qₛ² · E / (f_RF² · U_cav)",
             ],
-            "note": alpha.get("message") + " For the SSMB experiment, α₀ matters because it controls how RF detuning maps into momentum and therefore into arrival-phase offset relative to the laser.",
+            "note": ((phase_quality.get("message") or "") + " " + (alpha.get("message") or "")).strip() + " For the SSMB experiment, α₀ matters because it controls how RF detuning maps into momentum and therefore into arrival-phase offset relative to the laser.",
             "default_trend": "alpha_difference",
             "trend_options": ["alpha_difference", "bpm_alpha0", "legacy_alpha0", "delta_s", "rf_offset_hz"],
         },
@@ -1048,6 +1088,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
     environment = summary.get("environment_monitor", {})
     oscillation = summary.get("oscillation_study", {})
     beam_stability = summary.get("beam_stability", {})
+    phase_quality = summary.get("phase_scan_quality", {})
     return [
         {
             "title": "1. Raw Instruments",
@@ -1074,6 +1115,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
                 "The recovered notebook shows a scalar orbit-lock loop, not a feed-forward RF-to-bump table.",
                 "Operationally, the bump is being used so that during the RF ramp the beam arrives with a shifted phase offset relative to the laser while the source-region orbit is kept stable enough for that phase scan to be interpretable.",
                 "Because BPMZ1L2RP is in L2 near the undulator side, the loop helps keep the source-region orbit centered, but the resulting closed orbit is still global.",
+                "With bump on, the safest live interpretation still comes from derived beam-state quantities reconstructed from raw measurements: BPM-based δₛ, BPM/QPD beam-stability checks, η from RF-vs-δₛ, then BPM-based α₀.",
                 "Current live bump state: %s, orbit error = %s mm, P1avg-vs-bump slope = %s" % (
                     bump.get("state_label", "unknown"),
                     _fmt(current.get("bump_orbit_error_mm")),
@@ -1082,7 +1124,21 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             ],
         },
         {
-            "title": "3. Momentum Offset δₛ",
+            "title": "3. Phase-Scan Quality Gate",
+            "equations": [
+                "usable scan = RF sweep active + stable source-region orbit + stable temperature + P1(δₛ) fit + BPM α₀ fit",
+            ],
+            "lines": [
+                "This live score is meant to answer the practical question: can we currently interpret P1/P3 mainly as beam-laser phase evolution rather than orbit drift or thermal drift?",
+                "Current phase-scan quality: %s / %.0f" % ((phase_quality.get("status") or "n/a"), float(phase_quality.get("score") or 0.0)),
+                phase_quality.get("message", "Phase-scan quality not yet available."),
+            ] + [
+                "%s: %s" % (check.get("label"), "yes" if check.get("ok") else "no")
+                for check in (phase_quality.get("checks") or [])
+            ],
+        },
+        {
+            "title": "4. Momentum Offset δₛ",
             "equations": [
                 "Δx_i = x_i - x_{i,ref}",
                 "Δx_i ≈ D_{x,i} · δₛ",
@@ -1096,7 +1152,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             ],
         },
         {
-            "title": "4. Phase Slip Factor η",
+            "title": "5. Phase Slip Factor η",
             "equations": [
                 "-Δf_RF / f_RF ≈ η · δₛ",
                 "η = -(1/f_RF) · d f_RF / dδₛ",
@@ -1109,7 +1165,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             ],
         },
         {
-            "title": "5. Momentum Compaction α₀",
+            "title": "6. Momentum Compaction α₀",
             "equations": [
                 "α₀ = η + 1/γ²",
                 "α₀,legacy ∝ Qₛ² · E / (f_RF² · U_cav)",
@@ -1125,7 +1181,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             ],
         },
         {
-            "title": "6. Spread And Coherent-Light Observables",
+            "title": "7. Spread And Coherent-Light Observables",
             "equations": [
                 "σₓ² ≈ βₓ εₓ + (ηₓ σδ)²",
                 "σ_E ≈ E₀ · σδ",
@@ -1145,7 +1201,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             ],
         },
         {
-            "title": "7. P1 Oscillation Study",
+            "title": "8. P1 Oscillation Study",
             "equations": [
                 "Estimate dominant P1avg period from rolling FFT/autocorrelation",
                 "Compare candidate channels using correlation, lag, and harmonic-period match",

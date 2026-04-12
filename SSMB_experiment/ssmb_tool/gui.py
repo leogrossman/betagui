@@ -3025,6 +3025,7 @@ class SSMBGui:
         oscillation = safe_summary.get("oscillation_study", {}) or {}
         resonance = safe_summary.get("ssmb_resonance", {}) or {}
         beam_stability = safe_summary.get("beam_stability", {}) or {}
+        phase_quality = safe_summary.get("phase_scan_quality", {}) or {}
         lines = [
             "SSMB Oscillation / Resonance Study",
             "",
@@ -3044,6 +3045,17 @@ class SSMBGui:
             "Beam energy / σδ: %s MeV / %s" % (self._format_plot_value(current.get("beam_energy_from_bpm_mev")), self._format_plot_value(current.get("qpd_l4_sigma_delta_first_order"))),
             "Beam stability during sweep: %s" % (beam_stability.get("status") or "n/a"),
             beam_stability.get("message", "Beam-stability assessment unavailable."),
+            "Phase-scan quality: %s / %s" % (
+                (phase_quality.get("status") or "n/a"),
+                self._format_plot_value(phase_quality.get("score")),
+            ),
+            phase_quality.get("message", "Phase-scan quality assessment unavailable."),
+            "Checks: %s" % (
+                ", ".join(
+                    "%s=%s" % (check.get("label"), "yes" if check.get("ok") else "no")
+                    for check in (phase_quality.get("checks") or [])
+                ) or "n/a"
+            ),
             "",
             "Resonance sanity check",
             "Synchrotron period from Qs: %s" % self._format_short_duration(resonance.get("synchrotron_period_s")),
@@ -3053,6 +3065,7 @@ class SSMBGui:
             "Phase interpretation",
             "Working hypothesis: RF ramp -> δₛ -> arrival-phase offset relative to laser -> changed microbunching condition -> P1/P3 response.",
             "Direct live beam-phase / beam-loading monitor: not yet verified in the current PV inventory. Right now the best phase-sensitive chain is indirect: RF, δₛ, η, α₀, plus P1/P3.",
+            "With bump on, keep using the derived BPM/QPD chain, but only trust the phase interpretation when the stability and quality checks above stay green.",
             "",
             "Caveat",
             "This is a live heuristic study. Error bars and certainty here are based on rolling FFT/autocorrelation / correlation strength, not a full offline statistical model.",
