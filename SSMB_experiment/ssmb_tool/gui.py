@@ -41,6 +41,7 @@ except ImportError:  # pragma: no cover - depends on host GUI packages
 
 HISTORY_TAIL_READ_BYTES = 2 * 1024 * 1024
 HISTORY_COMPACT_BYTES = 8 * 1024 * 1024
+LIVE_MONITOR_EXCLUDED_TAGS = {"ring", "quadrupole", "sextupole", "octupole"}
 
 
 def _parse_text_mapping(text: str) -> dict[str, str]:
@@ -51,6 +52,21 @@ def _parse_text_mapping(text: str) -> dict[str, str]:
             continue
         items.append(line)
     return parse_labeled_pvs(items)
+
+
+def _filter_live_monitor_specs(specs, extra_labels: Sequence[str]):
+    selected = set(extra_labels or ())
+    filtered = []
+    for spec in specs:
+        if spec.label in selected:
+            filtered.append(spec)
+            continue
+        if spec.kind == "waveform":
+            continue
+        if any(tag in LIVE_MONITOR_EXCLUDED_TAGS for tag in (spec.tags or ())):
+            continue
+        filtered.append(spec)
+    return filtered
 
 
 class SSMBGui:
@@ -527,11 +543,15 @@ class SSMBGui:
 
     def _build_live_specs(self) -> None:
         try:
-            config = self._collect_logger_config(allow_writes=False)
-            _lattice, specs = build_specs(config)
+            _lattice, specs = self._build_monitor_specs()
         except Exception:
             return
         self.live_spec_lookup = spec_index(specs)
+
+    def _build_monitor_specs(self):
+        config = self._collect_logger_config(allow_writes=False)
+        _lattice, specs = build_specs(config)
+        return _lattice, _filter_live_monitor_specs(specs, self._extra_monitor_labels())
 
     def _open_candidate_picker(self) -> None:
         window = tk.Toplevel(self.root)
@@ -580,14 +600,15 @@ class SSMBGui:
         ttk.Entry(controls, textvariable=monitor_history_span_var, width=12).grid(row=0, column=3, sticky="w")
         ttk.Label(
             controls,
-            text="All configured live-monitor PVs are sampled by the single central monitor loop. Use this window to tune rate/span and promote extra channels into the live analysis context.",
+            text="The live monitor uses a lean default PV subset for responsiveness. Use this window to tune rate/span and promote extra channels into the live analysis context when you need extra lattice/debug detail.",
             wraplength=680,
             justify="left",
             foreground="#607d8b",
         ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(8, 0))
 
         current_config = self._collect_logger_config(allow_writes=False)
-        _lattice, specs = build_specs(current_config)
+        _lattice, all_specs = build_specs(current_config)
+        specs = _filter_live_monitor_specs(all_specs, self._extra_monitor_labels())
         labels = [spec.label for spec in specs if spec.pv]
         selected_now = set(self._extra_monitor_labels())
 
@@ -618,8 +639,9 @@ class SSMBGui:
         scroll = ttk.Scrollbar(picker, orient="vertical", command=table.yview)
         scroll.grid(row=0, column=1, sticky="ns")
         table.configure(yscrollcommand=scroll.set)
-        spec_map = {spec.label: spec for spec in specs if spec.pv}
-        for label in labels:
+        spec_map = {spec.label: spec for spec in all_specs if spec.pv}
+        all_labels = [spec.label for spec in all_specs if spec.pv]
+        for label in all_labels:
             spec = spec_map[label]
             use = "[x]" if label in current_selected else "[ ]"
             table.insert(
@@ -633,7 +655,7 @@ class SSMBGui:
 
         def sync_selection(_event=None):
             chosen = set(table.selection())
-            for label in labels:
+            for label in all_labels:
                 current_use = "[x]" if label in chosen else "[ ]"
                 table.set(label, "use", current_use)
 
@@ -1039,13 +1061,15 @@ class SSMBGui:
     def _monitor_loop(self, interval: float) -> None:
         try:
             config = self._collect_logger_config(allow_writes=False)
-            adapter = ReadOnlyEpicsAdapter(timeout=config.timeout_seconds)
-            _lattice, specs = build_specs(config)
+            adapter = ReadOnlyEpicsAdapter(timeout=min(config.timeout_seconds, 0.25))
+            _lattice, specs = self._build_monitor_specs()
             self.live_spec_lookup = spec_index(specs)
+            self.queue.put("Live monitor using %d PV channels (lean subset + selected extras)." % len(specs))
             sample_index = 0
             start = time.monotonic()
             derived_context = None
             while self.monitor_stop_event is not None and not self.monitor_stop_event.is_set():
+                sample_started = time.monotonic()
                 sample = self._capture_monitor_sample(adapter, specs, sample_index, time.monotonic() - start, derived_context)
                 if derived_context is None:
                     derived_context = {
@@ -1068,6 +1092,9 @@ class SSMBGui:
                         "summary": summary,
                     }
                 )
+                elapsed = time.monotonic() - sample_started
+                if elapsed > max(1.0, 1.5 * interval):
+                    self.queue.put("Live monitor sample %d took %.2f s for %d PVs." % (sample_index, elapsed, len(specs)))
                 sample_index += 1
                 if self.monitor_stop_event.wait(interval):
                     break

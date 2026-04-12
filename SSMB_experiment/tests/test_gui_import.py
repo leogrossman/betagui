@@ -28,6 +28,30 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         args = parser.parse_args(["--unsafe-start"])
         self.assertTrue(args.unsafe_start)
 
+    def test_live_monitor_filter_stays_lean_by_default(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+        from SSMB_experiment.ssmb_tool.config import LoggerConfig
+        from SSMB_experiment.ssmb_tool.log_now import build_specs
+
+        cfg = LoggerConfig(
+            duration_seconds=60.0,
+            sample_hz=1.0,
+            include_bpm_buffer=True,
+            include_candidate_bpm_scalars=True,
+            include_ring_bpm_scalars=True,
+            include_quadrupoles=True,
+            include_sextupoles=True,
+            include_octupoles=True,
+        )
+        _lattice, specs = build_specs(cfg)
+        filtered = gui._filter_live_monitor_specs(specs, [])
+        labels = {spec.label for spec in filtered}
+        self.assertNotIn("bpm_buffer_raw", labels)
+        self.assertNotIn("bpmz1k1rp_x", labels)
+        self.assertIn("p1_h1_ampl_avg", labels)
+        self.assertIn("climate_kw13_return_temp_c", labels)
+        self.assertIn("qpd_l4_sigma_x", labels)
+
 
 if __name__ == "__main__":
     unittest.main()
