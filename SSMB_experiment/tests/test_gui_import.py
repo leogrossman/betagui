@@ -72,6 +72,29 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         self.assertIn("ssmb_experiment_live_monitor", str(path))
         self.assertNotIn("/tmp/betagui/SSMB_experiment/.ssmb_local", str(path))
 
+    def test_lattice_inspection_config_uses_replace_for_frozen_logger_config(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+        from SSMB_experiment.ssmb_tool.config import LoggerConfig
+
+        app = object.__new__(gui.SSMBGui)
+        base = LoggerConfig(
+            include_candidate_bpm_scalars=False,
+            include_ring_bpm_scalars=False,
+            include_quadrupoles=False,
+            include_sextupoles=False,
+            include_octupoles=False,
+        )
+        app._collect_logger_config = mock.Mock(return_value=base)
+
+        updated = gui.SSMBGui._lattice_inspection_config(app)
+
+        self.assertFalse(base.include_candidate_bpm_scalars)
+        self.assertTrue(updated.include_candidate_bpm_scalars)
+        self.assertTrue(updated.include_ring_bpm_scalars)
+        self.assertTrue(updated.include_quadrupoles)
+        self.assertTrue(updated.include_sextupoles)
+        self.assertTrue(updated.include_octupoles)
+
     def test_open_monitor_window_can_handle_no_live_sample(self):
         import SSMB_experiment.ssmb_tool.gui as gui
 

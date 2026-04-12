@@ -11,6 +11,7 @@ import shutil
 import threading
 import time
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -1335,6 +1336,7 @@ class SSMBGui:
         self.monitor_window_bump_state.pack(side="left", padx=6)
         self.monitor_window_temp_state = tk.Label(state_row, text="Temp stable", bg="#2e7d32", fg="white", padx=10, pady=4)
         self.monitor_window_temp_state.pack(side="left", padx=6)
+        self.monitor_window_temp_state.bind("<Button-1>", lambda _event: self._open_temperature_view())
         self.monitor_window_logger_state = tk.Label(state_row, text="Logger idle", bg="#546e7a", fg="white", padx=10, pady=4)
         self.monitor_window_logger_state.pack(side="left", padx=6)
         helper = ttk.Label(
@@ -1417,7 +1419,7 @@ class SSMBGui:
         selector.column("metric", width=180, anchor="w")
         selector.column("value", width=96, anchor="e")
         selector.grid(row=1, column=0, sticky="ns")
-        text = tk.Text(side, wrap="word", height=8, width=38)
+        text = tk.Text(side, wrap="word", height=14, width=38)
         text.grid(row=2, column=0, sticky="ew", pady=(6, 0))
         text.configure(state="disabled")
         self.monitor_section_tree = section_tree
@@ -1780,6 +1782,7 @@ class SSMBGui:
                 height - 10,
                 max(10, self._window_samples_for_seconds(LONG_STUDY_PLOT_WINDOW_S)),
                 actual_samples=actual_samples,
+                independent_scales=True,
             )
             canvas.create_text(width / 2, 6, anchor="n", text=title, fill="#37474f", font=("Helvetica", 10, "bold"))
 
@@ -2104,6 +2107,7 @@ class SSMBGui:
             window_samples,
             use_log_override=settings.get("log_y"),
             actual_samples=actual_samples,
+            independent_scales=len(series_payload) > 1,
         )
 
     def _draw_series(self, canvas, values, x0, y0, x1, y1, color, label):
@@ -2117,7 +2121,7 @@ class SSMBGui:
         if len(pts) >= 4:
             canvas.create_line(*pts, fill=color, width=2)
 
-    def _draw_multi_series(self, canvas, series_payload, x0, y0, x1, y1, window_samples: int, use_log_override=None, actual_samples=None):
+    def _draw_multi_series(self, canvas, series_payload, x0, y0, x1, y1, window_samples: int, use_log_override=None, actual_samples=None, independent_scales=False):
         canvas.create_rectangle(x0, y0, x1, y1, outline="#cfd8dc")
         use_log = bool(self.monitor_log_scale_var.get()) if use_log_override is None else bool(use_log_override)
         clean_all = []
@@ -2161,15 +2165,20 @@ class SSMBGui:
         plot_y0 = y0 + 38
         plot_x1 = x1 - 8
         plot_y1 = y1 - 22
-        axis_text = "log10 scale" if use_log else ("y / 1e%d" % exponent if scale != 1.0 else "linear scale")
+        axis_text = "independent y-scales" if independent_scales else ("log10 scale" if use_log else ("y / 1e%d" % exponent if scale != 1.0 else "linear scale"))
         label_text = "last %d samples" % displayed_samples if displayed_samples < window_samples else "last %d samples" % window_samples
         canvas.create_text(x0 + 4, y0 + 4, anchor="nw", text=label_text, fill="#607d8b", font=("Helvetica", 8))
         canvas.create_text(x1 - 4, y0 + 4, anchor="ne", text="%.1f s window | %s" % (time_span_s, axis_text), fill="#607d8b", font=("Helvetica", 8))
-        for frac, value in ((0.0, vmax), (0.5, 0.5 * (vmin + vmax)), (1.0, vmin)):
-            y = plot_y0 + frac * (plot_y1 - plot_y0)
-            canvas.create_line(plot_x0, y, plot_x1, y, fill="#eceff1", dash=(2, 2))
-            display_value = value if use_log else value / scale
-            canvas.create_text(plot_x0 - 4, y, anchor="e", text="%.3g" % display_value, fill="#607d8b", font=("Helvetica", 8))
+        if not independent_scales:
+            for frac, value in ((0.0, vmax), (0.5, 0.5 * (vmin + vmax)), (1.0, vmin)):
+                y = plot_y0 + frac * (plot_y1 - plot_y0)
+                canvas.create_line(plot_x0, y, plot_x1, y, fill="#eceff1", dash=(2, 2))
+                display_value = value if use_log else value / scale
+                canvas.create_text(plot_x0 - 4, y, anchor="e", text="%.3g" % display_value, fill="#607d8b", font=("Helvetica", 8))
+        else:
+            for frac in (0.0, 0.5, 1.0):
+                y = plot_y0 + frac * (plot_y1 - plot_y0)
+                canvas.create_line(plot_x0, y, plot_x1, y, fill="#eceff1", dash=(2, 2))
         for frac, label in ((0.0, "-%.0fs" % time_span_s), (0.5, "-%.0fs" % (0.5 * time_span_s)), (1.0, "now")):
             x = plot_x0 + frac * (plot_x1 - plot_x0)
             canvas.create_line(x, plot_y1, x, plot_y1 + 4, fill="#90a4ae")
@@ -2188,9 +2197,12 @@ class SSMBGui:
                     transformed.append(math.log10(numeric) if numeric > 0.0 else None)
                 else:
                     transformed.append(numeric)
-            pts = self._series_to_points(transformed, plot_x0, plot_y0, plot_x1, plot_y1, reference=clean_all)
+            reference = clean_all
+            if independent_scales:
+                reference = [value for value in transformed if isinstance(value, (int, float))]
+            pts = self._series_to_points(transformed, plot_x0, plot_y0, plot_x1, plot_y1, reference=reference)
             if len(pts) >= 4:
-                canvas.create_line(*pts, fill=color, width=2, smooth=True)
+                canvas.create_line(*pts, fill=color, width=2)
 
     def _draw_beam_proxy(self, canvas, center_x, sigma_x, sigma_y, x0, y0, x1, y1, title):
         canvas.create_rectangle(x0, y0, x1, y1, outline="#d7ccc8")
@@ -2240,12 +2252,7 @@ class SSMBGui:
         if self.lattice_window is not None and self.lattice_window.winfo_exists():
             self.lattice_window.lift()
             return
-        config = self._collect_logger_config(allow_writes=False)
-        config.include_candidate_bpm_scalars = True
-        config.include_ring_bpm_scalars = True
-        config.include_quadrupoles = True
-        config.include_sextupoles = True
-        config.include_octupoles = True
+        config = self._lattice_inspection_config()
         lattice, specs = build_specs(config)
         window = tk.Toplevel(self.root)
         window.title("SSMB Live Lattice View")
@@ -2255,7 +2262,7 @@ class SSMBGui:
         outer.columnconfigure(0, weight=1)
         outer.columnconfigure(1, weight=0)
         outer.rowconfigure(0, weight=1)
-        canvas = tk.Canvas(outer, bg="white", height=660)
+        canvas = tk.Canvas(outer, bg="white", height=720)
         canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         side = ttk.Frame(outer)
         side.grid(row=0, column=1, sticky="nsew")
@@ -2280,6 +2287,26 @@ class SSMBGui:
         self._draw_lattice_view(lattice, specs)
         self._refresh_lattice_view()
 
+    def _lattice_inspection_config(self):
+        base = self._collect_logger_config(allow_writes=False)
+        return replace(
+            base,
+            include_candidate_bpm_scalars=True,
+            include_ring_bpm_scalars=True,
+            include_quadrupoles=True,
+            include_sextupoles=True,
+            include_octupoles=True,
+        )
+
+    def _open_temperature_view(self) -> None:
+        self._open_lattice_window()
+        if not self.lattice_device_items:
+            return
+        for item in self.lattice_device_items:
+            if item.get("name") == "Temperature monitor":
+                self._show_lattice_item_info(item)
+                break
+
     def _on_lattice_canvas_configure(self, _event=None) -> None:
         if self.lattice_context is None or self.lattice_specs is None:
             return
@@ -2289,7 +2316,7 @@ class SSMBGui:
         canvas = self.lattice_canvas
         canvas.delete("all")
         width = int(canvas.winfo_width() or 1000)
-        height = int(canvas.winfo_height() or 680)
+        height = int(canvas.winfo_height() or 740)
         left = 60
         right = width - 40
         y_track = 100
@@ -2297,12 +2324,13 @@ class SSMBGui:
             "section": 60,
             "bpm": 160,
             "qpd": 220,
-            "rf": 280,
-            "quadrupole": 350,
-            "sextupole": 410,
-            "dipole": 470,
-            "octupole": 530,
-            "bump": 610,
+            "environment": 280,
+            "rf": 340,
+            "quadrupole": 410,
+            "sextupole": 470,
+            "dipole": 530,
+            "octupole": 590,
+            "bump": 660,
         }
         canvas.create_line(left, y_track, right, y_track, fill="#37474f", width=3)
         self.lattice_device_items = []
@@ -2319,6 +2347,7 @@ class SSMBGui:
         row_specs = (
             ("BPMs", row_positions["bpm"]),
             ("QPD / optics", row_positions["qpd"]),
+            ("Environment", row_positions["environment"]),
             ("RF / tune", row_positions["rf"]),
             ("Quadrupoles", row_positions["quadrupole"]),
             ("Sextupoles", row_positions["sextupole"]),
@@ -2437,6 +2466,14 @@ class SSMBGui:
                 row_positions["qpd"],
             ),
             (
+                "Temperature monitor",
+                "climate_kw13_return_temp_c",
+                "Cooling and SR-area temperature monitor group for checking slow thermal drifts against P1/P3 and orbit motion.",
+                self._element_s_position(lattice, "BM1L2RP", fallback=6.3),
+                "#00838f",
+                row_positions["environment"],
+            ),
+            (
                 "HS1P2K3RP:setCur",
                 "l4_bump_hcorr_k3_upstream",
                 "Recovered bump corrector, mapped to the associated S1 sextupole package in K3 (inferred position).",
@@ -2501,10 +2538,12 @@ class SSMBGui:
                 short_label = "U125"
             elif name == "Laser interaction":
                 short_label = "Laser"
+            elif name == "Temperature monitor":
+                short_label = "Temp"
             else:
                 short_label = name.split(":")[0]
             label_dy = -16
-            if name in ("P1 light monitor", "QPD00ZL4RP", "HS3P2L4RP:setCur"):
+            if name in ("P1 light monitor", "QPD00ZL4RP", "HS3P2L4RP:setCur", "Temperature monitor"):
                 label_dy = -26
             elif name in ("P3 light monitor", "QPD01ZL2RP", "HS3P1L4RP:setCur"):
                 label_dy = 18
@@ -2624,6 +2663,26 @@ class SSMBGui:
                     "Also inspect sigma_y and center drift to see whether the profile monitor itself is moving.",
                 ]
             )
+        if item.get("name") == "Temperature monitor":
+            lines.extend(
+                [
+                    "",
+                    "Temperature channels tracked here:",
+                    "- KW13 return temperature",
+                    "- SR temperature",
+                    "- SR secondary temperature",
+                    "Use this to correlate slow thermal drift against P1/P3 and bump/orbit motion.",
+                ]
+            )
+        if item.get("name") == "U125 undulator":
+            lines.extend(
+                [
+                    "",
+                    "Undulator / interaction marker:",
+                    "This is an inferred lattice marker for the U125 interaction region.",
+                    "No verified live undulator PV is attached yet, but nearby diagnostics include QPD01, BPMZ1L2RP, and the P1/P3 light monitors.",
+                ]
+            )
         if item.get("element_type") == "RFCavity":
             lines.extend(
                 [
@@ -2704,6 +2763,10 @@ class SSMBGui:
         elif item.get("name") == "P3 light monitor":
             series_payload.append(("P3 avg", list(trend_data.get("p3_h1_ampl_avg", [])), "#fb8c00"))
             series_payload.append(("P3 live", list(trend_data.get("p3_h1_ampl", [])), "#f4511e"))
+        elif item.get("name") == "Temperature monitor":
+            series_payload.append(("KW13 temp [C]", list(trend_data.get("climate_kw13_return_temp_c", [])), "#00838f"))
+            series_payload.append(("SR temp [C]", list(trend_data.get("climate_sr_temp_c", [])), "#00695c"))
+            series_payload.append(("SR temp1 [C]", list(trend_data.get("climate_sr_temp1_c", [])), "#26a69a"))
         elif (item.get("pv_label") or "").startswith("l4_bump_hcorr"):
             series_payload.append(("Orbit error [mm]", list(trend_data.get("bump_orbit_error_mm", [])), "#c2185b"))
             series_payload.append(("BPM avg [mm]", list(trend_data.get("bump_bpm_avg_mm", [])), "#00838f"))
@@ -2718,12 +2781,25 @@ class SSMBGui:
             canvas.create_rectangle(10, 10, width - 10, height - 10, outline="#cfd8dc")
             canvas.create_text(width / 2, height / 2, text="No live history yet for this device", fill="#90a4ae")
             return
-        self._draw_multi_series(canvas, series_payload, 10, 10, width - 10, height - 10, max(20, max(len(values) for _label, values, _color in series_payload)))
+        self._draw_multi_series(
+            canvas,
+            series_payload,
+            10,
+            10,
+            width - 10,
+            height - 10,
+            max(20, max(len(values) for _label, values, _color in series_payload)),
+            actual_samples=max((len(values) for _label, values, _color in series_payload), default=0),
+            independent_scales=len(series_payload) > 1,
+        )
         canvas.create_text(width / 2, 12, anchor="n", text="%s live history" % item.get("name", "device"), fill="#37474f", font=("Helvetica", 10, "bold"))
         first_values = [float(value) for value in series_payload[0][1] if isinstance(value, (int, float))]
         if first_values:
             mean = sum(first_values) / len(first_values)
             canvas.create_text(width - 12, height - 10, anchor="se", text="mean %.3g" % mean, fill="#546e7a", font=("Helvetica", 8))
+            if len(first_values) >= 2:
+                slope = (first_values[-1] - first_values[0]) / max(len(first_values) - 1, 1)
+                canvas.create_text(width - 12, height - 24, anchor="se", text="slope %.3g/sample" % slope, fill="#546e7a", font=("Helvetica", 8))
         channels = ((self.latest_monitor_sample or {}).get("channels", {}) or {})
         if item.get("name") == "QPD00ZL4RP":
             self._draw_beam_proxy(
@@ -2996,6 +3072,7 @@ class SSMBGui:
                 height - 10,
                 max(20, self._window_samples_for_seconds(LONG_STUDY_PLOT_WINDOW_S)),
                 actual_samples=actual_samples,
+                independent_scales=len(payload) > 1,
             )
             canvas.create_text(width / 2, 6, anchor="n", text=title, fill="#37474f", font=("Helvetica", 10, "bold"))
 
@@ -3165,6 +3242,7 @@ class SSMBGui:
                 height - 10,
                 max(20, self._window_samples_for_seconds(LONG_STUDY_PLOT_WINDOW_S)),
                 actual_samples=actual_samples,
+                independent_scales=len(payload) > 1,
             )
             bump_canvas.create_text(width / 2, 6, anchor="n", text="Bump loop vs P1", fill="#37474f", font=("Helvetica", 10, "bold"))
         if und_canvas is not None:
@@ -3186,6 +3264,7 @@ class SSMBGui:
                 height - 10,
                 max(20, self._window_samples_for_seconds(LONG_STUDY_PLOT_WINDOW_S)),
                 actual_samples=actual_samples,
+                independent_scales=len(payload) > 1,
             )
             und_canvas.create_text(width / 2, 6, anchor="n", text="Undulator-side anchor and spread proxies", fill="#37474f", font=("Helvetica", 10, "bold"))
 
