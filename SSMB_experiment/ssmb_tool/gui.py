@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import json
 import math
 import queue
 import shutil
@@ -12,6 +13,7 @@ from typing import Optional, Sequence
 
 from .config import LoggerConfig, SSMB_ROOT, parse_labeled_pvs
 from .epics_io import EpicsAdapter, EpicsUnavailableError, ReadOnlyEpicsAdapter
+from .inventory import spec_index
 from .lattice import LatticeElement
 from .live_monitor import (
     build_monitor_sections,
@@ -68,6 +70,7 @@ class SSMBGui:
         self.latest_monitor_summary = None
         self.lattice_device_items = []
         self.selected_lattice_item_name = None
+        self.live_spec_lookup = {}
         self.bump_lab_plot_canvases = {}
         self.oscillation_selected_candidate_key = None
         self.stage0_stop_event: Optional[threading.Event] = None
@@ -75,6 +78,7 @@ class SSMBGui:
         self._build_ui()
         self._apply_profile()
         self._refresh_inventory()
+        self._load_monitor_history_cache()
         self._open_monitor_window()
         self.root.after(100, self._drain_queue)
 
@@ -103,6 +107,7 @@ class SSMBGui:
         self.samples_per_point_var = tk.StringVar(value="1")
         self.sample_spacing_var = tk.StringVar(value="0.0")
         self.monitor_interval_var = tk.StringVar(value="0.5")
+        self.monitor_history_span_var = tk.StringVar(value="600")
         self.rolling_window_var = tk.StringVar(value="600")
         self.monitor_log_scale_var = tk.BooleanVar(value=False)
         self.monitor_candidate_keys_var = tk.StringVar(value="")
@@ -349,6 +354,74 @@ class SSMBGui:
             labels.append(label)
         return labels
 
+    def _monitor_history_path(self) -> Path:
+        return SSMB_ROOT / ".ssmb_local" / "live_monitor" / "history.jsonl"
+
+    def _monitor_history_span_seconds(self) -> float:
+        try:
+            return max(30.0, float(self.monitor_history_span_var.get()))
+        except Exception:
+            return 600.0
+
+    def _trim_monitor_history(self) -> None:
+        if not self.monitor_history:
+            return
+        span_s = self._monitor_history_span_seconds()
+        latest_ts = None
+        latest = self.monitor_history[-1]
+        try:
+            latest_ts = float(latest.get("timestamp_epoch_s"))
+        except Exception:
+            latest_ts = None
+        if latest_ts is None:
+            return
+        cutoff = latest_ts - span_s
+        while self.monitor_history:
+            try:
+                ts = float(self.monitor_history[0].get("timestamp_epoch_s"))
+            except Exception:
+                break
+            if ts >= cutoff:
+                break
+            self.monitor_history.popleft()
+
+    def _append_monitor_history_cache(self, sample: dict) -> None:
+        path = self._monitor_history_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(sample, ensure_ascii=True) + "\n")
+
+    def _load_monitor_history_cache(self) -> None:
+        path = self._monitor_history_path()
+        if not path.exists():
+            return
+        now = time.time()
+        cutoff = now - self._monitor_history_span_seconds()
+        try:
+            with path.open("r", encoding="utf-8") as stream:
+                for raw_line in stream:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    payload = json.loads(line)
+                    try:
+                        ts = float(payload.get("timestamp_epoch_s"))
+                    except Exception:
+                        ts = None
+                    if ts is not None and ts < cutoff:
+                        continue
+                    self.monitor_history.append(payload)
+        except Exception:
+            return
+
+    def _build_live_specs(self) -> None:
+        try:
+            config = self._collect_logger_config(allow_writes=False)
+            _lattice, specs = build_specs(config)
+        except Exception:
+            return
+        self.live_spec_lookup = spec_index(specs)
+
     def _open_candidate_picker(self) -> None:
         window = tk.Toplevel(self.root)
         window.title("Choose Oscillation Candidates")
@@ -389,11 +462,11 @@ class SSMBGui:
         controls.columnconfigure(1, weight=1)
         controls.columnconfigure(3, weight=1)
         monitor_interval_var = tk.StringVar(value=self.monitor_interval_var.get())
-        rolling_window_var = tk.StringVar(value=self.rolling_window_var.get())
+        monitor_history_span_var = tk.StringVar(value=self.monitor_history_span_var.get())
         ttk.Label(controls, text="Monitor interval [s]").grid(row=0, column=0, sticky="w")
         ttk.Entry(controls, textvariable=monitor_interval_var, width=12).grid(row=0, column=1, sticky="w")
-        ttk.Label(controls, text="Rolling window [samples]").grid(row=0, column=2, sticky="w", padx=(12, 0))
-        ttk.Entry(controls, textvariable=rolling_window_var, width=12).grid(row=0, column=3, sticky="w")
+        ttk.Label(controls, text="History span [s]").grid(row=0, column=2, sticky="w", padx=(12, 0))
+        ttk.Entry(controls, textvariable=monitor_history_span_var, width=12).grid(row=0, column=3, sticky="w")
         ttk.Label(
             controls,
             text="All configured live-monitor PVs are sampled by the single central monitor loop. Use this window to tune rate/span and promote extra channels into the live analysis context.",
@@ -415,7 +488,7 @@ class SSMBGui:
         current_selected = set(selected_now)
         table = ttk.Treeview(
             picker,
-            columns=("use", "label", "pv", "tags", "notes"),
+            columns=("use", "label", "unit", "pv", "tags", "notes"),
             show="headings",
             height=18,
             selectmode="extended",
@@ -423,9 +496,10 @@ class SSMBGui:
         for col, title, width in (
             ("use", "Use", 55),
             ("label", "Label", 180),
-            ("pv", "PV", 280),
+            ("unit", "Unit", 70),
+            ("pv", "PV", 240),
             ("tags", "Tags", 160),
-            ("notes", "Notes / used for", 360),
+            ("notes", "Notes / used for", 320),
         ):
             table.heading(col, text=title)
             table.column(col, width=width, anchor="w")
@@ -441,7 +515,7 @@ class SSMBGui:
                 "",
                 "end",
                 iid=label,
-                values=(use, label, spec.pv or "", ", ".join(spec.tags or ()), spec.notes or ""),
+                values=(use, label, spec.unit or "", spec.pv or "", ", ".join(spec.tags or ()), spec.notes or ""),
             )
             if label in current_selected:
                 table.selection_add(label)
@@ -478,6 +552,7 @@ class SSMBGui:
                 "",
                 "Approximate live-history memory: %.2f MB" % (approx_bytes / (1024.0 * 1024.0)),
                 "Central sample buffer length: %d" % len(self.monitor_history),
+                "Current history span target: %s s" % self.monitor_history_span_var.get(),
                 "Tip: add extra BPM labels here if you want them to appear in oscillation-study candidate picking and to keep them handy for live lattice inspection.",
             ],
         )
@@ -487,7 +562,13 @@ class SSMBGui:
 
         def apply_settings():
             self.monitor_interval_var.set(monitor_interval_var.get().strip() or self.monitor_interval_var.get())
-            self.rolling_window_var.set(rolling_window_var.get().strip() or self.rolling_window_var.get())
+            self.monitor_history_span_var.set(monitor_history_span_var.get().strip() or self.monitor_history_span_var.get())
+            try:
+                interval = max(0.01, float(self.monitor_interval_var.get()))
+                span = max(30.0, float(self.monitor_history_span_var.get()))
+                self.rolling_window_var.set(str(max(10, int(span / interval))))
+            except Exception:
+                pass
             selected = list(table.selection())
             self.monitor_extra_labels_var.set(", ".join(selected))
             window.destroy()
@@ -849,6 +930,7 @@ class SSMBGui:
             config = self._collect_logger_config(allow_writes=False)
             adapter = ReadOnlyEpicsAdapter(timeout=config.timeout_seconds)
             _lattice, specs = build_specs(config)
+            self.live_spec_lookup = spec_index(specs)
             sample_index = 0
             start = time.monotonic()
             derived_context = None
@@ -863,12 +945,14 @@ class SSMBGui:
                         },
                     }
                 self.monitor_history.append(sample)
+                self._trim_monitor_history()
+                self._append_monitor_history_cache(sample)
                 summary = summarize_live_monitor(list(self.monitor_history), extra_candidate_keys=self._extra_oscillation_candidates())
                 self.queue.put(
                     {
                         "kind": "monitor_update",
                         "summary_lines": format_monitor_summary(summary),
-                        "channel_lines": format_channel_snapshot(sample),
+                        "channel_lines": format_channel_snapshot(sample, self.live_spec_lookup),
                         "sample": sample,
                         "summary": summary,
                     }
@@ -1741,6 +1825,22 @@ class SSMBGui:
                 )
         extras = [
             (
+                "U125 undulator",
+                None,
+                "U125 undulator / interaction section marker. Inferred lattice marker near the L2 straight.",
+                self._element_s_position(lattice, "BM1L2RP", fallback=6.8),
+                "#26a69a",
+                row_positions["qpd"],
+            ),
+            (
+                "Laser interaction",
+                None,
+                "Inferred laser / interaction-point marker near the undulator region. No direct PV is attached here.",
+                self._element_s_position(lattice, "BM1L2RP", fallback=7.05),
+                "#00acc1",
+                row_positions["qpd"],
+            ),
+            (
                 "P1 light monitor",
                 "p1_h1_ampl_avg",
                 "Main coherent-light harmonic monitor used for the SSMB scan. Placed near the L2/undulator diagnostic region.",
@@ -1833,6 +1933,10 @@ class SSMBGui:
                 short_label = "P1"
             elif name == "P3 light monitor":
                 short_label = "P3"
+            elif name == "U125 undulator":
+                short_label = "U125"
+            elif name == "Laser interaction":
+                short_label = "Laser"
             else:
                 short_label = name.split(":")[0]
             canvas.create_text(x, row_y - 14, text=short_label, anchor="s", font=("Helvetica", 8))
@@ -1910,13 +2014,16 @@ class SSMBGui:
         payload = channels.get(item.get("pv_label"), {}) if item.get("pv_label") else {}
         value = payload.get("value")
         pv = payload.get("pv") or item.get("pv")
+        spec = self.live_spec_lookup.get(item.get("pv_label")) if item.get("pv_label") else None
+        unit = (getattr(spec, "unit", "") or "")
         lines = [
             item.get("name", "device"),
             "",
             "Type: %s" % item.get("element_type"),
             "PV label: %s" % (item.get("pv_label") or "n/a"),
             "PV: %s" % (pv or "n/a"),
-            "Live value: %s" % value,
+            "Unit: %s" % (unit or "n/a"),
+            "Live value: %s%s" % (value, (" %s" % unit) if unit else ""),
             "Notes: %s" % item.get("notes", ""),
         ]
         if item.get("pv_label") == "qpd_l4_sigma_x":
@@ -2458,6 +2565,7 @@ class SSMBGui:
         except Exception as exc:
             self._set_inventory_text(["Could not build inventory: %s" % exc])
             return
+        self.live_spec_lookup = spec_index(specs)
         lines = inventory_overview_lines(specs)
         try:
             estimate_bytes = estimate_passive_session_bytes(specs, config.duration_seconds, config.sample_hz)

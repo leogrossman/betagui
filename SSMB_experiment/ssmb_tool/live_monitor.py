@@ -1152,16 +1152,19 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
     return lines
 
 
-def format_channel_snapshot(sample: Dict[str, object]) -> List[str]:
+def format_channel_snapshot(sample: Dict[str, object], spec_map: Optional[Dict[str, object]] = None) -> List[str]:
     channels = sample.get("channels", {})
     lines = ["Current channel snapshot", ""]
     for label in sorted(channels):
         payload = channels[label]
         value = payload.get("value")
+        spec = (spec_map or {}).get(label)
+        unit = getattr(spec, "unit", "") or ""
         if isinstance(value, list):
             lines.append("%s = [waveform len=%d]" % (label, len(value)))
         else:
-            lines.append("%s = %s    (%s)" % (label, value, payload.get("pv")))
+            unit_text = (" %s" % unit) if unit else ""
+            lines.append("%s = %s%s    (%s)" % (label, value, unit_text, payload.get("pv")))
     return lines
 
 
