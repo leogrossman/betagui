@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import math
 import queue
 import shutil
 import threading
@@ -102,6 +103,7 @@ class SSMBGui:
         self.monitor_interval_var = tk.StringVar(value="0.5")
         self.rolling_window_var = tk.StringVar(value="600")
         self.monitor_log_scale_var = tk.BooleanVar(value=False)
+        self.monitor_candidate_keys_var = tk.StringVar(value="")
         self.bump_lab_poll_var = tk.StringVar(value="0.5")
         self.bump_lab_bpm_vars = {
             "BPMZ1K1RP:rdX": tk.BooleanVar(value=True),
@@ -280,6 +282,10 @@ class SSMBGui:
         ttk.Entry(frame, textvariable=self.rolling_window_var, width=12).grid(row=row, column=3, sticky="w", pady=2)
         ttk.Checkbutton(frame, text="Log y-axis where possible", variable=self.monitor_log_scale_var).grid(row=row, column=4, sticky="w", padx=(10, 0))
         row += 1
+        ttk.Label(frame, text="Extra oscillation candidates").grid(row=row, column=0, sticky="w")
+        ttk.Entry(frame, textvariable=self.monitor_candidate_keys_var, width=42).grid(row=row, column=1, columnspan=3, sticky="ew", pady=2)
+        ttk.Label(frame, text="trend keys, comma-separated", foreground="#607d8b").grid(row=row, column=4, sticky="w")
+        row += 1
         button_row = ttk.Frame(frame)
         button_row.grid(row=row, column=0, columnspan=5, sticky="ew", pady=(8, 8))
         self.start_monitor_button = ttk.Button(button_row, text="Start Live Monitor", command=self._start_monitor)
@@ -309,6 +315,20 @@ class SSMBGui:
         self.monitor_channels_text.configure(state="disabled")
         frame.rowconfigure(row - 1, weight=1)
         frame.columnconfigure(3, weight=1)
+
+    def _extra_oscillation_candidates(self) -> list[str]:
+        raw = self.monitor_candidate_keys_var.get().strip()
+        if not raw:
+            return []
+        seen = set()
+        keys = []
+        for item in raw.replace("\n", ",").split(","):
+            key = item.strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            keys.append(key)
+        return keys
 
     def _build_sweep_tab(self, frame: "ttk.Frame") -> None:
         row = 0
@@ -667,7 +687,7 @@ class SSMBGui:
                         },
                     }
                 self.monitor_history.append(sample)
-                summary = summarize_live_monitor(list(self.monitor_history))
+                summary = summarize_live_monitor(list(self.monitor_history), extra_candidate_keys=self._extra_oscillation_candidates())
                 self.queue.put(
                     {
                         "kind": "monitor_update",
@@ -746,7 +766,7 @@ class SSMBGui:
         self.monitor_window_channels_text.grid(row=3, column=0, sticky="nsew")
         self.monitor_window_channels_text.configure(state="disabled")
         self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
-        self._update_monitor_dashboard(self.latest_monitor_summary or summarize_live_monitor([]))
+        self._update_monitor_dashboard(self.latest_monitor_summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates()))
         window.protocol("WM_DELETE_WINDOW", self._close_monitor_window)
 
     def _close_monitor_window(self) -> None:
@@ -801,7 +821,7 @@ class SSMBGui:
         self.oscillation_window = window
         self.oscillation_window_text = text
         self.oscillation_plot_canvases = canvases
-        self._update_oscillation_window(self.latest_monitor_summary or summarize_live_monitor([]))
+        self._update_oscillation_window(self.latest_monitor_summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates()))
         window.protocol("WM_DELETE_WINDOW", self._close_oscillation_window)
 
     def _update_oscillation_window(self, summary) -> None:
@@ -872,7 +892,7 @@ class SSMBGui:
         if self.monitor_window is None or not self.monitor_window.winfo_exists():
             return
         if summary is None:
-            summary = summarize_live_monitor([])
+            summary = summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates())
         sections = build_monitor_sections(summary)
         self._ensure_monitor_cards(sections)
         for section, widgets in self.monitor_section_widgets:

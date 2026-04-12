@@ -252,18 +252,25 @@ def _autocorr_period(values: Sequence[Optional[float]], dt_s: Optional[float]) -
     }
 
 
-def analyze_p1_oscillation(samples: Sequence[Dict[str, object]]) -> Dict[str, object]:
+def analyze_p1_oscillation(samples: Sequence[Dict[str, object]], extra_candidate_keys: Optional[Sequence[str]] = None) -> Dict[str, object]:
     dt_s = _estimate_sample_dt_seconds(samples)
     p1_values = _extract_series(samples, "p1_h1_ampl_avg")
     p1_period = _dominant_period(p1_values, dt_s)
     p1_autocorr = _autocorr_period(p1_values, dt_s)
-    if not p1_period.get("available"):
+    candidate_keys = list(OSCILLATION_CANDIDATE_KEYS)
+    for key in extra_candidate_keys or ():
+        if key and key not in candidate_keys:
+            candidate_keys.append(key)
+    valid_p1_count = len([value for value in p1_values if isinstance(value, (int, float))])
+    if valid_p1_count < 4:
         return {
             "available": False,
+            "provisional": False,
             "reason": p1_period.get("reason", "insufficient_data"),
             "dt_s": dt_s,
-            "sample_count": p1_period.get("sample_count", 0),
+            "sample_count": valid_p1_count,
             "candidate_count": 0,
+            "checked_candidate_keys": candidate_keys,
             "candidates": [],
         }
     p1_array = np.asarray([value for value in p1_values if isinstance(value, (int, float))], dtype=float)
@@ -272,7 +279,7 @@ def analyze_p1_oscillation(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
         x = np.arange(len(p1_array), dtype=float) * dt_s
         p1_drift_fit = _linear_fit(x.tolist(), p1_array.tolist())
     candidates = []
-    for key in OSCILLATION_CANDIDATE_KEYS:
+    for key in candidate_keys:
         values = _extract_series(samples, key)
         a, b = _align_valid_pairs(p1_values, values)
         if a is None or b is None:
@@ -296,7 +303,12 @@ def analyze_p1_oscillation(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
         fft_similarity = _harmonic_similarity(candidate_period.get("period_s"), p1_period.get("period_s"))
         ac_similarity = _harmonic_similarity(candidate_autocorr.get("period_s"), p1_autocorr.get("period_s"))
         period_similarity = max(fft_similarity, ac_similarity)
-        score = 0.35 * abs(corr) + 0.25 * abs(best_corr) + 0.25 * period_similarity + 0.15 * abs(_valid_float(candidate_autocorr.get("peak_autocorr")) or 0.0)
+        has_period = bool(p1_period.get("available"))
+        period_weight = 0.25 if has_period else 0.05
+        corr_weight = 0.35 if has_period else 0.45
+        xcorr_weight = 0.25 if has_period else 0.35
+        auto_weight = 0.15
+        score = corr_weight * abs(corr) + xcorr_weight * abs(best_corr) + period_weight * period_similarity + auto_weight * abs(_valid_float(candidate_autocorr.get("peak_autocorr")) or 0.0)
         candidates.append(
             {
                 "key": key,
@@ -309,33 +321,43 @@ def analyze_p1_oscillation(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
                 "candidate_autocorr_period_s": candidate_autocorr.get("period_s") if candidate_autocorr.get("available") else None,
                 "harmonic_similarity": period_similarity,
                 "score": score,
+                "pair_count": len(a),
             }
         )
     candidates.sort(key=lambda item: item["score"], reverse=True)
     cycles_seen = _valid_float(p1_period.get("cycles_seen")) or 0.0
-    certainty = "low"
-    if cycles_seen >= OSCILLATION_MIN_CYCLES_FOR_HIGH and (p1_period.get("peak_power_fraction") or 0.0) >= 0.35:
-        certainty = "high"
-    elif cycles_seen >= OSCILLATION_MIN_CYCLES_FOR_MEDIUM and (p1_period.get("peak_power_fraction") or 0.0) >= 0.2:
-        certainty = "medium"
+    certainty = "very_low"
+    provisional = not bool(p1_period.get("available"))
+    if p1_period.get("available"):
+        certainty = "low"
+        if cycles_seen >= OSCILLATION_MIN_CYCLES_FOR_HIGH and (p1_period.get("peak_power_fraction") or 0.0) >= 0.35:
+            certainty = "high"
+        elif cycles_seen >= OSCILLATION_MIN_CYCLES_FOR_MEDIUM and (p1_period.get("peak_power_fraction") or 0.0) >= 0.2:
+            certainty = "medium"
+    elif valid_p1_count >= 8 and candidates:
+        top_score = _valid_float((candidates[0] or {}).get("score")) or 0.0
+        certainty = "low" if top_score >= 0.45 else "very_low"
     top = candidates[0] if candidates else None
     return {
-        "available": True,
+        "available": bool(candidates) or bool(p1_period.get("available")),
+        "provisional": provisional,
+        "reason": None if (bool(candidates) or bool(p1_period.get("available"))) else p1_period.get("reason", "insufficient_data"),
         "dt_s": dt_s,
-        "sample_count": p1_period.get("sample_count"),
-        "dominant_period_s": p1_period.get("period_s"),
+        "sample_count": max(valid_p1_count, p1_period.get("sample_count") or 0),
+        "dominant_period_s": p1_period.get("period_s") if p1_period.get("available") else None,
         "autocorr_period_s": p1_autocorr.get("period_s") if p1_autocorr.get("available") else None,
-        "dominant_frequency_hz": p1_period.get("frequency_hz"),
-        "dominant_frequency_mhz": p1_period.get("frequency_mhz"),
-        "peak_power_fraction": p1_period.get("peak_power_fraction"),
+        "dominant_frequency_hz": p1_period.get("frequency_hz") if p1_period.get("available") else None,
+        "dominant_frequency_mhz": p1_period.get("frequency_mhz") if p1_period.get("available") else None,
+        "peak_power_fraction": p1_period.get("peak_power_fraction") if p1_period.get("available") else None,
         "autocorr_peak": p1_autocorr.get("peak_autocorr") if p1_autocorr.get("available") else None,
         "cycles_seen": cycles_seen,
-        "span_s": p1_period.get("span_s"),
+        "span_s": p1_period.get("span_s") if p1_period.get("available") else (None if dt_s is None else valid_p1_count * dt_s),
         "certainty": certainty,
         "top_candidate": top,
         "candidate_count": len(candidates),
         "candidates": candidates[:8],
         "p1_drift_slope_per_s": None if p1_drift_fit is None else p1_drift_fit.get("slope"),
+        "checked_candidate_keys": candidate_keys,
     }
 
 
@@ -355,7 +377,7 @@ def detect_rf_sweep_active(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
     }
 
 
-def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, object]:
+def summarize_live_monitor(samples: Sequence[Dict[str, object]], extra_candidate_keys: Optional[Sequence[str]] = None) -> Dict[str, object]:
     latest = samples[-1] if samples else {}
     derived = latest.get("derived", {})
     channels = latest.get("channels", {})
@@ -459,7 +481,27 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
             p1_series.append((d, p1, rf))
             p1_avg_series.append((d, p1_avg, rf))
             p3_series.append((d, p3, rf))
+    sigma_x_delta = []
+    qpd00_center_delta = []
+    qpd01_center_delta = []
+    beam_current_delta = []
     if len(delta_series) >= 3 and sweep_state["active"]:
+        for sample in samples:
+            d = _valid_float(sample.get("derived", {}).get("delta_l4_bpm_first_order"))
+            if d is None:
+                continue
+            sigma_x = _valid_float(sample.get("derived", {}).get("qpd_l4_sigma_x_mm"))
+            qpd00_center = _valid_float(sample.get("channels", {}).get("qpd_l4_center_x_avg_um", {}).get("value"))
+            qpd01_center = _valid_float(sample.get("channels", {}).get("qpd_l2_center_x_avg_um", {}).get("value"))
+            beam_current = _valid_float(sample.get("channels", {}).get("beam_current", {}).get("value"))
+            if sigma_x is not None:
+                sigma_x_delta.append((d, sigma_x))
+            if qpd00_center is not None:
+                qpd00_center_delta.append((d, qpd00_center))
+            if qpd01_center is not None:
+                qpd01_center_delta.append((d, qpd01_center))
+            if beam_current is not None:
+                beam_current_delta.append((d, beam_current))
         slip = fit_slip_factor(delta_series, rf_series)
         beam_energy_mev = _valid_float(channels.get("beam_energy_mev", {}).get("value"))
         legacy_alpha = _valid_float(derived.get("legacy_alpha0_corrected"))
@@ -481,6 +523,10 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
             "p1_vs_rf": _linear_fit([rf for _x, y, rf in p1_series if y is not None], [y for _x, y, rf in p1_series if y is not None]),
             "p1_avg_vs_rf": _linear_fit([rf for _x, y, rf in p1_avg_series if y is not None], [y for _x, y, rf in p1_avg_series if y is not None]),
             "p3_vs_rf": _linear_fit([rf for _x, y, rf in p3_series if y is not None], [y for _x, y, rf in p3_series if y is not None]),
+            "sigma_x_vs_delta": _linear_fit([x for x, y in sigma_x_delta], [y for _x, y in sigma_x_delta]) if len(sigma_x_delta) >= 2 else None,
+            "qpd00_center_vs_delta": _linear_fit([x for x, y in qpd00_center_delta], [y for _x, y in qpd00_center_delta]) if len(qpd00_center_delta) >= 2 else None,
+            "qpd01_center_vs_delta": _linear_fit([x for x, y in qpd01_center_delta], [y for _x, y in qpd01_center_delta]) if len(qpd01_center_delta) >= 2 else None,
+            "beam_current_vs_delta": _linear_fit([x for x, y in beam_current_delta], [y for _x, y in beam_current_delta]) if len(beam_current_delta) >= 2 else None,
         }
     summary["rf_sweep_metrics"] = sweep_metrics
     summary["bump_monitor"] = {
@@ -503,7 +549,7 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
     }
     summary["alpha_assessment"] = assess_alpha_monitor(summary)
     summary["trend_data"] = extract_trend_data(samples)
-    summary["oscillation_study"] = analyze_p1_oscillation(samples)
+    summary["oscillation_study"] = analyze_p1_oscillation(samples, extra_candidate_keys=extra_candidate_keys)
     return summary
 
 
@@ -777,10 +823,13 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 ("dQₓ/dδ", _fmt((sweep.get("qx_vs_delta") or {}).get("slope"))),
                 ("dQᵧ/dδ", _fmt((sweep.get("qy_vs_delta") or {}).get("slope"))),
                 ("dQₛ/dδ", _fmt((sweep.get("qs_vs_delta") or {}).get("slope"))),
+                ("dσₓ/dδ", _fmt((sweep.get("sigma_x_vs_delta") or {}).get("slope"))),
+                ("dQPD00 center/dδ", _fmt((sweep.get("qpd00_center_vs_delta") or {}).get("slope"))),
             ],
             "equations": [
                 "Qₓ(δ) ≈ Qₓ0 + ξₓ δ",
                 "Qᵧ(δ) ≈ Qᵧ0 + ξᵧ δ",
+                "Additional sweep-derived cross-checks: σₓ(δ), center_X(δ), I_beam(δ), P1(δ)",
             ],
             "note": "There is currently one live tune source per plane. Treat tune slopes as cross-checks; the strongest SSMB chain remains RF → δₛ → η → α₀.",
             "default_trend": "tune_y",
@@ -903,6 +952,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
                     _fmt_duration((oscillation.get("top_candidate") or {}).get("lag_s")),
                     _fmt((oscillation.get("top_candidate") or {}).get("pearson_r")),
                 ),
+                "Checked candidates: %s" % (", ".join(oscillation.get("checked_candidate_keys") or []) or "none"),
             ],
         },
     ]
@@ -1012,6 +1062,8 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
                 "Qx vs delta slope: %s" % _fmt((sweep_metrics.get("qx_vs_delta") or {}).get("slope")),
                 "Qy vs delta slope: %s" % _fmt((sweep_metrics.get("qy_vs_delta") or {}).get("slope")),
                 "Qs vs delta slope: %s" % _fmt((sweep_metrics.get("qs_vs_delta") or {}).get("slope")),
+                "QPD00 sigma_x vs delta slope: %s" % _fmt((sweep_metrics.get("sigma_x_vs_delta") or {}).get("slope")),
+                "QPD00 center X vs delta slope: %s" % _fmt((sweep_metrics.get("qpd00_center_vs_delta") or {}).get("slope")),
             ]
         )
     else:
@@ -1049,9 +1101,12 @@ def format_oscillation_study(summary: Dict[str, object]) -> List[str]:
                 "",
                 "Guidance:",
                 "- For a ~5 minute effect, keep the live monitor running for at least 10 minutes for medium/high confidence.",
-                "- The ranking is computed from P1avg against bump, RF/delta, camera-center, temperature, tune, and P3 candidates.",
+                "- The ranking is computed from P1avg against bump, RF/delta, camera-center, temperature, tune, P3, and derived alpha/energy candidates.",
             ]
         )
+        checked = osc.get("checked_candidate_keys") or []
+        if checked:
+            lines.extend(["", "Checked candidates:", ", ".join(checked)])
         return lines
     lines.extend(
         [
@@ -1061,6 +1116,7 @@ def format_oscillation_study(summary: Dict[str, object]) -> List[str]:
             "Cycles seen: %s" % _fmt(osc.get("cycles_seen")),
             "Spectral confidence: %s" % _fmt(osc.get("peak_power_fraction")),
             "Overall certainty: %s" % osc.get("certainty", "n/a"),
+            "Mode: %s" % ("provisional short-history ranking" if osc.get("provisional") else "full period + correlation ranking"),
             "P1 drift slope: %s per s" % _fmt(osc.get("p1_drift_slope_per_s")),
             "",
             "Top candidates:",
@@ -1081,6 +1137,9 @@ def format_oscillation_study(summary: Dict[str, object]) -> List[str]:
         )
     lines.extend(
         [
+            "",
+            "Checked candidates:",
+            ", ".join(osc.get("checked_candidate_keys") or []) or "none",
             "",
             "Interpretation:",
             "- High score with small lag and similar/harmonic period is the strongest live clue.",

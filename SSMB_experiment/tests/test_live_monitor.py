@@ -228,6 +228,32 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         lines = format_oscillation_study({"oscillation_study": analysis})
         self.assertTrue(any("Dominant P1 period" in line for line in lines))
 
+    def test_p1_oscillation_study_provisional_candidates_work_early(self):
+        samples = []
+        for index in range(10):
+            p1 = 0.05 + 0.004 * index
+            bump_error = 0.10 + 0.02 * index
+            samples.append(
+                {
+                    "timestamp_epoch_s": 2_000_000.0 + index,
+                    "sample_index": index,
+                    "channels": {
+                        "p1_h1_ampl_avg": {"value": p1},
+                        "l4_bump_feedback_ref": {"value": 0.0},
+                        "l4_bump_orbit_bpm_k1": {"value": bump_error},
+                        "l4_bump_orbit_bpm_l2": {"value": bump_error},
+                        "l4_bump_orbit_bpm_k3": {"value": bump_error},
+                        "l4_bump_orbit_bpm_l4": {"value": bump_error},
+                    },
+                    "derived": {},
+                }
+            )
+        analysis = analyze_p1_oscillation(samples, extra_candidate_keys=["p1_h1_ampl_avg"])
+        self.assertTrue(analysis["available"])
+        self.assertTrue(analysis["provisional"])
+        self.assertIn("bump_orbit_error_mm", analysis["checked_candidate_keys"])
+        self.assertIn("p1_h1_ampl_avg", analysis["checked_candidate_keys"])
+
 
 if __name__ == "__main__":
     unittest.main()
