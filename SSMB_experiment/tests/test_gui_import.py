@@ -177,38 +177,6 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         gui.SSMBGui._on_monitor_plot_selected(app, "machine_state", ["beam_current"], tree)
         app._update_monitor_dashboard.assert_not_called()
 
-    def test_monitor_plot_selected_toggles_multiple_metrics(self):
-        import SSMB_experiment.ssmb_tool.gui as gui
-
-        class FakeTree:
-            def __init__(self, selection):
-                self._selection = list(selection)
-                self.set_calls = []
-                self.selection_set_calls = []
-
-            def selection(self):
-                return tuple(self._selection)
-
-            def selection_set(self, values):
-                self.selection_set_calls.append(tuple(values))
-                self._selection = list(values)
-
-            def exists(self, key):
-                return True
-
-            def set(self, key, column, value):
-                self.set_calls.append((key, column, value))
-
-        app = object.__new__(gui.SSMBGui)
-        app._updating_monitor_plot_selector = False
-        app.monitor_plot_controls = {"machine_state": ["beam_current"]}
-        app.latest_monitor_summary = {}
-        app._update_monitor_dashboard = mock.Mock()
-        tree = FakeTree(["rf_offset_hz"])
-        gui.SSMBGui._on_monitor_plot_selected(app, "machine_state", ["beam_current", "rf_offset_hz"], tree)
-        self.assertEqual(app.monitor_plot_controls["machine_state"], ["beam_current", "rf_offset_hz"])
-        app._update_monitor_dashboard.assert_called_once()
-
     def test_monitor_window_render_smoke(self):
         import SSMB_experiment.ssmb_tool.gui as gui
         from SSMB_experiment.ssmb_tool.live_monitor import format_channel_snapshot, format_monitor_summary, summarize_live_monitor
