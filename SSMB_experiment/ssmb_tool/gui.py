@@ -2326,13 +2326,13 @@ class SSMBGui:
         lattice, specs = build_specs(config)
         window = tk.Toplevel(self.root)
         window.title("SSMB Live Lattice View")
-        self._place_window_on_screen(window, 1360, 860, x=100, y=90, relative_to_root=True)
+        self._place_window_on_screen(window, 1420, 980, x=100, y=90, relative_to_root=True)
         outer = ttk.Frame(window, padding=10)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
         outer.columnconfigure(1, weight=0)
         outer.rowconfigure(0, weight=1)
-        canvas = tk.Canvas(outer, bg="white", height=720)
+        canvas = tk.Canvas(outer, bg="white", height=900)
         canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         side = ttk.Frame(outer)
         side.grid(row=0, column=1, sticky="nsew")
@@ -2350,6 +2350,7 @@ class SSMBGui:
         model_box.bind("<<ComboboxSelected>>", lambda _event: self._reload_lattice_model())
         ttk.Button(controls, text="Reload model", command=self._reload_lattice_model).grid(row=0, column=2, padx=(0, 6))
         ttk.Button(controls, text="Save machine snapshot…", command=self._save_lattice_snapshot).grid(row=0, column=3)
+        ttk.Button(controls, text="Optics Help", command=self._open_lattice_optics_help_window).grid(row=0, column=4, padx=(6, 0))
         info = tk.Text(side, wrap="word", width=42, height=18)
         info.grid(row=1, column=0, sticky="nsew")
         info.configure(state="disabled")
@@ -2437,11 +2438,89 @@ class SSMBGui:
             return
         self._draw_lattice_view(self.lattice_context, self.lattice_specs)
 
+    def _open_lattice_optics_help_window(self) -> None:
+        if tk is None or self.root is None or not self.root.winfo_exists():
+            return
+        window = tk.Toplevel(self.root)
+        window.title("Lattice Optics Help")
+        self._place_window_on_screen(window, 760, 560, x=180, y=120, relative_to_root=True)
+        frame = ttk.Frame(window, padding=12)
+        frame.pack(fill="both", expand=True)
+        text = tk.Text(frame, wrap="word", width=90, height=32)
+        text.pack(fill="both", expand=True)
+        lines = [
+            "How these lattice values are obtained",
+            "",
+            "All optics shown in the lattice viewer are model values loaded from the bundled lattice export JSON, not direct live EPICS measurements.",
+            "",
+            "Pipeline:",
+            "1. A pyAT lattice is solved offline with at.get_optics(..., method=at.linopt4).",
+            "2. The export stores per-element optics_center values and dense optics_samples arrays around the full ring.",
+            "3. The control-room lattice viewer reads those exported arrays and overlays them on top of the live EPICS state.",
+            "",
+            "Meaning of the main quantities:",
+            "beta_x, beta_y: horizontal / vertical beta functions from the linear optics solution.",
+            "eta_x, eta_y: horizontal / vertical dispersion from the same solution.",
+            "sigma_x, sigma_y: model beam-size quantities from the exported optics/covariance context.",
+            "sigma_delta: model relative momentum spread used in the export context. In the control-room GUI this is an optics-model value, not a direct live measurement.",
+            "beta_z-like: an approximate longitudinal scale carried in the export for qualitative context. It is beta-like, not a canonical live longitudinal Twiss observable.",
+            "",
+            "Important caveat:",
+            "The live tool combines these static model functions with live RF/BPM/QPD measurements. That is useful for interpretation, but the optics rows themselves do not change unless you load a different export/model.",
+            "",
+            "For live derived quantities such as δs, η, and BPM α0, the tool instead uses live BPM/QPD/RF data plus the relevant dispersion values from the selected export.",
+        ]
+        self._set_text_widget(text, lines)
+
+    def _draw_lattice_function_row(self, canvas, lattice, samples, keys, colors, x0, x1, y_center, label, band_half_height=22):
+        if not samples:
+            return
+        s_values = list(samples.get("s_m", []))
+        if not s_values:
+            return
+        payload = []
+        for key, color in zip(keys, colors):
+            values = list(samples.get(key, []))
+            if values:
+                payload.append((key, values, color))
+        if not payload:
+            return
+        y0 = y_center - band_half_height
+        y1 = y_center + band_half_height
+        canvas.create_text(10, y_center, anchor="w", text=label, fill="#455a64", font=("Helvetica", 10, "bold"))
+        canvas.create_line(x0, y_center, x1, y_center, fill="#eceff1", dash=(3, 3))
+        combined = []
+        for _name, values, _color in payload:
+            combined.extend(float(v) for v in values if isinstance(v, (int, float)))
+        if not combined:
+            return
+        vmin = min(combined)
+        vmax = max(combined)
+        if math.isclose(vmax, vmin):
+            vmax = vmin + 1.0
+        for key, values, color in payload:
+            points = []
+            for s_val, v_val in zip(s_values, values):
+                if not isinstance(v_val, (int, float)):
+                    continue
+                x = self._s_to_x(float(s_val), lattice, x0, x1)
+                norm = (float(v_val) - vmin) / (vmax - vmin)
+                y = y1 - norm * (y1 - y0)
+                points.extend((x, y))
+            if len(points) >= 4:
+                canvas.create_line(*points, fill=color, width=2, smooth=False)
+        legend_x = x1 - 8
+        legend_y = y0 + 2
+        for key, _values, color in reversed(payload):
+            short = key.replace("_m", "").replace("beta_", "β").replace("eta_", "η")
+            canvas.create_text(legend_x, legend_y, anchor="ne", text=short, fill=color, font=("Helvetica", 8, "bold"))
+            legend_y += 12
+
     def _draw_lattice_view(self, lattice, specs) -> None:
         canvas = self.lattice_canvas
         canvas.delete("all")
         width = int(canvas.winfo_width() or 1000)
-        height = int(canvas.winfo_height() or 740)
+        height = int(canvas.winfo_height() or 900)
         left = 60
         right = width - 40
         y_track = 100
@@ -2457,6 +2536,8 @@ class SSMBGui:
             "dipole": 590,
             "octupole": 650,
             "bump": 720,
+            "beta_optics": 790,
+            "dispersion_optics": 850,
         }
         canvas.create_line(left, y_track, right, y_track, fill="#37474f", width=3)
         self.lattice_device_items = []
@@ -2481,6 +2562,8 @@ class SSMBGui:
             ("Dipoles", row_positions["dipole"]),
             ("Octupoles", row_positions["octupole"]),
             ("Bump correctors", row_positions["bump"]),
+            ("Beta functions", row_positions["beta_optics"]),
+            ("Dispersion functions", row_positions["dispersion_optics"]),
         )
         for row_name, row_y in row_specs:
             canvas.create_text(10, row_y, anchor="w", text=row_name, fill="#455a64", font=("Helvetica", 10, "bold"))
@@ -2513,9 +2596,23 @@ class SSMBGui:
                 outline=marker_outline,
                 width=2 if marker_outline else 1,
             )
+            label_item_id = None
             is_bump_feedback_bpm = element.family_name in ("BPMZ1K1RP", "BPMZ1L2RP", "BPMZ1K3RP", "BPMZ1L4RP")
             if is_bump_feedback_bpm:
                 canvas.create_rectangle(x - (half_width + 3), row_y - 15, x + (half_width + 3), row_y + 15, outline="#1565c0", width=2)
+            if element.element_type in ("RFCavity",):
+                label_item_id = canvas.create_text(x, row_y - 18, text=label or element.family_name, anchor="s", font=("Helvetica", 8, "bold"))
+            elif element.element_type == "Monitor" and element.family_name in bpm_label_specs:
+                spec = bpm_label_specs[element.family_name]
+                label_fill = "#1565c0" if is_bump_feedback_bpm else "#263238"
+                label_item_id = canvas.create_text(
+                    x,
+                    row_y + spec["dy"],
+                    text=spec["text"],
+                    anchor=spec["anchor"],
+                    font=("Helvetica", 7, "bold" if is_bump_feedback_bpm else "normal"),
+                    fill=label_fill,
+                )
             self.lattice_device_items.append(
                 {
                     "item_id": item_id,
@@ -2530,21 +2627,9 @@ class SSMBGui:
                     "optics_center": getattr(element, "optics_center", {}) or {},
                     "model_strengths": getattr(element, "model_strengths", {}) or {},
                     "click_radius": 20 if element.element_type == "Monitor" else (26 if element.element_type == "RFCavity" else 24),
+                    "canvas_ids": tuple(value for value in (item_id, label_item_id) if value is not None),
                 }
             )
-            if element.element_type in ("RFCavity",):
-                canvas.create_text(x, row_y - 18, text=label or element.family_name, anchor="s", font=("Helvetica", 8, "bold"))
-            elif element.element_type == "Monitor" and element.family_name in bpm_label_specs:
-                spec = bpm_label_specs[element.family_name]
-                label_fill = "#1565c0" if is_bump_feedback_bpm else "#263238"
-                canvas.create_text(
-                    x,
-                    row_y + spec["dy"],
-                    text=spec["text"],
-                    anchor=spec["anchor"],
-                    font=("Helvetica", 7, "bold" if is_bump_feedback_bpm else "normal"),
-                    fill=label_fill,
-                )
         extras = [
             (
                 "U125 undulator",
@@ -2684,9 +2769,10 @@ class SSMBGui:
                 label_dy = -26
             elif name in ("P3 light monitor", "QPD01ZL2RP", "HS3P1L4RP:setCur"):
                 label_dy = 18
-            canvas.create_text(x, row_y + label_dy, text=short_label, anchor="s" if label_dy < 0 else "n", font=("Helvetica", 8, "bold" if name.startswith("QPD") or name.startswith("P") else "normal"))
+            label_item_id = canvas.create_text(x, row_y + label_dy, text=short_label, anchor="s" if label_dy < 0 else "n", font=("Helvetica", 8, "bold" if name.startswith("QPD") or name.startswith("P") else "normal"))
+            value_item_id = None
             if isinstance(live_value, (int, float)):
-                canvas.create_text(x, row_y + 12, text="%.3f" % float(live_value), anchor="n", font=("Helvetica", 7), fill="#5d4037")
+                value_item_id = canvas.create_text(x, row_y + 12, text="%.3f" % float(live_value), anchor="n", font=("Helvetica", 7), fill="#5d4037")
             self.lattice_device_items.append(
                 {
                     "item_id": item_id,
@@ -2700,9 +2786,32 @@ class SSMBGui:
                     "row": row_y,
                     "optics_center": {},
                     "model_strengths": {},
-                    "click_radius": 18,
+                    "click_radius": 22 if name.startswith(("QPD", "P")) else 18,
+                    "canvas_ids": tuple(value for value in (item_id, label_item_id, value_item_id) if value is not None),
                 }
             )
+        self._draw_lattice_function_row(
+            canvas,
+            lattice,
+            lattice.optics_samples,
+            ("beta_x_m", "beta_y_m"),
+            ("#1d3557", "#d62828"),
+            left,
+            right,
+            row_positions["beta_optics"],
+            "Beta functions",
+        )
+        self._draw_lattice_function_row(
+            canvas,
+            lattice,
+            lattice.optics_samples,
+            ("eta_x_m", "eta_y_m"),
+            ("#2a9d8f", "#8e24aa"),
+            left,
+            right,
+            row_positions["dispersion_optics"],
+            "Dispersion functions",
+        )
         bump_state = (self.latest_monitor_summary or {}).get("bump_state", {})
         bump_label = "BUMP ON" if bump_state.get("active") else "BUMP OFF/idle"
         bump_color = "#b71c1c" if bump_state.get("active") else "#1b5e20"
@@ -2741,6 +2850,12 @@ class SSMBGui:
     def _on_lattice_click(self, event) -> None:
         if not self.lattice_device_items:
             return
+        if self.lattice_canvas is not None:
+            overlapping = set(self.lattice_canvas.find_overlapping(event.x - 2, event.y - 2, event.x + 2, event.y + 2))
+            for item in self.lattice_device_items:
+                if overlapping.intersection(set(item.get("canvas_ids", ()))):
+                    self._show_lattice_item_info(item)
+                    return
         candidates = [
             item
             for item in self.lattice_device_items
