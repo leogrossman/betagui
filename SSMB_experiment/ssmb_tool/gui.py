@@ -64,6 +64,7 @@ class SSMBGui:
         self.latest_monitor_sample = None
         self.latest_monitor_summary = None
         self.lattice_device_items = []
+        self.selected_lattice_item_name = None
         self.stage0_stop_event: Optional[threading.Event] = None
         self._build_vars()
         self._build_ui()
@@ -113,7 +114,7 @@ class SSMBGui:
         }
 
     def _build_ui(self) -> None:
-        self.root.title("SSMB Experiment Stage 0 / RF Sweep")
+        self.root.title("SSMB Experiment Logger / RF Sweep")
         self.root.geometry("1380x900")
 
         outer = ttk.Frame(self.root, padding=10)
@@ -125,6 +126,30 @@ class SSMBGui:
         control = ttk.Frame(outer)
         control.grid(row=0, column=0, sticky="nsw", padx=(0, 10))
 
+        safety_frame = ttk.Frame(control)
+        safety_frame.pack(fill="x", pady=(0, 8))
+        ttk.Label(safety_frame, text="Machine Safety").pack(anchor="w")
+        self.safe_mode_button = tk.Button(
+            safety_frame,
+            text="SAFE MODE ON",
+            bg="#b71c1c",
+            fg="white",
+            activebackground="#c62828",
+            activeforeground="white",
+            relief="raised",
+            padx=12,
+            pady=8,
+            command=self._toggle_safe_mode,
+        )
+        self.safe_mode_button.pack(fill="x")
+        self.safe_mode_hint = ttk.Label(
+            safety_frame,
+            text="Writes are blocked. Turn this off explicitly before RF sweep or experimental bump control.",
+            wraplength=340,
+            justify="left",
+        )
+        self.safe_mode_hint.pack(anchor="w", pady=(4, 0))
+
         notebook = ttk.Notebook(control)
         notebook.pack(fill="both", expand=False)
 
@@ -132,12 +157,13 @@ class SSMBGui:
         logger_frame = ttk.Frame(notebook, padding=8)
         sweep_frame = ttk.Frame(notebook, padding=8)
         notebook.add(monitor_frame, text="Live Monitor")
-        notebook.add(logger_frame, text="Stage 0 Logger")
+        notebook.add(logger_frame, text="Measurement Logger")
         notebook.add(sweep_frame, text="RF Sweep")
 
         self._build_monitor_tab(monitor_frame)
         self._build_logger_tab(logger_frame)
         self._build_sweep_tab(sweep_frame)
+        self._update_safe_mode_visuals()
 
         right = ttk.Frame(outer)
         right.grid(row=0, column=1, sticky="nsew")
@@ -191,7 +217,7 @@ class SSMBGui:
         profile_combo.bind("<<ComboboxSelected>>", lambda _event: self._apply_profile())
         row += 1
 
-        ttk.Checkbutton(frame, text="Safe / read-only mode", variable=self.safe_mode_var, command=self._update_write_controls).grid(row=row, column=0, columnspan=2, sticky="w")
+        ttk.Checkbutton(frame, text="Safe / read-only mode", variable=self.safe_mode_var, command=self._on_safe_mode_changed).grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
 
         ttk.Checkbutton(frame, text="Heavy logging mode", variable=self.heavy_mode_var, command=self._toggle_heavy_mode).grid(row=row, column=0, columnspan=2, sticky="w")
@@ -224,7 +250,7 @@ class SSMBGui:
         button_row = ttk.Frame(frame)
         button_row.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         ttk.Button(button_row, text="Preview Logged Channels", command=self._refresh_inventory).pack(side="left")
-        ttk.Button(button_row, text="Run Stage 0 Log", command=self._run_stage0).pack(side="left", padx=6)
+        ttk.Button(button_row, text="Run Measurement Log", command=self._run_stage0).pack(side="left", padx=6)
         self.start_manual_button = ttk.Button(button_row, text="Start Manual Log", command=self._start_manual_stage0)
         self.start_manual_button.pack(side="left")
         self.stop_manual_button = ttk.Button(button_row, text="Stop Manual Log", command=self._stop_manual_stage0)
@@ -378,6 +404,40 @@ class SSMBGui:
                 self.run_sweep_button.state(["!disabled"])
             else:
                 self.run_sweep_button.state(["disabled"])
+        self._update_safe_mode_visuals()
+
+    def _toggle_safe_mode(self) -> None:
+        self.safe_mode_var.set(not self.safe_mode_var.get())
+        self._on_safe_mode_changed()
+
+    def _on_safe_mode_changed(self) -> None:
+        self._update_write_controls()
+
+    def _update_safe_mode_visuals(self) -> None:
+        if not hasattr(self, "safe_mode_button"):
+            return
+        if self.safe_mode_var.get():
+            self.safe_mode_button.configure(
+                text="SAFE MODE ON",
+                bg="#b71c1c",
+                fg="white",
+                activebackground="#c62828",
+                activeforeground="white",
+            )
+            self.safe_mode_hint.configure(
+                text="Writes are blocked. Turn this off explicitly before RF sweep or experimental bump control."
+            )
+        else:
+            self.safe_mode_button.configure(
+                text="WRITE MODE ENABLED",
+                bg="#f9a825",
+                fg="black",
+                activebackground="#fbc02d",
+                activeforeground="black",
+            )
+            self.safe_mode_hint.configure(
+                text="Writes are possible. RF sweep and experimental bump control still require explicit confirmation."
+            )
 
     def _preset_low_alpha(self) -> None:
         self.label_var.set("low_alpha")
@@ -818,14 +878,30 @@ class SSMBGui:
         vmax = max(clean_all)
         if vmax == vmin:
             vmax = vmin + 1.0
+        try:
+            interval_s = max(0.01, float(self.monitor_interval_var.get()))
+        except Exception:
+            interval_s = 0.5
+        time_span_s = max(1.0, window_samples * interval_s)
+        plot_x0 = x0 + 42
+        plot_y0 = y0 + 34
+        plot_x1 = x1 - 8
+        plot_y1 = y1 - 22
         canvas.create_text(x0 + 4, y0 + 4, anchor="nw", text="last %d samples" % window_samples, fill="#607d8b", font=("Helvetica", 8))
-        canvas.create_text(x1 - 4, y0 + 4, anchor="ne", text="max %.3g" % vmax, fill="#607d8b", font=("Helvetica", 8))
-        canvas.create_text(x1 - 4, y1 - 4, anchor="se", text="min %.3g" % vmin, fill="#607d8b", font=("Helvetica", 8))
+        canvas.create_text(x1 - 4, y0 + 4, anchor="ne", text="%.1f s window" % time_span_s, fill="#607d8b", font=("Helvetica", 8))
+        for frac, value in ((0.0, vmax), (0.5, 0.5 * (vmin + vmax)), (1.0, vmin)):
+            y = plot_y0 + frac * (plot_y1 - plot_y0)
+            canvas.create_line(plot_x0, y, plot_x1, y, fill="#eceff1", dash=(2, 2))
+            canvas.create_text(plot_x0 - 4, y, anchor="e", text="%.3g" % value, fill="#607d8b", font=("Helvetica", 8))
+        for frac, label in ((0.0, "-%.0fs" % time_span_s), (0.5, "-%.0fs" % (0.5 * time_span_s)), (1.0, "now")):
+            x = plot_x0 + frac * (plot_x1 - plot_x0)
+            canvas.create_line(x, plot_y1, x, plot_y1 + 4, fill="#90a4ae")
+            canvas.create_text(x, plot_y1 + 6, anchor="n", text=label, fill="#607d8b", font=("Helvetica", 8))
         legend_y = y0 + 18
         for idx, (label, values, color) in enumerate(series_payload):
             canvas.create_rectangle(x0 + 6, legend_y + idx * 12, x0 + 14, legend_y + 8 + idx * 12, fill=color, outline=color)
             canvas.create_text(x0 + 18, legend_y + 4 + idx * 12, anchor="w", text=label, fill="#37474f", font=("Helvetica", 8))
-            pts = self._series_to_points(values, x0 + 8, y0 + 48, x1 - 8, y1 - 12, reference=clean_all)
+            pts = self._series_to_points(values, plot_x0, plot_y0, plot_x1, plot_y1, reference=clean_all)
             if len(pts) >= 4:
                 canvas.create_line(*pts, fill=color, width=2, smooth=True)
 
@@ -935,6 +1011,9 @@ class SSMBGui:
             live_value = live_payload.get("value")
             marker_color, marker_outline = self._live_marker_style(element, live_value, color)
             item_id = canvas.create_rectangle(x - 5, row_y - 12, x + 5, row_y + 12, fill=marker_color, outline=marker_outline, width=2 if marker_outline else 1)
+            is_bump_feedback_bpm = element.family_name in ("BPMZ1K1RP", "BPMZ1L2RP", "BPMZ1K3RP", "BPMZ1L4RP")
+            if is_bump_feedback_bpm:
+                canvas.create_rectangle(x - 8, row_y - 15, x + 8, row_y + 15, outline="#1565c0", width=2)
             self.lattice_device_items.append(
                 {
                     "item_id": item_id,
@@ -951,7 +1030,8 @@ class SSMBGui:
                 canvas.create_text(x, row_y - 18, text=label or element.family_name, anchor="s", font=("Helvetica", 8, "bold"))
             elif element.element_type == "Monitor" and element.family_name in ("BPMZ1L2RP", "BPMZ1K3RP", "BPMZ1L4RP", "BPMZ3L4RP", "BPMZ4L4RP", "BPMZ5L4RP", "BPMZ6L4RP"):
                 display = element.family_name.replace("RP", "")
-                canvas.create_text(x, row_y - 16, text=display, anchor="s", font=("Helvetica", 7))
+                label_fill = "#1565c0" if is_bump_feedback_bpm else "#263238"
+                canvas.create_text(x, row_y - 16, text=display, anchor="s", font=("Helvetica", 7, "bold" if is_bump_feedback_bpm else "normal"), fill=label_fill)
                 if isinstance(live_value, (int, float)):
                     canvas.create_text(x, row_y + 16, text="%.2f" % float(live_value), anchor="n", font=("Helvetica", 7), fill="#37474f")
         extras = [
@@ -1011,6 +1091,11 @@ class SSMBGui:
             return
         if not self.lattice_device_items:
             return
+        if self.selected_lattice_item_name:
+            for item in self.lattice_device_items:
+                if item.get("name") == self.selected_lattice_item_name:
+                    self._show_lattice_item_info(item)
+                    return
         self._set_text_widget(
             self.lattice_info_text,
             [
@@ -1034,6 +1119,7 @@ class SSMBGui:
         self._show_lattice_item_info(nearest)
 
     def _show_lattice_item_info(self, item: dict) -> None:
+        self.selected_lattice_item_name = item.get("name")
         sample = self.latest_monitor_sample or {}
         channels = sample.get("channels", {})
         payload = channels.get(item.get("pv_label"), {}) if item.get("pv_label") else {}
@@ -1074,6 +1160,20 @@ class SSMBGui:
                     "Live bump state is inferred from the set of these currents plus AKC10VP.",
                 ]
             )
+        if item.get("pv_label", "").endswith("_x") and isinstance(value, (int, float)):
+            severity = "linear/green"
+            if abs(float(value)) >= BPM_NONLINEAR_MM:
+                severity = "nonlinear/red"
+            elif abs(float(value)) >= BPM_WARNING_MM:
+                severity = "warning/yellow"
+            lines.extend(
+                [
+                    "",
+                    "Live orbit interpretation:",
+                    "Current X severity: %s" % severity,
+                    "Green < %.1f mm, yellow >= %.1f mm, red >= %.1f mm." % (BPM_WARNING_MM, BPM_WARNING_MM, BPM_NONLINEAR_MM),
+                ]
+            )
         self._set_text_widget(self.lattice_info_text, lines)
 
     def _close_lattice_window(self) -> None:
@@ -1085,6 +1185,7 @@ class SSMBGui:
         self.lattice_context = None
         self.lattice_specs = None
         self.lattice_device_items = []
+        self.selected_lattice_item_name = None
 
     def _section_bounds(self, lattice) -> dict:
         bounds = {}
