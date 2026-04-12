@@ -947,6 +947,13 @@ class SSMBGui:
         ttk.Button(preset_row, text="Preset: sweep bump ON", command=lambda: self._preset_sweep("rf_sweep_bump_on")).pack(side="left", padx=4)
         ttk.Button(preset_row, text="Preset: quick phase test ON", command=lambda: self._preset_quick_phase_sweep("quick_phase_bump_on")).pack(side="left", padx=4)
         ttk.Button(preset_row, text="Preset: quick phase test OFF", command=lambda: self._preset_quick_phase_sweep("quick_phase_bump_off")).pack(side="left", padx=4)
+        ttk.Button(preset_row, text="Preset: quick phase test MY bump", command=lambda: self._preset_quick_phase_sweep("quick_phase_my_bump")).pack(side="left", padx=4)
+        row += 1
+        bump_row = ttk.Frame(frame)
+        bump_row.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        ttk.Button(bump_row, text="Open Experimental Bump Lab", command=self._open_bump_lab_window).pack(side="left")
+        ttk.Button(bump_row, text="Observe External Bump", command=self._start_bump_lab_observer).pack(side="left", padx=6)
+        ttk.Button(bump_row, text="Run My Bumper", command=self._start_bump_lab_controller).pack(side="left", padx=6)
         row += 1
         for label, var in (
             ("Center RF PV value", self.center_rf_var),
@@ -1138,7 +1145,10 @@ class SSMBGui:
         self._refresh_inventory()
 
     def _preset_quick_phase_sweep(self, label: str) -> None:
-        bump_note = "ON" if "on" in label.lower() else "OFF"
+        if "my_bump" in label.lower():
+            bump_note = "MY experimental bump"
+        else:
+            bump_note = "ON" if "on" in label.lower() else "OFF"
         self.label_var.set(label)
         self.heavy_mode_var.set(True)
         self.log_profile_var.set("heavy")
