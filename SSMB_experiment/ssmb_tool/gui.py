@@ -2343,13 +2343,14 @@ class SSMBGui:
             "section": 60,
             "bpm": 160,
             "qpd": 220,
-            "environment": 280,
-            "rf": 340,
-            "quadrupole": 410,
-            "sextupole": 470,
-            "dipole": 530,
-            "octupole": 590,
-            "bump": 660,
+            "light": 280,
+            "environment": 340,
+            "rf": 400,
+            "quadrupole": 470,
+            "sextupole": 530,
+            "dipole": 590,
+            "octupole": 650,
+            "bump": 720,
         }
         canvas.create_line(left, y_track, right, y_track, fill="#37474f", width=3)
         self.lattice_device_items = []
@@ -2366,6 +2367,7 @@ class SSMBGui:
         row_specs = (
             ("BPMs", row_positions["bpm"]),
             ("QPD / optics", row_positions["qpd"]),
+            ("P1 / P3 / undulator", row_positions["light"]),
             ("Environment", row_positions["environment"]),
             ("RF / tune", row_positions["rf"]),
             ("Quadrupoles", row_positions["quadrupole"]),
@@ -2419,6 +2421,8 @@ class SSMBGui:
                     "x": x,
                     "y": row_y,
                     "row": row_y,
+                    "optics_center": getattr(element, "optics_center", {}) or {},
+                    "model_strengths": getattr(element, "model_strengths", {}) or {},
                     "click_radius": 20 if element.element_type == "Monitor" else (26 if element.element_type == "RFCavity" else 24),
                 }
             )
@@ -2450,7 +2454,7 @@ class SSMBGui:
                 "Inferred laser / interaction-point marker near the undulator region. No direct PV is attached here.",
                 self._element_s_position(lattice, "BM1L2RP", fallback=7.05),
                 "#00acc1",
-                row_positions["qpd"],
+                row_positions["light"],
             ),
             (
                 "P1 light monitor",
@@ -2458,7 +2462,7 @@ class SSMBGui:
                 "Main coherent-light harmonic monitor used for the SSMB scan. Placed near the L2/undulator diagnostic region.",
                 self._element_s_position(lattice, "BM1L2RP", fallback=7.2),
                 "#8e24aa",
-                row_positions["qpd"],
+                row_positions["light"],
             ),
             (
                 "P3 light monitor",
@@ -2466,7 +2470,7 @@ class SSMBGui:
                 "Third-harmonic coherent-light monitor from the same scope chain. Placed near the L2/undulator diagnostic region.",
                 self._element_s_position(lattice, "BM1L2RP", fallback=7.35),
                 "#fb8c00",
-                row_positions["qpd"],
+                row_positions["light"],
             ),
             (
                 "QPD00ZL4RP",
@@ -2490,6 +2494,14 @@ class SSMBGui:
                 "Cooling and SR-area temperature monitor group for checking slow thermal drifts against P1/P3 and orbit motion.",
                 self._element_s_position(lattice, "BM1L2RP", fallback=6.3),
                 "#00838f",
+                row_positions["environment"],
+            ),
+            (
+                "Optics functions",
+                None,
+                "Static optics from the bundled SSMB lattice export: beta_x, beta_y, eta_x, eta_y, beta_z-like, sigma_x, sigma_y, sigma_delta.",
+                self._element_s_position(lattice, "BM1L2RP", fallback=6.7),
+                "#546e7a",
                 row_positions["environment"],
             ),
             (
@@ -2580,6 +2592,8 @@ class SSMBGui:
                     "x": x,
                     "y": row_y,
                     "row": row_y,
+                    "optics_center": {},
+                    "model_strengths": {},
                     "click_radius": 18,
                 }
             )
@@ -2664,6 +2678,7 @@ class SSMBGui:
                 ]
             )
         if item.get("element_type") in ("Quadrupole", "Sextupole", "Octupole", "Dipole"):
+            strengths = item.get("model_strengths", {}) or {}
             lines.extend(
                 [
                     "",
@@ -2671,6 +2686,25 @@ class SSMBGui:
                     "Section: %s" % ((item.get("notes", "").split(" in ", 1)[1]) if " in " in item.get("notes", "") else "ring"),
                     "Power-supply PV mapping comes from the lattice export / inventory build.",
                     "If the live monitor is not polling this magnet family, the live value can be n/a while the PV mapping and metadata are still shown here.",
+                    "Model K: %s" % strengths.get("K"),
+                    "Model H / bend: %s" % strengths.get("H"),
+                    "Model PolynomB: %s" % strengths.get("PolynomB"),
+                ]
+            )
+        optics = item.get("optics_center", {}) or {}
+        if optics:
+            lines.extend(
+                [
+                    "",
+                    "Lattice optics at this location:",
+                    "beta_x / beta_y: %s / %s m" % (self._format_plot_value(optics.get("beta_x_m")), self._format_plot_value(optics.get("beta_y_m"))),
+                    "eta_x / eta_y: %s / %s m" % (self._format_plot_value(optics.get("eta_x_m")), self._format_plot_value(optics.get("eta_y_m"))),
+                    "beta_z-like: %s m" % self._format_plot_value(optics.get("beta_z_like_m")),
+                    "sigma_x / sigma_y / sigma_delta: %s / %s m / %s" % (
+                        self._format_plot_value(optics.get("sigma_x_m")),
+                        self._format_plot_value(optics.get("sigma_y_m")),
+                        self._format_plot_value(optics.get("sigma_delta")),
+                    ),
                 ]
             )
         if item.get("pv_label") == "qpd_l4_sigma_x":
@@ -2700,6 +2734,14 @@ class SSMBGui:
                     "Undulator / interaction marker:",
                     "This is an inferred lattice marker for the U125 interaction region.",
                     "No verified live undulator PV is attached yet, but nearby diagnostics include QPD01, BPMZ1L2RP, and the P1/P3 light monitors.",
+                ]
+            )
+        if item.get("name") == "Optics functions":
+            lines.extend(
+                [
+                    "",
+                    "This plots the bundled SSMB lattice optics functions from the machine export.",
+                    "Use it to compare where beta_x, beta_y, eta_x, eta_y, and beta_z-like are large relative to the interaction region and the bump BPMs.",
                 ]
             )
         if item.get("element_type") == "RFCavity":
@@ -2789,6 +2831,15 @@ class SSMBGui:
             series_payload.append(("KW13 temp [C]", list(trend_data.get("climate_kw13_return_temp_c", [])), "#00838f"))
             series_payload.append(("SR temp [C]", list(trend_data.get("climate_sr_temp_c", [])), "#00695c"))
             series_payload.append(("SR temp1 [C]", list(trend_data.get("climate_sr_temp1_c", [])), "#26a69a"))
+        elif item.get("name") == "Optics functions":
+            optics = (self.lattice_context.optics_samples if self.lattice_context is not None else {}) or {}
+            series_payload.append(("βx [m]", list(optics.get("beta_x_m", [])), "#1d3557"))
+            series_payload.append(("βy [m]", list(optics.get("beta_y_m", [])), "#d62828"))
+            series_payload.append(("ηx [m]", list(optics.get("eta_x_m", [])), "#2a9d8f"))
+            series_payload.append(("ηy [m]", list(optics.get("eta_y_m", [])), "#8e24aa"))
+            beta_z_like = list(optics.get("beta_z_like_m", []))
+            if beta_z_like:
+                series_payload.append(("βz-like [m]", beta_z_like, "#6d4c41"))
         elif (item.get("pv_label") or "").startswith("l4_bump_hcorr"):
             series_payload.append(("Orbit error [mm]", list(trend_data.get("bump_orbit_error_mm", [])), "#c2185b"))
             series_payload.append(("BPM avg [mm]", list(trend_data.get("bump_bpm_avg_mm", [])), "#00838f"))
@@ -3017,6 +3068,8 @@ class SSMBGui:
         ttk.Button(top, text="Open Oscillation Study", command=self._open_oscillation_window).pack(side="left", padx=6)
         ttk.Button(top, text="Open Lattice View", command=self._open_lattice_window).pack(side="left", padx=6)
         ttk.Button(top, text="Derived Quantity Help", command=self._open_theory_window).pack(side="left", padx=6)
+        self.ssmb_study_rf_state = tk.Label(top, text="RF sweep OFF", bg="#607d8b", fg="white", padx=10, pady=4)
+        self.ssmb_study_rf_state.pack(side="right")
         table = ttk.Treeview(frame, columns=("quantity", "raw", "derived", "current"), show="headings", height=7)
         table.heading("quantity", text="Quantity")
         table.heading("raw", text="From raw data")
@@ -3075,6 +3128,8 @@ class SSMBGui:
                     "1. Measure horizontal BPM positions in L4: BPMZ3L4RP, BPMZ4L4RP, BPMZ5L4RP, BPMZ6L4RP.",
                     "2. Subtract the stored reference orbit x_ref at each BPM.",
                     "3. Project the resulting Δx onto the model dispersion D_x to infer δₛ.",
+                    "The live tool currently fixes this to the L4 BPM chain because that is the cleanest dispersive region in the current setup.",
+                    "The L2 bump BPMs are used primarily for source-region stability / bump control, not as the default δₛ reconstruction chain.",
                     "",
                     "Equation",
                     "Δx_i = x_i - x_{i,ref}",
@@ -3290,6 +3345,12 @@ class SSMBGui:
         beam_stability = safe_summary.get("beam_stability", {}) or {}
         phase_quality = safe_summary.get("phase_scan_quality", {}) or {}
         sweep_detection = safe_summary.get("rf_sweep_detection", {}) or {}
+        if getattr(self, "ssmb_study_rf_state", None) is not None:
+            active = bool(sweep_detection.get("active"))
+            self.ssmb_study_rf_state.configure(
+                text=("RF sweep ON (%s)" % (sweep_detection.get("reason") or "n/a")) if active else "RF sweep OFF",
+                bg="#b71c1c" if active else "#607d8b",
+            )
         quantity_defs = self._ssmb_study_quantity_defs()
         if self.ssmb_study_table is not None and self.ssmb_study_table.winfo_exists():
             rows = [

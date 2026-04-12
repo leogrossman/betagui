@@ -17,6 +17,8 @@ class LatticeElement:
     power_supply_rd_pv: Optional[str]
     pv_candidates: Sequence[str]
     connected_inventory_pvs: Sequence[str]
+    optics_center: Dict[str, object]
+    model_strengths: Dict[str, object]
 
 
 @dataclass
@@ -26,6 +28,8 @@ class LatticeContext:
     circumference_m: float
     elements: List[LatticeElement]
     special_locations: Dict[str, Dict[str, object]]
+    optics_samples: Dict[str, List[float]]
+    global_metrics: Dict[str, object]
 
     @classmethod
     def load(cls, path: Path) -> "LatticeContext":
@@ -41,6 +45,12 @@ class LatticeContext:
                 power_supply_rd_pv=item.get("power_supply_rd_pv"),
                 pv_candidates=item.get("pv_candidates", []),
                 connected_inventory_pvs=item.get("connected_inventory_pvs", []),
+                optics_center=dict(item.get("optics_center", {})),
+                model_strengths={
+                    "K": item.get("K"),
+                    "H": item.get("H"),
+                    "PolynomB": item.get("PolynomB"),
+                },
             )
             for item in data.get("elements", [])
         ]
@@ -50,6 +60,11 @@ class LatticeContext:
             circumference_m=float(data.get("circumference_m", 0.0)),
             elements=elements,
             special_locations=dict(data.get("special_locations", {})),
+            optics_samples={
+                str(key): (list(value) if isinstance(value, (list, tuple)) else [value])
+                for key, value in dict(data.get("optics_samples", {})).items()
+            },
+            global_metrics=dict(data.get("global_metrics", {})),
         )
 
     def monitors(self) -> List[LatticeElement]:
