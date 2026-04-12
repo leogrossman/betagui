@@ -46,11 +46,13 @@ LIVE_MONITOR_EXCLUDED_TAGS = {"ring", "quadrupole", "sextupole", "octupole"}
 LIVE_MONITOR_PLOT_WINDOW_S = 60.0
 DETAIL_PLOT_WINDOW_S = 60.0
 LONG_STUDY_PLOT_WINDOW_S = 600.0
-DEFAULT_PLOT_MAX_POINTS = 320
-LONG_STUDY_PLOT_MAX_POINTS = 480
+DETAIL_PLOT_MAX_POINTS = 220
+OVERVIEW_PLOT_MAX_POINTS = 120
+LONG_STUDY_PLOT_MAX_POINTS = 320
 MONITOR_DASHBOARD_RENDER_MIN_S = 1.0
 MONITOR_WINDOW_RENDER_MIN_S = 1.0
 MONITOR_WINDOW_REFRESH_MS = 2000
+PLOT_SMOOTH_POINT_LIMIT = 90
 
 
 def _parse_text_mapping(text: str) -> dict[str, str]:
@@ -86,6 +88,10 @@ def _downsample_tail(values, max_points: int):
     if sampled[-1] != values[-1]:
         sampled.append(values[-1])
     return sampled
+
+
+def _joined_lines(lines) -> str:
+    return "\n".join(lines or [])
 
 
 class SSMBGui:
@@ -975,12 +981,16 @@ class SSMBGui:
         self.inventory_text.configure(state="disabled")
 
     def _set_text_widget(self, widget: "tk.Text", lines: list[str]) -> None:
+        rendered = _joined_lines(lines)
+        if getattr(widget, "_ssmb_last_text", None) == rendered:
+            return
         yview = widget.yview()
         xview = widget.xview()
         widget.configure(state="normal")
         widget.delete("1.0", "end")
-        widget.insert("1.0", "\n".join(lines))
+        widget.insert("1.0", rendered)
         widget.configure(state="disabled")
+        widget._ssmb_last_text = rendered
         try:
             if yview != (0.0, 1.0):
                 widget.yview_moveto(yview[0])
@@ -1525,18 +1535,28 @@ class SSMBGui:
             "",
             "Start Live Monitor or reload a recent history cache.",
         ]
+        text_started = time.monotonic()
         if self.monitor_window_summary_text is not None:
             self._set_text_widget(self.monitor_window_summary_text, summary_lines)
         if self.monitor_window_channels_text is not None:
             self._set_text_widget(self.monitor_window_channels_text, channel_lines)
+        text_elapsed = time.monotonic() - text_started
         started = time.monotonic()
         self._update_monitor_dashboard(summary)
-        elapsed = time.monotonic() - started
-        if elapsed > 0.25:
-            self._debug("monitor window snapshot render took %.3f s" % elapsed)
+        dashboard_elapsed = time.monotonic() - started
         overview_window = getattr(self, "monitor_overview_window", None)
         if overview_window is not None and overview_window.winfo_exists():
+            overview_started = time.monotonic()
             self._update_monitor_overview(summary)
+            overview_elapsed = time.monotonic() - overview_started
+        else:
+            overview_elapsed = 0.0
+        total_elapsed = text_elapsed + dashboard_elapsed + overview_elapsed
+        if total_elapsed > 0.25:
+            self._debug(
+                "monitor window snapshot render took %.3f s (text=%.3f dashboard=%.3f overview=%.3f)"
+                % (total_elapsed, text_elapsed, dashboard_elapsed, overview_elapsed)
+            )
 
     def _reload_monitor_window_from_cache(self) -> None:
         if self.monitor_window is None or not self.monitor_window.winfo_exists():
@@ -2138,7 +2158,7 @@ class SSMBGui:
             values = list(trend_data.get(metric, []))
             if fixed_window:
                 values = values[-window_samples:]
-            values = _downsample_tail(values, DEFAULT_PLOT_MAX_POINTS)
+            values = _downsample_tail(values, DETAIL_PLOT_MAX_POINTS)
             meta = trend_definitions().get(metric, {"label": metric, "color": "#455a64"})
             series_payload.append((meta["label"], values, meta["color"]))
         actual_samples = max((len(values) for _label, values, _color in series_payload), default=0)
@@ -2209,13 +2229,24 @@ class SSMBGui:
             if not current and options:
                 current = options[: min(2, len(options))]
             self.monitor_plot_controls[section["key"]] = current
-            for item in selector.get_children():
-                selector.delete(item)
-            for key in options:
-                values = [value for value in (summary.get("trend_data", {}) or {}).get(key, []) if isinstance(value, (int, float))]
-                latest = values[-1] if values else None
-                selector.insert("", "end", iid=key, values=("[x]" if key in current else "[ ]", trend_definitions()[key]["label"], self._format_plot_value(latest)))
-            selector.bind("<<TreeviewSelect>>", lambda _event, key=section["key"], opts=options, tree=selector: self._on_monitor_plot_selected(key, opts, tree))
+            previous_options = widgets.get("selector_options", [])
+            if list(previous_options) != list(options):
+                for item in selector.get_children():
+                    selector.delete(item)
+                for key in options:
+                    values = [value for value in (summary.get("trend_data", {}) or {}).get(key, []) if isinstance(value, (int, float))]
+                    latest = values[-1] if values else None
+                    selector.insert("", "end", iid=key, values=("[x]" if key in current else "[ ]", trend_definitions()[key]["label"], self._format_plot_value(latest)))
+                selector.bind("<<TreeviewSelect>>", lambda _event, key=section["key"], opts=options, tree=selector: self._on_monitor_plot_selected(key, opts, tree))
+                widgets["selector_options"] = list(options)
+            else:
+                for key in options:
+                    if not selector.exists(key):
+                        continue
+                    values = [value for value in (summary.get("trend_data", {}) or {}).get(key, []) if isinstance(value, (int, float))]
+                    latest = values[-1] if values else None
+                    selector.set(key, "enabled", "[x]" if key in current else "[ ]")
+                    selector.set(key, "value", self._format_plot_value(latest))
             self._updating_monitor_plot_selector = True
             try:
                 selector.selection_set(tuple(current))
@@ -2226,7 +2257,7 @@ class SSMBGui:
             for metric in current:
                 values = list(trend_data.get(metric, []))
                 values = values[-self._window_samples_for_seconds(LIVE_MONITOR_PLOT_WINDOW_S):]
-                values = _downsample_tail(values, DEFAULT_PLOT_MAX_POINTS)
+                values = _downsample_tail(values, OVERVIEW_PLOT_MAX_POINTS)
                 meta = trend_definitions().get(metric, {"label": metric, "color": "#455a64"})
                 payload.append((meta["label"], values, meta["color"]))
             canvas = widgets["canvas"]
@@ -2321,7 +2352,8 @@ class SSMBGui:
                     transformed.append(numeric)
             pts = self._series_to_points(transformed, plot_x0, plot_y0, plot_x1, plot_y1, reference=clean_all)
             if len(pts) >= 4:
-                canvas.create_line(*pts, fill=color, width=2, smooth=True)
+                point_count = max(0, len(pts) // 2)
+                canvas.create_line(*pts, fill=color, width=2, smooth=point_count <= PLOT_SMOOTH_POINT_LIMIT)
 
     def _draw_beam_proxy(self, canvas, center_x, sigma_x, sigma_y, x0, y0, x1, y1, title):
         canvas.create_rectangle(x0, y0, x1, y1, outline="#d7ccc8")
