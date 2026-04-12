@@ -330,6 +330,36 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         self.assertEqual(app.ssmb_study_quantity_key, "eta")
         app._update_ssmb_study_window.assert_called_once()
 
+    def test_show_lattice_item_info_tolerates_none_pv_label(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        app = object.__new__(gui.SSMBGui)
+        app.selected_lattice_item_name = None
+        app.latest_monitor_sample = {"channels": {}}
+        app.latest_monitor_summary = {"trend_data": {}, "current": {}}
+        app.live_spec_lookup = {}
+        app.lattice_specs = None
+        app.lattice_info_text = mock.Mock()
+        app.lattice_context = None
+        app._set_text_widget = mock.Mock()
+        app._draw_lattice_item_history = mock.Mock()
+
+        gui.SSMBGui._show_lattice_item_info(
+            app,
+            {
+                "name": "Optics functions",
+                "element_type": "Diagnostic",
+                "pv_label": None,
+                "pv": None,
+                "notes": "static optics",
+                "optics_center": {},
+                "model_strengths": {},
+            },
+        )
+
+        app._set_text_widget.assert_called_once()
+        app._draw_lattice_item_history.assert_called_once()
+
     def test_monitor_window_render_smoke(self):
         import SSMB_experiment.ssmb_tool.gui as gui
         from SSMB_experiment.ssmb_tool.live_monitor import format_channel_snapshot, format_monitor_summary, summarize_live_monitor

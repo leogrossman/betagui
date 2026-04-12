@@ -127,10 +127,14 @@ class SSMBGui:
         self.lattice_window: Optional["tk.Toplevel"] = None
         self.bump_lab_window: Optional["tk.Toplevel"] = None
         self.ssmb_study_window: Optional["tk.Toplevel"] = None
+        self.delta_settings_window: Optional["tk.Toplevel"] = None
         self.bump_lab_thread: Optional[threading.Thread] = None
         self.bump_lab_stop_event: Optional[threading.Event] = None
         self.lattice_context = None
         self.lattice_specs = None
+        self.lattice_row_positions = {}
+        self.lattice_plot_bounds = None
+        self.selected_lattice_optics_sample_index = None
         self.latest_monitor_sample = None
         self.latest_monitor_summary = None
         self.lattice_device_items = []
@@ -226,6 +230,7 @@ class SSMBGui:
         self.laser_shots_var = tk.StringVar(value="0")
         self.output_dir_var = tk.StringVar(value=str(SSMB_ROOT / ".ssmb_local" / "ssmb_stage0"))
         self.lattice_model_var = tk.StringVar(value="")
+        self.delta_reconstruction_var = tk.StringVar(value="default")
         self.include_bpm_buffer_var = tk.BooleanVar(value=True)
         self.include_candidate_bpm_var = tk.BooleanVar(value=True)
         self.include_ring_bpm_var = tk.BooleanVar(value=True)
@@ -554,6 +559,63 @@ class SSMBGui:
             value, used = _first_order_delta_from_bpms(channels, refs, dispersion_map)
             variants[key] = {"value": value, "used": used}
         return variants
+
+    def _primary_delta_variant_key(self) -> str:
+        mapping = {
+            "default": "delta_s",
+            "inner": "delta_s_inner",
+            "outer": "delta_s_outer",
+        }
+        return mapping.get(self.delta_reconstruction_var.get(), "delta_s")
+
+    def _open_delta_settings_window(self) -> None:
+        if self.delta_settings_window is not None and self.delta_settings_window.winfo_exists():
+            self.delta_settings_window.lift()
+            return
+        if tk is None or self.root is None or not self.root.winfo_exists():
+            return
+        window = tk.Toplevel(self.root)
+        window.title("δₛ Reconstruction Settings")
+        self._place_window_on_screen(window, 720, 460, x=220, y=140, relative_to_root=True)
+        outer = ttk.Frame(window, padding=12)
+        outer.pack(fill="both", expand=True)
+        ttk.Label(
+            outer,
+            text="Choose which passive BPM subset is used as the primary displayed δₛ in the SSMB study views. The safe baseline remains the full L4 chain unless you change it here.",
+            wraplength=680,
+            justify="left",
+        ).pack(anchor="w")
+        choices = ttk.LabelFrame(outer, text="Displayed δₛ reconstruction", padding=10)
+        choices.pack(fill="x", pady=(10, 10))
+        ttk.Radiobutton(choices, text="Default L4 chain: BPMZ3L4RP, BPMZ4L4RP, BPMZ5L4RP, BPMZ6L4RP", variable=self.delta_reconstruction_var, value="default").pack(anchor="w")
+        ttk.Radiobutton(choices, text="Inner pair only: BPMZ4L4RP + BPMZ5L4RP", variable=self.delta_reconstruction_var, value="inner").pack(anchor="w", pady=(4, 0))
+        ttk.Radiobutton(choices, text="Outer pair only: BPMZ3L4RP + BPMZ6L4RP", variable=self.delta_reconstruction_var, value="outer").pack(anchor="w", pady=(4, 0))
+        detail = tk.Text(outer, wrap="word", width=84, height=12)
+        detail.pack(fill="both", expand=True)
+        lines = [
+            "Dispersion values used in the current passive model:",
+            "",
+        ]
+        for key, value in DEFAULT_L4_DISPERSION_M.items():
+            lines.append("%s : %s m" % (key, self._format_plot_value(value)))
+        lines.extend(
+            [
+                "",
+                "Interpretation:",
+                "- These reconstructions use horizontal BPM offsets and the selected dispersion values from the current lattice export.",
+                "- L2 bump BPMs are better treated as source-region stability monitors, not the default δₛ estimator.",
+                "- Comparing the default / inner / outer variants is a useful consistency check during RF sweep.",
+            ]
+        )
+        self._set_text_widget(detail, lines)
+        ttk.Button(outer, text="Close", command=window.destroy).pack(anchor="e", pady=(10, 0))
+        window.protocol("WM_DELETE_WINDOW", lambda: self._close_delta_settings_window())
+        self.delta_settings_window = window
+
+    def _close_delta_settings_window(self) -> None:
+        if self.delta_settings_window is not None and self.delta_settings_window.winfo_exists():
+            self.delta_settings_window.destroy()
+        self.delta_settings_window = None
 
     def _should_compute_extended_analysis(self) -> bool:
         for name in ("oscillation_window", "ssmb_study_window"):
@@ -2338,8 +2400,7 @@ class SSMBGui:
         side.grid(row=0, column=1, sticky="nsew")
         side.columnconfigure(0, weight=1)
         side.rowconfigure(1, weight=1)
-        side.rowconfigure(2, weight=0)
-        side.rowconfigure(3, weight=0)
+        side.rowconfigure(2, weight=1)
         controls = ttk.Frame(side)
         controls.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         controls.columnconfigure(1, weight=1)
@@ -2351,18 +2412,17 @@ class SSMBGui:
         ttk.Button(controls, text="Reload model", command=self._reload_lattice_model).grid(row=0, column=2, padx=(0, 6))
         ttk.Button(controls, text="Save machine snapshot…", command=self._save_lattice_snapshot).grid(row=0, column=3)
         ttk.Button(controls, text="Optics Help", command=self._open_lattice_optics_help_window).grid(row=0, column=4, padx=(6, 0))
+        ttk.Button(controls, text="δₛ Settings", command=self._open_delta_settings_window).grid(row=0, column=5, padx=(6, 0))
         info = tk.Text(side, wrap="word", width=42, height=18)
         info.grid(row=1, column=0, sticky="nsew")
         info.configure(state="disabled")
-        detail_canvas = tk.Canvas(side, bg="white", width=360, height=190, highlightthickness=1, highlightbackground="#cfd8dc")
-        detail_canvas.grid(row=2, column=0, sticky="ew", pady=(8, 0))
-        optics_canvas = tk.Canvas(side, bg="white", width=360, height=220, highlightthickness=1, highlightbackground="#cfd8dc")
-        optics_canvas.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        detail_canvas = tk.Canvas(side, bg="white", width=360, height=320, highlightthickness=1, highlightbackground="#cfd8dc")
+        detail_canvas.grid(row=2, column=0, sticky="nsew", pady=(8, 0))
         self.lattice_window = window
         self.lattice_canvas = canvas
         self.lattice_info_text = info
         self.lattice_detail_canvas = detail_canvas
-        self.lattice_optics_canvas = optics_canvas
+        self.lattice_optics_canvas = None
         self.lattice_context = lattice
         self.lattice_specs = specs
         canvas.bind("<Button-1>", self._on_lattice_click)
@@ -2538,7 +2598,10 @@ class SSMBGui:
             "bump": 720,
             "beta_optics": 790,
             "dispersion_optics": 850,
+            "beta_z_optics": 910,
         }
+        self.lattice_row_positions = dict(row_positions)
+        self.lattice_plot_bounds = (left, right)
         canvas.create_line(left, y_track, right, y_track, fill="#37474f", width=3)
         self.lattice_device_items = []
         sections = [("K1", "#fff3e0"), ("L2", "#e8f5e9"), ("K3", "#e3f2fd"), ("L4", "#fce4ec")]
@@ -2564,6 +2627,7 @@ class SSMBGui:
             ("Bump correctors", row_positions["bump"]),
             ("Beta functions", row_positions["beta_optics"]),
             ("Dispersion functions", row_positions["dispersion_optics"]),
+            ("βz-like", row_positions["beta_z_optics"]),
         )
         for row_name, row_y in row_specs:
             canvas.create_text(10, row_y, anchor="w", text=row_name, fill="#455a64", font=("Helvetica", 10, "bold"))
@@ -2812,6 +2876,17 @@ class SSMBGui:
             row_positions["dispersion_optics"],
             "Dispersion functions",
         )
+        self._draw_lattice_function_row(
+            canvas,
+            lattice,
+            lattice.optics_samples,
+            ("beta_z_like_m",),
+            ("#6d4c41",),
+            left,
+            right,
+            row_positions["beta_z_optics"],
+            "βz-like",
+        )
         bump_state = (self.latest_monitor_summary or {}).get("bump_state", {})
         bump_label = "BUMP ON" if bump_state.get("active") else "BUMP OFF/idle"
         bump_color = "#b71c1c" if bump_state.get("active") else "#1b5e20"
@@ -2850,6 +2925,10 @@ class SSMBGui:
     def _on_lattice_click(self, event) -> None:
         if not self.lattice_device_items:
             return
+        optics_sample = self._optics_sample_from_lattice_click(event.x, event.y)
+        if optics_sample is not None:
+            self._show_lattice_optics_sample_info(optics_sample)
+            return
         if self.lattice_canvas is not None:
             overlapping = set(self.lattice_canvas.find_overlapping(event.x - 2, event.y - 2, event.x + 2, event.y + 2))
             for item in self.lattice_device_items:
@@ -2868,6 +2947,64 @@ class SSMBGui:
             key=lambda item: (item["x"] - event.x) ** 2 + ((item.get("row", item["y"]) - event.y) * 1.35) ** 2,
         )
         self._show_lattice_item_info(nearest)
+
+    def _optics_sample_from_lattice_click(self, x, y):
+        lattice = self.lattice_context
+        if lattice is None or not lattice.optics_samples:
+            return None
+        left_right = self.lattice_plot_bounds
+        if not left_right:
+            return None
+        left, right = left_right
+        rows = self.lattice_row_positions or {}
+        valid_rows = [rows.get("beta_optics"), rows.get("dispersion_optics"), rows.get("beta_z_optics")]
+        if not any(row is not None and abs(y - row) <= 26 for row in valid_rows):
+            return None
+        s_values = list((lattice.optics_samples or {}).get("s_m", []))
+        if not s_values:
+            return None
+        target_s = self._x_to_s(x, left, right, lattice.circumference_m)
+        nearest_idx = min(range(len(s_values)), key=lambda idx: abs(float(s_values[idx]) - target_s))
+        return {"index": nearest_idx, "s_m": float(s_values[nearest_idx])}
+
+    def _x_to_s(self, x, left, right, circumference_m):
+        if right <= left:
+            return 0.0
+        norm = min(1.0, max(0.0, (float(x) - left) / float(right - left)))
+        return norm * float(circumference_m)
+
+    def _show_lattice_optics_sample_info(self, sample_info: dict) -> None:
+        lattice = self.lattice_context
+        if lattice is None:
+            return
+        optics = lattice.optics_samples or {}
+        idx = int(sample_info["index"])
+        self.selected_lattice_item_name = "Optics functions"
+        self.selected_lattice_optics_sample_index = idx
+        def _sample(key):
+            values = list(optics.get(key, []))
+            return values[idx] if idx < len(values) else None
+        sigma_x = _sample("sigma_x_m")
+        sigma_y = _sample("sigma_y_m")
+        lines = [
+            "Optics sample at s = %s m" % self._format_plot_value(sample_info["s_m"]),
+            "",
+            "This point is read from the bundled lattice export, not a live EPICS readback.",
+            "Use it to inspect model optics and beam-size variation along the ring.",
+            "",
+            "beta_x / beta_y: %s / %s m" % (self._format_plot_value(_sample("beta_x_m")), self._format_plot_value(_sample("beta_y_m"))),
+            "eta_x / eta_y: %s / %s m" % (self._format_plot_value(_sample("eta_x_m")), self._format_plot_value(_sample("eta_y_m"))),
+            "beta_z-like: %s m" % self._format_plot_value(_sample("beta_z_like_m")),
+            "sigma_x / sigma_y / sigma_delta: %s / %s m / %s" % (
+                self._format_plot_value(sigma_x),
+                self._format_plot_value(sigma_y),
+                self._format_plot_value(_sample("sigma_delta")),
+            ),
+            "",
+            "The beam-profile view below uses one common spatial scale for sigma_x and sigma_y so size changes along the lattice are visually comparable.",
+        ]
+        self._set_text_widget(self.lattice_info_text, lines)
+        self._draw_lattice_optics_sample_detail(sample_info["s_m"], sigma_x, sigma_y)
 
     def _show_lattice_item_info(self, item: dict) -> None:
         self.selected_lattice_item_name = item.get("name")
@@ -2991,7 +3128,7 @@ class SSMBGui:
                     "Live bump state is inferred from the set of these currents plus AKC10VP.",
                 ]
             )
-        if item.get("pv_label", "").endswith("_x") and isinstance(value, (int, float)):
+        if (item.get("pv_label") or "").endswith("_x") and isinstance(value, (int, float)):
             severity = "linear/green"
             if abs(float(value)) >= BPM_NONLINEAR_MM:
                 severity = "nonlinear/red"
@@ -3007,7 +3144,33 @@ class SSMBGui:
             )
         self._set_text_widget(self.lattice_info_text, lines)
         self._draw_lattice_item_history(item)
-        self._draw_lattice_optics_overview(item)
+
+    def _draw_lattice_optics_sample_detail(self, s_m, sigma_x, sigma_y) -> None:
+        canvas = getattr(self, "lattice_detail_canvas", None)
+        if canvas is None:
+            return
+        canvas.delete("all")
+        width = int(canvas.winfo_width() or 360)
+        height = int(canvas.winfo_height() or 190)
+        self._draw_beam_proxy(
+            canvas,
+            0.0,
+            sigma_x * 1e3 if isinstance(sigma_x, (int, float)) else None,
+            sigma_y * 1e3 if isinstance(sigma_y, (int, float)) else None,
+            24,
+            22,
+            width - 24,
+            height - 22,
+            "Model beam profile @ s=%s m" % self._format_plot_value(s_m),
+        )
+        canvas.create_text(
+            width / 2,
+            height - 8,
+            anchor="s",
+            text="Common scale for σx and σy from bundled lattice export",
+            fill="#546e7a",
+            font=("Helvetica", 8),
+        )
 
     def _draw_lattice_item_history(self, item: dict) -> None:
         canvas = getattr(self, "lattice_detail_canvas", None)
@@ -3180,6 +3343,9 @@ class SSMBGui:
         self.lattice_info_text = None
         self.lattice_detail_canvas = None
         self.lattice_optics_canvas = None
+        self.lattice_row_positions = {}
+        self.lattice_plot_bounds = None
+        self.selected_lattice_optics_sample_index = None
         self.lattice_context = None
         self.lattice_specs = None
         self.lattice_device_items = []
@@ -3376,7 +3542,7 @@ class SSMBGui:
                 "label": "δₛ",
                 "raw": "L4 BPM offsets [mm]",
                 "derived": "Weighted dispersive BPM reconstruction",
-                "current": lambda current, sweep, osc, res, quality: self._format_plot_value(current.get("delta_l4_bpm_first_order")),
+                "current": lambda current, sweep, osc, res, quality: self._format_plot_value((self._delta_variant_estimates().get(self._primary_delta_variant_key()) or {}).get("value")),
                 "plot_keys": ["delta_s", "rf_offset_hz", "beam_energy_mev"],
                 "theory": [
                     "Definition",
@@ -3604,6 +3770,8 @@ class SSMBGui:
         phase_quality = safe_summary.get("phase_scan_quality", {}) or {}
         sweep_detection = safe_summary.get("rf_sweep_detection", {}) or {}
         delta_variants = self._delta_variant_estimates()
+        primary_delta_key = self._primary_delta_variant_key()
+        primary_delta_value = (delta_variants.get(primary_delta_key) or {}).get("value")
         if getattr(self, "ssmb_study_rf_state", None) is not None:
             active = bool(sweep_detection.get("active"))
             self.ssmb_study_rf_state.configure(
@@ -3673,7 +3841,7 @@ class SSMBGui:
             "Certainty: %s" % oscillation.get("certainty", "n/a"),
             "",
             "Derived machine quantities",
-            "δₛ: %s" % self._format_plot_value(current.get("delta_l4_bpm_first_order")),
+            "δₛ (%s): %s" % (self.delta_reconstruction_var.get(), self._format_plot_value(primary_delta_value)),
             "η: %s" % self._format_plot_value(sweep.get("phase_slip_factor_eta")),
             "α₀ legacy / BPM: %s / %s" % (self._format_plot_value(current.get("legacy_alpha0_corrected")), self._format_plot_value(sweep.get("alpha0_from_bpm_eta"))),
             "Beam energy / σδ: %s MeV / %s" % (self._format_plot_value(current.get("beam_energy_from_bpm_mev")), self._format_plot_value(current.get("qpd_l4_sigma_delta_first_order"))),
