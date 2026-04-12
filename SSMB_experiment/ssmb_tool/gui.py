@@ -38,8 +38,10 @@ class SSMBGui:
         self.allow_writes = allow_writes
         self.queue: "queue.Queue[object]" = queue.Queue()
         self.worker: Optional[threading.Thread] = None
+        self.stage0_stop_event: Optional[threading.Event] = None
         self._build_vars()
         self._build_ui()
+        self._apply_profile()
         self._refresh_inventory()
         self.root.after(100, self._drain_queue)
 
@@ -57,6 +59,8 @@ class SSMBGui:
         self.include_sextupole_var = tk.BooleanVar(value=True)
         self.include_octupole_var = tk.BooleanVar(value=True)
         self.heavy_mode_var = tk.BooleanVar(value=False)
+        self.safe_mode_var = tk.BooleanVar(value=True)
+        self.log_profile_var = tk.StringVar(value="ssmb_standard")
 
         self.center_rf_var = tk.StringVar(value="")
         self.delta_min_hz_var = tk.StringVar(value="-100")
@@ -136,6 +140,15 @@ class SSMBGui:
         ttk.Button(preset_row, text="Preset: bump ON", command=lambda: self._preset_bump("bump_on")).pack(side="left")
         row += 1
 
+        ttk.Label(frame, text="Logging profile").grid(row=row, column=0, sticky="w")
+        profile_combo = ttk.Combobox(frame, textvariable=self.log_profile_var, values=("minimal", "ssmb_standard", "heavy"), width=18, state="readonly")
+        profile_combo.grid(row=row, column=1, sticky="w", pady=2)
+        profile_combo.bind("<<ComboboxSelected>>", lambda _event: self._apply_profile())
+        row += 1
+
+        ttk.Checkbutton(frame, text="Safe / read-only mode", variable=self.safe_mode_var, command=self._update_write_controls).grid(row=row, column=0, columnspan=2, sticky="w")
+        row += 1
+
         ttk.Checkbutton(frame, text="Heavy logging mode", variable=self.heavy_mode_var, command=self._toggle_heavy_mode).grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
         ttk.Checkbutton(frame, text="Include BPM buffer waveform", variable=self.include_bpm_buffer_var, command=self._refresh_inventory).grid(row=row, column=0, columnspan=2, sticky="w")
@@ -167,6 +180,11 @@ class SSMBGui:
         button_row.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         ttk.Button(button_row, text="Preview Logged Channels", command=self._refresh_inventory).pack(side="left")
         ttk.Button(button_row, text="Run Stage 0 Log", command=self._run_stage0).pack(side="left", padx=6)
+        self.start_manual_button = ttk.Button(button_row, text="Start Manual Log", command=self._start_manual_stage0)
+        self.start_manual_button.pack(side="left")
+        self.stop_manual_button = ttk.Button(button_row, text="Stop Manual Log", command=self._stop_manual_stage0)
+        self.stop_manual_button.pack(side="left", padx=6)
+        self.stop_manual_button.state(["disabled"])
 
     def _build_sweep_tab(self, frame: "ttk.Frame") -> None:
         row = 0
@@ -195,19 +213,20 @@ class SSMBGui:
         sweep_buttons.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         ttk.Button(sweep_buttons, text="Read Live RF", command=self._read_live_rf).pack(side="left")
         ttk.Button(sweep_buttons, text="Preview RF Sweep", command=self._preview_sweep).pack(side="left", padx=6)
-        run_button = ttk.Button(sweep_buttons, text="Run RF Sweep", command=self._run_sweep)
-        run_button.pack(side="left")
-        if not self.allow_writes:
-            run_button.state(["disabled"])
+        self.run_sweep_button = ttk.Button(sweep_buttons, text="Run RF Sweep", command=self._run_sweep)
+        self.run_sweep_button.pack(side="left")
+        self._update_write_controls()
 
     def _collect_logger_config(self, allow_writes: bool = False) -> LoggerConfig:
+        safe_mode = bool(self.safe_mode_var.get()) if allow_writes else True
+        write_enabled = bool(allow_writes and self.allow_writes and not safe_mode)
         return LoggerConfig(
             duration_seconds=float(self.duration_var.get()),
             sample_hz=float(self.sample_hz_var.get()),
             timeout_seconds=float(self.timeout_var.get()),
             output_root=Path(self.output_dir_var.get()).expanduser().resolve(),
-            safe_mode=not allow_writes,
-            allow_writes=allow_writes,
+            safe_mode=safe_mode,
+            allow_writes=write_enabled,
             include_bpm_buffer=bool(self.include_bpm_buffer_var.get()),
             include_candidate_bpm_scalars=bool(self.include_candidate_bpm_var.get()),
             include_ring_bpm_scalars=bool(self.include_ring_bpm_var.get()),
@@ -220,8 +239,46 @@ class SSMBGui:
             extra_optional_pvs=_parse_text_mapping(self.optional_pvs_text.get("1.0", "end")),
         )
 
+    def _apply_profile(self) -> None:
+        profile = self.log_profile_var.get()
+        if profile == "minimal":
+            self.heavy_mode_var.set(False)
+            self.include_bpm_buffer_var.set(False)
+            self.include_candidate_bpm_var.set(True)
+            self.include_ring_bpm_var.set(False)
+            self.include_quadrupole_var.set(False)
+            self.include_sextupole_var.set(False)
+            self.include_octupole_var.set(False)
+            if float(self.sample_hz_var.get()) > 2.0:
+                self.sample_hz_var.set("2")
+        elif profile == "heavy":
+            self.heavy_mode_var.set(True)
+            self.include_bpm_buffer_var.set(True)
+            self.include_candidate_bpm_var.set(True)
+            self.include_ring_bpm_var.set(True)
+            self.include_quadrupole_var.set(True)
+            self.include_sextupole_var.set(True)
+            self.include_octupole_var.set(True)
+            if float(self.sample_hz_var.get()) > 2.0:
+                self.sample_hz_var.set("1")
+        else:
+            self.heavy_mode_var.set(False)
+            self.include_bpm_buffer_var.set(False)
+            self.include_candidate_bpm_var.set(True)
+            self.include_ring_bpm_var.set(True)
+            self.include_quadrupole_var.set(False)
+            self.include_sextupole_var.set(True)
+            self.include_octupole_var.set(True)
+            if float(self.sample_hz_var.get()) > 2.0:
+                self.sample_hz_var.set("1")
+        self._refresh_inventory()
+
     def _toggle_heavy_mode(self) -> None:
         heavy = bool(self.heavy_mode_var.get())
+        if heavy:
+            self.log_profile_var.set("heavy")
+        elif self.log_profile_var.get() == "heavy":
+            self.log_profile_var.set("ssmb_standard")
         if heavy:
             self.include_bpm_buffer_var.set(True)
             self.include_candidate_bpm_var.set(True)
@@ -232,6 +289,13 @@ class SSMBGui:
             if float(self.sample_hz_var.get()) > 2.0:
                 self.sample_hz_var.set("1")
         self._refresh_inventory()
+
+    def _update_write_controls(self) -> None:
+        if hasattr(self, "run_sweep_button"):
+            if self.allow_writes and not self.safe_mode_var.get():
+                self.run_sweep_button.state(["!disabled"])
+            else:
+                self.run_sweep_button.state(["disabled"])
 
     def _preset_low_alpha(self) -> None:
         self.label_var.set("low_alpha")
@@ -284,8 +348,14 @@ class SSMBGui:
                 message = self.queue.get_nowait()
             except queue.Empty:
                 break
-            if isinstance(message, dict) and message.get("kind") == "bpm_status":
-                self._update_bpm_status(message)
+            if isinstance(message, dict):
+                if message.get("kind") == "bpm_status":
+                    self._update_bpm_status(message)
+                elif message.get("kind") == "manual_stage0_done":
+                    self.stage0_stop_event = None
+                    self.start_manual_button.state(["!disabled"])
+                    self.stop_manual_button.state(["disabled"])
+                    self._append_log("Manual logging task finalized.")
             else:
                 self._append_log(str(message))
         self.root.after(100, self._drain_queue)
@@ -371,6 +441,57 @@ class SSMBGui:
         session_dir = run_stage0_logger(config, progress_callback=self._emit, sample_callback=self._emit_bpm_status)
         self._emit("Stage 0 log saved to: %s" % session_dir)
 
+    def _start_manual_stage0(self) -> None:
+        if self.stage0_stop_event is not None:
+            self._append_log("Manual logging is already running.")
+            return
+        config = self._collect_logger_config(allow_writes=False)
+        config = LoggerConfig(
+            duration_seconds=24.0 * 3600.0,
+            sample_hz=config.sample_hz,
+            timeout_seconds=config.timeout_seconds,
+            output_root=config.output_root,
+            lattice_export=config.lattice_export,
+            safe_mode=True,
+            allow_writes=False,
+            include_bpm_buffer=config.include_bpm_buffer,
+            include_candidate_bpm_scalars=config.include_candidate_bpm_scalars,
+            include_ring_bpm_scalars=config.include_ring_bpm_scalars,
+            include_quadrupoles=config.include_quadrupoles,
+            include_sextupoles=config.include_sextupoles,
+            include_octupoles=config.include_octupoles,
+            session_label=config.session_label,
+            operator_note=config.operator_note,
+            extra_pvs=config.extra_pvs,
+            extra_optional_pvs=config.extra_optional_pvs,
+        )
+        self.stage0_stop_event = threading.Event()
+        self.start_manual_button.state(["disabled"])
+        self.stop_manual_button.state(["!disabled"])
+        self._append_log("Starting manual passive logging. Use Stop Manual Log to finish and flush outputs.")
+        self._run_in_worker(self._run_stage0_manual_worker, config)
+
+    def _stop_manual_stage0(self) -> None:
+        if self.stage0_stop_event is None:
+            self._append_log("No manual logging task is currently running.")
+            return
+        self._append_log("Manual stop requested. Waiting for the current sample to finish.")
+        self.stage0_stop_event.set()
+
+    def _run_stage0_manual_worker(self, config: LoggerConfig) -> None:
+        try:
+            session_dir = run_stage0_logger(
+                config,
+                progress_callback=self._emit,
+                sample_callback=self._emit_bpm_status,
+                stop_event=self.stage0_stop_event,
+                session_prefix="ssmb_manual",
+                extra_metadata={"manual_stop_mode": True, "started_from_gui": True},
+            )
+            self._emit("Manual log saved to: %s" % session_dir)
+        finally:
+            self.queue.put({"kind": "manual_stage0_done"})
+
     def _read_live_rf(self) -> None:
         try:
             adapter = ReadOnlyEpicsAdapter(timeout=float(self.timeout_var.get()))
@@ -432,6 +553,9 @@ class SSMBGui:
         if not self.allow_writes:
             self._append_log("RF sweep writes are disabled. Start the GUI with --allow-writes.")
             return
+        if self.safe_mode_var.get():
+            self._append_log("RF sweep writes are blocked because Safe / read-only mode is enabled.")
+            return
         runtime = self._build_sweep_runtime()
         current_rf = None
         try:
@@ -441,8 +565,8 @@ class SSMBGui:
         except Exception:
             current_rf = None
         lines = preview_lines(runtime.plan, current_rf)
-        preview_text = "\n".join(lines)
-        if not messagebox.askokcancel("Confirm RF Sweep", preview_text):
+        preview_text = "This action will write to EPICS PVs.\n\nDouble-check units carefully: the RF preview below is in Hz, while %s uses PV units where 1 unit = 1000 Hz.\n\n%s" % (RF_PV_NAME, "\n".join(lines))
+        if not messagebox.askokcancel("Confirm RF Sweep Writes", preview_text):
             self._append_log("RF sweep cancelled by user.")
             return
         self._run_in_worker(self._run_sweep_worker, runtime)

@@ -95,6 +95,64 @@ class SSMBExperimentSweepTest(unittest.TestCase):
             sample_lines = (session_dir / "samples.jsonl").read_text(encoding="utf-8").strip().splitlines()
             self.assertGreaterEqual(len(sample_lines), 1 + plan.n_points * plan.samples_per_point + 1)
 
+    def test_failed_rf_sweep_still_writes_metadata_and_restores_rf(self):
+        class FailingAdapter(FakeEpicsAdapter):
+            def get(self, name, default=None):
+                if name == "BPMZ4L4RP:rdX":
+                    raise RuntimeError("simulated BPM read failure")
+                return super().get(name, default)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = LoggerConfig(
+                duration_seconds=60.0,
+                sample_hz=1.0,
+                output_root=Path(tmpdir),
+                safe_mode=False,
+                allow_writes=True,
+                include_bpm_buffer=False,
+                include_candidate_bpm_scalars=True,
+                include_ring_bpm_scalars=False,
+                include_octupoles=False,
+                session_label="rf_sweep_failure",
+            )
+            plan = build_plan_from_hz(
+                center_rf_pv=499688.38770589296,
+                delta_min_hz=-20.0,
+                delta_max_hz=20.0,
+                n_points=3,
+                settle_seconds=0.0,
+                samples_per_point=1,
+                sample_spacing_seconds=0.0,
+            )
+            runtime = SweepRuntimeConfig(logger_config=config, plan=plan, write_enabled=True)
+            adapter = FailingAdapter(
+                {
+                    RF_PV_NAME: 499688.38770589296,
+                    "TUNEZRP:measX": 0.0,
+                    "TUNEZRP:measY": 1450.0,
+                    "cumz4x003gp:tuneSyn": 19500.0,
+                    "PAHRP:setVoltCav": 40.0,
+                    "ERMPCGP:rdRmp": 250.0,
+                    "QPD00ZL4RP:rdSigmaX": 0.6,
+                    "QPD00ZL4RP:rdSigmaY": 0.2,
+                    "BPMZ3L4RP:rdX": -0.06064241411164305,
+                    "BPMZ5L4RP:rdX": -0.09744634305157819,
+                    "BPMZ6L4RP:rdX": -0.05908095004017995,
+                },
+                allow_writes=True,
+            )
+            with self.assertRaises(RuntimeError):
+                run_rf_sweep_session(runtime, adapter=adapter)
+            sessions = sorted(Path(tmpdir).glob("ssmb_rf_sweep_rf_sweep_failure*"))
+            self.assertTrue(sessions)
+            session_dir = sessions[-1]
+            metadata = json.loads((session_dir / "metadata.json").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["session_status"], "failed")
+            self.assertIn("failure", metadata)
+            self.assertTrue((session_dir / "samples.jsonl").exists())
+            self.assertTrue((session_dir / "samples.csv").exists())
+            self.assertEqual(adapter.values[RF_PV_NAME], 499688.38770589296)
+
 
 if __name__ == "__main__":
     unittest.main()

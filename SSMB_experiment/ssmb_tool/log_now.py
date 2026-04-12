@@ -381,7 +381,7 @@ def estimate_passive_session_bytes(specs: Sequence[ChannelSpec], duration_second
     return sample_count * estimate_sample_bytes(specs)
 
 
-def run_stage0_logger(config: LoggerConfig, adapter=None, progress_callback=None, sample_callback=None, session_prefix: str = "ssmb_stage0", extra_metadata: Optional[Dict[str, object]] = None) -> Path:
+def run_stage0_logger(config: LoggerConfig, adapter=None, progress_callback=None, sample_callback=None, stop_event=None, session_prefix: str = "ssmb_stage0", extra_metadata: Optional[Dict[str, object]] = None) -> Path:
     if config.allow_writes or not config.safe_mode:
         raise ValueError("Stage 0 logger is read-only only. Use the separate RF sweep tool for explicit writes.")
     lattice, specs = build_specs(config)
@@ -442,6 +442,9 @@ def run_stage0_logger(config: LoggerConfig, adapter=None, progress_callback=None
     try:
         while True:
             now = time.monotonic()
+            if stop_event is not None and getattr(stop_event, "is_set", lambda: False)():
+                emit("Stop requested by operator; finalizing passive log.")
+                break
             if now > deadline:
                 break
             try:

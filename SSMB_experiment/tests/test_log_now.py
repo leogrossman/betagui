@@ -1,9 +1,15 @@
+import json
+import tempfile
+import threading
 import unittest
+from pathlib import Path
 
 from SSMB_experiment.ssmb_tool.config import DEFAULT_LATTICE_EXPORT
+from SSMB_experiment.ssmb_tool.config import LoggerConfig
+from SSMB_experiment.ssmb_tool.epics_io import FakeEpicsAdapter
 from SSMB_experiment.ssmb_tool.inventory import build_default_inventory
 from SSMB_experiment.ssmb_tool.lattice import LatticeContext
-from SSMB_experiment.ssmb_tool.log_now import _derived_metrics
+from SSMB_experiment.ssmb_tool.log_now import _derived_metrics, run_stage0_logger
 
 
 class SSMBExperimentLogNowTest(unittest.TestCase):
@@ -80,6 +86,45 @@ class SSMBExperimentLogNowTest(unittest.TestCase):
         self.assertEqual(lookup["l4_bump_orbit_bpm_l4"].pv, "BPMZ1L4RP:rdX")
         self.assertEqual(lookup["qpd_l4_sigma_y_avg"].pv, "QPD00ZL4RP:rdSigmaYav")
         self.assertEqual(lookup["qpd_l2_sigma_y_avg"].pv, "QPD01ZL2RP:rdSigmaYav")
+
+    def test_manual_stop_event_still_writes_outputs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            stop_event = threading.Event()
+            stop_event.set()
+            config = LoggerConfig(
+                duration_seconds=120.0,
+                sample_hz=1.0,
+                output_root=Path(tmpdir),
+                include_bpm_buffer=False,
+                include_candidate_bpm_scalars=True,
+                include_ring_bpm_scalars=False,
+                include_quadrupoles=False,
+                include_sextupoles=False,
+                include_octupoles=False,
+                session_label="manual_test",
+            )
+            adapter = FakeEpicsAdapter(
+                {
+                    "MCLKHGP:setFrq": 499688.38770589296,
+                    "ERMPCGP:rdRmp": 250.0,
+                }
+            )
+            session_dir = run_stage0_logger(
+                config,
+                adapter=adapter,
+                stop_event=stop_event,
+                session_prefix="ssmb_manual",
+                extra_metadata={"manual_stop_mode": True},
+            )
+            self.assertTrue((session_dir / "metadata.json").exists())
+            self.assertTrue((session_dir / "samples.jsonl").exists())
+            self.assertTrue((session_dir / "samples.csv").exists())
+            metadata = json.loads((session_dir / "metadata.json").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["session_status"], "completed")
+            self.assertEqual(metadata["partial_sample_count"], 0)
+            self.assertTrue(metadata["manual_stop_mode"])
+            log_text = (session_dir / "session.log").read_text(encoding="utf-8")
+            self.assertIn("Stop requested by operator", log_text)
 
 
 if __name__ == "__main__":

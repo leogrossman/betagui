@@ -222,6 +222,7 @@ def run_rf_sweep_session(runtime_config: SweepRuntimeConfig, adapter=None, progr
 
     session_failed = False
     failure_message = None
+    pending_exception: Optional[Exception] = None
     try:
         baseline = capture_sample(
             adapter,
@@ -287,7 +288,7 @@ def run_rf_sweep_session(runtime_config: SweepRuntimeConfig, adapter=None, progr
         session_failed = True
         failure_message = str(exc)
         emit("RF sweep failed: %s" % exc)
-        raise
+        pending_exception = exc
     finally:
         if plan.restore_initial_rf:
             emit("Restoring RF PV to %.6f" % initial_rf)
@@ -330,7 +331,10 @@ def run_rf_sweep_session(runtime_config: SweepRuntimeConfig, adapter=None, progr
         metadata["failure"] = failure_message
     metadata["partial_sample_count"] = len(samples)
     logger.write_json("metadata.json", metadata)
-    return write_session_outputs(logger, metadata, samples)
+    session_dir = write_session_outputs(logger, metadata, samples)
+    if pending_exception is not None:
+        raise pending_exception
+    return session_dir
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
