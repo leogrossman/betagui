@@ -149,6 +149,7 @@ class SSMBGui:
         self.stage0_stop_event: Optional[threading.Event] = None
         self._monitor_cache_append_count = 0
         self._shutdown_started = False
+        self.window_log_states = {}
         self._build_vars()
         self._build_ui()
         self._apply_profile()
@@ -1128,6 +1129,146 @@ class SSMBGui:
         except Exception:
             pass
 
+    def _window_log_root(self) -> Path:
+        base = self._collect_logger_config(allow_writes=False).output_root
+        return base.parent / "window_logs"
+
+    def _window_log_button_text(self, key: str) -> str:
+        state = (getattr(self, "window_log_states", {}) or {}).get(key) or {}
+        return "Stop Log" if state.get("active") else "Start Log"
+
+    def _update_window_log_button(self, key: str) -> None:
+        button = getattr(self, "%s_log_button" % key, None)
+        if button is None:
+            return
+        active = bool((((getattr(self, "window_log_states", {}) or {}).get(key)) or {}).get("active"))
+        button.configure(
+            text=self._window_log_button_text(key),
+            bg="#c62828" if active else "#2e7d32",
+            activebackground="#b71c1c" if active else "#388e3c",
+            fg="white",
+            activeforeground="white",
+        )
+
+    def _toggle_window_log(self, key: str) -> None:
+        if not hasattr(self, "window_log_states"):
+            self.window_log_states = {}
+        state = self.window_log_states.get(key) or {}
+        if state.get("active"):
+            self._stop_window_log(key)
+        else:
+            self._start_window_log(key)
+
+    def _start_window_log(self, key: str) -> None:
+        if not hasattr(self, "window_log_states"):
+            self.window_log_states = {}
+        self._stop_window_log(key, quiet=True)
+        root = self._window_log_root()
+        root.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        path = root / ("%s_%s.jsonl" % (key, stamp))
+        stream = path.open("a", encoding="utf-8")
+        self.window_log_states[key] = {"active": True, "path": path, "stream": stream}
+        self._append_log("%s study log started: %s" % (key.replace("_", " ").title(), path))
+        self._update_window_log_button(key)
+        if self.latest_monitor_summary is not None:
+            self._append_window_log_entry(key, self.latest_monitor_summary)
+
+    def _stop_window_log(self, key: str, quiet: bool = False) -> None:
+        if not hasattr(self, "window_log_states"):
+            self.window_log_states = {}
+        state = self.window_log_states.get(key) or {}
+        stream = state.get("stream")
+        path = state.get("path")
+        if stream is not None:
+            try:
+                stream.flush()
+                stream.close()
+            except Exception:
+                pass
+        self.window_log_states[key] = {"active": False, "path": path}
+        self._update_window_log_button(key)
+        if not quiet and path is not None:
+            self._append_log("%s study log saved: %s" % (key.replace("_", " ").title(), path))
+
+    def _build_window_log_payload(self, key: str, summary: dict) -> dict:
+        current = (summary or {}).get("current", {}) or {}
+        thermal = (summary or {}).get("thermal_orbit_monitor", {}) or {}
+        base = {
+            "timestamp_epoch_s": time.time(),
+            "window": key,
+            "rf_sweep_detection": (summary or {}).get("rf_sweep_detection"),
+            "temperature_state": (summary or {}).get("temperature_state"),
+            "beam_stability": (summary or {}).get("beam_stability"),
+        }
+        if key == "oscillation":
+            base.update(
+                {
+                    "oscillation_study": (summary or {}).get("oscillation_study"),
+                    "thermal_orbit_monitor": thermal,
+                    "selected_candidate_key": self.oscillation_selected_candidate_key,
+                }
+            )
+        elif key == "ssmb":
+            base.update(
+                {
+                    "rf_sweep_metrics": (summary or {}).get("rf_sweep_metrics"),
+                    "phase_scan_quality": (summary or {}).get("phase_scan_quality"),
+                    "ssmb_resonance": (summary or {}).get("ssmb_resonance"),
+                    "delta_variants": self._delta_variant_estimates(),
+                    "selected_quantity_key": self.ssmb_study_quantity_key,
+                }
+            )
+        elif key == "lattice":
+            base.update(
+                {
+                    "selected_lattice_item_name": self.selected_lattice_item_name,
+                    "lattice_model": self.lattice_model_var.get(),
+                    "current": {
+                        "source_region_center_x_mm": current.get("source_region_center_x_mm"),
+                        "source_region_center_y_mm": current.get("source_region_center_y_mm"),
+                        "climate_kw13_return_temp_c": current.get("climate_kw13_return_temp_c"),
+                        "p1_h1_ampl_avg": current.get("p1_h1_ampl_avg"),
+                    },
+                }
+            )
+        elif key == "bump_lab":
+            base.update(
+                {
+                    "bump_state": (summary or {}).get("bump_state"),
+                    "bump_monitor": (summary or {}).get("bump_monitor"),
+                    "thermal_orbit_monitor": thermal,
+                    "current": {
+                        "bump_bpm_l2_mm": current.get("bump_bpm_l2_mm"),
+                        "bpmz1l2rp_x": current.get("bpmz1l2rp_x"),
+                        "bpmz1l2rp_y": current.get("bpmz1l2rp_y"),
+                        "source_region_center_x_mm": current.get("source_region_center_x_mm"),
+                        "source_region_center_y_mm": current.get("source_region_center_y_mm"),
+                        "climate_kw13_return_temp_c": current.get("climate_kw13_return_temp_c"),
+                        "p1_h1_ampl_avg": current.get("p1_h1_ampl_avg"),
+                        "qpd_l2_center_x_avg_um": current.get("qpd_l2_center_x_avg_um"),
+                    },
+                }
+            )
+        else:
+            base["current"] = current
+        return base
+
+    def _append_window_log_entry(self, key: str, summary: dict) -> None:
+        state = (getattr(self, "window_log_states", {}) or {}).get(key) or {}
+        if not state.get("active"):
+            return
+        stream = state.get("stream")
+        if stream is None:
+            return
+        try:
+            payload = self._build_window_log_payload(key, summary)
+            stream.write(json.dumps(payload, ensure_ascii=True) + "\n")
+            stream.flush()
+        except Exception as exc:
+            self._append_log("%s study log write failed: %s" % (key.replace("_", " ").title(), exc))
+            self._stop_window_log(key, quiet=True)
+
     def _drain_queue(self) -> None:
         while True:
             try:
@@ -1225,6 +1366,8 @@ class SSMBGui:
         channel_lines = payload.get("channel_lines", [])
         self.latest_monitor_sample = payload.get("sample")
         self.latest_monitor_summary = payload.get("summary")
+        for key in ("oscillation", "ssmb", "lattice", "bump_lab"):
+            self._append_window_log_entry(key, self.latest_monitor_summary)
         self._set_text_widget(self.monitor_summary_text, summary_lines)
         self._set_text_widget(self.monitor_channels_text, channel_lines)
         try:
@@ -1695,6 +1838,9 @@ class SSMBGui:
         top_buttons.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         ttk.Button(top_buttons, text="Open Theory Window", command=self._open_theory_window).pack(side="left")
         ttk.Checkbutton(top_buttons, text="Ignore during RF sweep", variable=self.oscillation_ignore_rf_var, command=lambda: self._update_oscillation_window(self.latest_monitor_summary)).pack(side="left", padx=8)
+        self.oscillation_log_button = tk.Button(top_buttons, command=lambda: self._toggle_window_log("oscillation"), padx=8, pady=4)
+        self.oscillation_log_button.pack(side="right")
+        self._update_window_log_button("oscillation")
         text = tk.Text(frame, wrap="word", height=16)
         text.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
         text.configure(state="disabled")
@@ -1764,6 +1910,7 @@ class SSMBGui:
         self._draw_oscillation_candidate_plots(safe_summary)
 
     def _close_oscillation_window(self) -> None:
+        self._stop_window_log("oscillation", quiet=True)
         if self.oscillation_window is not None and self.oscillation_window.winfo_exists():
             self.oscillation_window.destroy()
         self.oscillation_window = None
@@ -1875,7 +2022,9 @@ class SSMBGui:
                 [
                     ("P1 avg", self._prepare_plot_series(list(trend_data.get("p1_h1_ampl_avg", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa"),
                     ("KW13 temp", self._prepare_plot_series(list(trend_data.get("climate_kw13_return_temp_c", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#00838f"),
-                    ("BPMZ1L2", self._prepare_plot_series(list(trend_data.get("bump_bpm_l2_mm", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#0d47a1"),
+                    ("BPMZ1L2 x", self._prepare_plot_series(list(trend_data.get("bpmz1l2rp_x", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#1565c0"),
+                    ("BPMZ1L2 y", self._prepare_plot_series(list(trend_data.get("bpmz1l2rp_y", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#6a1b9a"),
+                    ("Source center y", self._prepare_plot_series(list(trend_data.get("source_region_center_y_mm", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#ab47bc"),
                     ("QPD01 center", self._prepare_plot_series(list(trend_data.get("qpd_l2_center_x_avg_um", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa"),
                 ],
             ),
@@ -2445,6 +2594,9 @@ class SSMBGui:
         ttk.Button(controls, text="Save machine snapshot…", command=self._save_lattice_snapshot).grid(row=0, column=3)
         ttk.Button(controls, text="Optics Help", command=self._open_lattice_optics_help_window).grid(row=0, column=4, padx=(6, 0))
         ttk.Button(controls, text="δₛ Settings", command=self._open_delta_settings_window).grid(row=0, column=5, padx=(6, 0))
+        self.lattice_log_button = tk.Button(controls, command=lambda: self._toggle_window_log("lattice"), padx=8, pady=3)
+        self.lattice_log_button.grid(row=0, column=6, padx=(6, 0))
+        self._update_window_log_button("lattice")
         info = tk.Text(side, wrap="word", width=42, height=18)
         info.grid(row=1, column=0, sticky="nsew")
         info.configure(state="disabled")
@@ -3376,6 +3528,7 @@ class SSMBGui:
         return (meta["label"], values, meta["color"])
 
     def _close_lattice_window(self) -> None:
+        self._stop_window_log("lattice", quiet=True)
         if self.lattice_window is not None and self.lattice_window.winfo_exists():
             self.lattice_window.destroy()
         self.lattice_window = None
@@ -3495,6 +3648,8 @@ class SSMBGui:
             return
         self._shutdown_started = True
         try:
+            for key in list(self.window_log_states.keys()):
+                self._stop_window_log(key, quiet=True)
             if self.monitor_stop_event is not None:
                 self.monitor_stop_event.set()
             if self.bump_lab_stop_event is not None:
@@ -3532,6 +3687,9 @@ class SSMBGui:
         ttk.Button(top, text="Open Oscillation Study", command=self._open_oscillation_window).pack(side="left", padx=6)
         ttk.Button(top, text="Open Lattice View", command=self._open_lattice_window).pack(side="left", padx=6)
         ttk.Button(top, text="Derived Quantity Help", command=self._open_theory_window).pack(side="left", padx=6)
+        self.ssmb_log_button = tk.Button(top, command=lambda: self._toggle_window_log("ssmb"), padx=8, pady=4)
+        self.ssmb_log_button.pack(side="left", padx=6)
+        self._update_window_log_button("ssmb")
         self.ssmb_study_rf_state = tk.Label(top, text="RF sweep OFF", bg="#607d8b", fg="white", padx=10, pady=4)
         self.ssmb_study_rf_state.pack(side="right")
         table = ttk.Treeview(frame, columns=("quantity", "raw", "derived", "current"), show="headings", height=7)
@@ -3568,6 +3726,7 @@ class SSMBGui:
         window.protocol("WM_DELETE_WINDOW", self._close_ssmb_study_window)
 
     def _close_ssmb_study_window(self) -> None:
+        self._stop_window_log("ssmb", quiet=True)
         if self.ssmb_study_window is not None and self.ssmb_study_window.winfo_exists():
             self.ssmb_study_window.destroy()
         self.ssmb_study_window = None
@@ -3692,6 +3851,27 @@ class SSMBGui:
                     "",
                     "Meaning",
                     "This is a first-order spread proxy from QPD00 in a dispersive region, not a full longitudinal phase-space measurement.",
+                ],
+            },
+            "source_center": {
+                "label": "Source center x/y",
+                "raw": "BPMZ1K1/L2/K3/L4 x,y",
+                "derived": "Mean undulator-side beam-center proxy",
+                "current": lambda current, sweep, osc, res, quality: "%s / %s mm" % (
+                    self._format_plot_value(current.get("source_region_center_x_mm")),
+                    self._format_plot_value(current.get("source_region_center_y_mm")),
+                ),
+                "plot_keys": ["source_region_center_x_mm", "source_region_center_y_mm", "climate_kw13_return_temp_c"],
+                "theory": [
+                    "Meaning",
+                    "This is a passive source-region beam-center proxy formed from the four bump-feedback BPMs around K1/L2/K3/L4.",
+                    "",
+                    "Equation",
+                    "x_center ≈ mean(x_K1, x_L2, x_K3, x_L4)",
+                    "y_center ≈ mean(y_K1, y_L2, y_K3, y_L4)",
+                    "",
+                    "Use",
+                    "Track whether slow temperature drift is moving the beam center near the undulator side, especially in y where laser-overlap sensitivity may be strong.",
                 ],
             },
             "p1_p3": {
@@ -3841,6 +4021,7 @@ class SSMBGui:
                 ("alpha0_legacy", quantity_defs["alpha0_legacy"]),
                 ("beam_energy", quantity_defs["beam_energy"]),
                 ("sigma_delta", quantity_defs["sigma_delta"]),
+                ("source_center", quantity_defs["source_center"]),
                 ("p1_p3", quantity_defs["p1_p3"]),
                 ("p1_period", quantity_defs["p1_period"]),
                 ("phase_quality", quantity_defs["phase_quality"]),
@@ -3885,6 +4066,10 @@ class SSMBGui:
             "η: %s" % self._format_plot_value(sweep.get("phase_slip_factor_eta")),
             "α₀ legacy / BPM: %s / %s" % (self._format_plot_value(current.get("legacy_alpha0_corrected")), self._format_plot_value(sweep.get("alpha0_from_bpm_eta"))),
             "Beam energy / σδ: %s MeV / %s" % (self._format_plot_value(current.get("beam_energy_from_bpm_mev")), self._format_plot_value(current.get("qpd_l4_sigma_delta_first_order"))),
+            "Source-region center x / y: %s / %s mm" % (
+                self._format_plot_value(current.get("source_region_center_x_mm")),
+                self._format_plot_value(current.get("source_region_center_y_mm")),
+            ),
             "Beam stability during sweep: %s" % (beam_stability.get("status") or "n/a"),
             beam_stability.get("message", "Beam-stability assessment unavailable."),
             "Phase-scan quality: %s / %s" % (
@@ -3914,6 +4099,7 @@ class SSMBGui:
             "Direct live beam-phase / beam-loading monitor: not yet verified in the current PV inventory. Right now the best phase-sensitive chain is indirect: RF, δₛ, η, α₀, plus P1/P3.",
             "With bump on, keep using the derived BPM/QPD chain, but only trust the phase interpretation when the stability and quality checks above stay green.",
             "Beam loading is not directly measured with a verified cavity sampler PV here yet. The best live heuristic proxies are charge/current stability versus RF/cavity signals and any correlation of energy / δₛ jitter with beam-current jitter.",
+            "For the current slow P1 problem with RF sweep off, the most important passive chain is temperature -> source-region BPM x/y center -> QPD/source-point drift -> P1.",
             "",
             "Caveat",
             "This is a live heuristic study. Error bars and certainty here are based on rolling FFT/autocorrelation / correlation strength, not a full offline statistical model.",
@@ -4002,6 +4188,9 @@ class SSMBGui:
         ttk.Button(button_row, text="Stop Loop", command=self._stop_bump_lab_loop).pack(side="left", padx=4)
         ttk.Button(button_row, text="Run Experimental Controller", command=self._start_bump_lab_controller).pack(side="left", padx=4)
         ttk.Button(button_row, text="Open Theory Window", command=self._open_theory_window).pack(side="left", padx=4)
+        self.bump_lab_log_button = tk.Button(button_row, command=lambda: self._toggle_window_log("bump_lab"), padx=8, pady=3)
+        self.bump_lab_log_button.pack(side="left", padx=4)
+        self._update_window_log_button("bump_lab")
         row += 1
 
         ttk.Label(right, text="Experimental bump-lab live summary").grid(row=0, column=0, columnspan=2, sticky="w")
@@ -4034,6 +4223,7 @@ class SSMBGui:
         window.protocol("WM_DELETE_WINDOW", self._close_bump_lab_window)
 
     def _close_bump_lab_window(self) -> None:
+        self._stop_window_log("bump_lab", quiet=True)
         if self.bump_lab_window is not None and self.bump_lab_window.winfo_exists():
             self.bump_lab_window.destroy()
         self.bump_lab_window = None
@@ -4091,12 +4281,17 @@ class SSMBGui:
             ),
             "δs: %s" % current.get("delta_l4_bpm_first_order"),
             "σδ proxy: %s" % current.get("qpd_l4_sigma_delta_first_order"),
-            "BPMZ1L2RP (undulator-side anchor): %s mm" % current.get("bump_bpm_l2_mm"),
+            "BPMZ1L2RP x (undulator-side anchor): %s mm" % current.get("bpmz1l2rp_x"),
+            "BPMZ1L2RP y (undulator-side anchor): %s mm" % current.get("bpmz1l2rp_y"),
+            "Source-region center x/y: %s / %s mm" % (current.get("source_region_center_x_mm"), current.get("source_region_center_y_mm")),
+            "Temp -> source-center y corr: %s" % ((summary.get("thermal_orbit_monitor") or {}).get("temp_to_source_center_y") or {}).get("corr"),
+            "Source-center y -> P1 corr: %s" % ((summary.get("thermal_orbit_monitor") or {}).get("source_center_y_to_p1") or {}).get("corr"),
             "QPD01 center X avg: %s um" % current.get("qpd_l2_center_x_avg_um"),
             "",
             "Interpretation:",
             "The recovered controller is a scalar orbit-lock loop: it drives the average of the 4 selected BPMs toward AKC12VP.",
             "Because BPMZ1L2RP is near the L2 / undulator side and the others are spread through K3 and L4, this is a global closed-orbit constraint, not a local undulator-only correction.",
+            "For the current thermal/P1 problem, treat this window first as a passive bump-performance monitor: if temp drift couples into source-region x/y center and then into P1, the bump algorithm may need a slow compensation term later.",
         ]
         self._set_text_widget(self.bump_lab_summary_text, lines)
         self._draw_bump_lab_plots(summary)
@@ -4131,6 +4326,9 @@ class SSMBGui:
             height = int(und_canvas.winfo_height() or 210)
             payload = [
                 ("BPMZ1L2 [mm]", self._prepare_plot_series(list(trend_data.get("bump_bpm_l2_mm", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#1565c0"),
+                ("BPMZ1L2 y [mm]", self._prepare_plot_series(list(trend_data.get("bpmz1l2rp_y", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#6a1b9a"),
+                ("Source center y [mm]", self._prepare_plot_series(list(trend_data.get("source_region_center_y_mm", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#ab47bc"),
+                ("KW13 temp [C]", self._prepare_plot_series(list(trend_data.get("climate_kw13_return_temp_c", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#00838f"),
                 ("δs", self._prepare_plot_series(list(trend_data.get("delta_s", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#43a047"),
                 ("σδ", self._prepare_plot_series(list(trend_data.get("sigma_delta", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#6d4c41"),
                 ("QPD01 center [um]", self._prepare_plot_series(list(trend_data.get("qpd_l2_center_x_avg_um", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa"),
@@ -4147,7 +4345,7 @@ class SSMBGui:
                 actual_samples=actual_samples,
                 independent_scales=len(payload) > 1,
             )
-            und_canvas.create_text(width / 2, 6, anchor="n", text="Undulator-side anchor and spread proxies", fill="#37474f", font=("Helvetica", 10, "bold"))
+            und_canvas.create_text(width / 2, 6, anchor="n", text="Undulator-side x/y center, temp, and spread proxies", fill="#37474f", font=("Helvetica", 10, "bold"))
 
     def _start_bump_lab_observer(self) -> None:
         if self.bump_lab_stop_event is not None:

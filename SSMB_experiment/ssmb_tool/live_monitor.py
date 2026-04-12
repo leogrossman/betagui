@@ -63,6 +63,8 @@ TREND_DEFINITIONS: Dict[str, Dict[str, object]] = {
     "bpmz1l2rp_y": {"label": "BPMZ1L2 y [mm]", "color": "#6a1b9a"},
     "bpmz1k3rp_y": {"label": "BPMZ1K3 y [mm]", "color": "#ab47bc"},
     "bpmz1l4rp_y": {"label": "BPMZ1L4 y [mm]", "color": "#ce93d8"},
+    "source_region_center_x_mm": {"label": "Source-region center x [mm]", "color": "#0277bd"},
+    "source_region_center_y_mm": {"label": "Source-region center y [mm]", "color": "#7b1fa2"},
 }
 
 OSCILLATION_CANDIDATE_KEYS = (
@@ -73,6 +75,8 @@ OSCILLATION_CANDIDATE_KEYS = (
     "delta_s",
     "bpmz1l2rp_x",
     "bpmz1l2rp_y",
+    "source_region_center_x_mm",
+    "source_region_center_y_mm",
     "beam_energy_mev",
     "sigma_delta",
     "legacy_alpha0",
@@ -95,6 +99,13 @@ def _valid_float(value) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _mean_valid(values: Sequence[Optional[float]]) -> Optional[float]:
+    valid = [float(value) for value in values if isinstance(value, (int, float))]
+    if not valid:
+        return None
+    return sum(valid) / len(valid)
 
 
 def _tune_period_seconds(tune_value) -> Optional[float]:
@@ -162,6 +173,8 @@ def _extract_series(samples: Sequence[Dict[str, object]], key: str) -> List[Opti
             "bump_bpm_l2_mm",
             "bump_bpm_k3_mm",
             "bump_bpm_l4_mm",
+            "source_region_center_x_mm",
+            "source_region_center_y_mm",
         ):
             bump = _summarize_bump_state(channels)
             if key == "bump_strength_a":
@@ -170,6 +183,28 @@ def _extract_series(samples: Sequence[Dict[str, object]], key: str) -> List[Opti
                 series.append(_valid_float(bump.get("bpm_avg_mm")))
             elif key == "bump_orbit_error_mm":
                 series.append(_valid_float(bump.get("orbit_error_mm")))
+            elif key == "source_region_center_x_mm":
+                series.append(
+                    _mean_valid(
+                        (
+                            _valid_float(channels.get("bpmz1k1rp_x", {}).get("value")),
+                            _valid_float(channels.get("bpmz1l2rp_x", {}).get("value")),
+                            _valid_float(channels.get("bpmz1k3rp_x", {}).get("value")),
+                            _valid_float(channels.get("bpmz1l4rp_x", {}).get("value")),
+                        )
+                    )
+                )
+            elif key == "source_region_center_y_mm":
+                series.append(
+                    _mean_valid(
+                        (
+                            _valid_float(channels.get("bpmz1k1rp_y", {}).get("value")),
+                            _valid_float(channels.get("bpmz1l2rp_y", {}).get("value")),
+                            _valid_float(channels.get("bpmz1k3rp_y", {}).get("value")),
+                            _valid_float(channels.get("bpmz1l4rp_y", {}).get("value")),
+                        )
+                    )
+                )
             else:
                 mapping = {
                     "bump_bpm_k1_mm": "l4_bump_orbit_bpm_k1",
@@ -508,6 +543,30 @@ def summarize_live_monitor(
             "bump_bpm_l2_mm": bump.get("bpm_values_mm", {}).get("l4_bump_orbit_bpm_l2"),
             "bump_bpm_k3_mm": bump.get("bpm_values_mm", {}).get("l4_bump_orbit_bpm_k3"),
             "bump_bpm_l4_mm": bump.get("bpm_values_mm", {}).get("l4_bump_orbit_bpm_l4"),
+            "bpmz1k1rp_x": _valid_float(channels.get("bpmz1k1rp_x", {}).get("value")),
+            "bpmz1l2rp_x": _valid_float(channels.get("bpmz1l2rp_x", {}).get("value")),
+            "bpmz1k3rp_x": _valid_float(channels.get("bpmz1k3rp_x", {}).get("value")),
+            "bpmz1l4rp_x": _valid_float(channels.get("bpmz1l4rp_x", {}).get("value")),
+            "bpmz1k1rp_y": _valid_float(channels.get("bpmz1k1rp_y", {}).get("value")),
+            "bpmz1l2rp_y": _valid_float(channels.get("bpmz1l2rp_y", {}).get("value")),
+            "bpmz1k3rp_y": _valid_float(channels.get("bpmz1k3rp_y", {}).get("value")),
+            "bpmz1l4rp_y": _valid_float(channels.get("bpmz1l4rp_y", {}).get("value")),
+            "source_region_center_x_mm": _mean_valid(
+                (
+                    _valid_float(channels.get("bpmz1k1rp_x", {}).get("value")),
+                    _valid_float(channels.get("bpmz1l2rp_x", {}).get("value")),
+                    _valid_float(channels.get("bpmz1k3rp_x", {}).get("value")),
+                    _valid_float(channels.get("bpmz1l4rp_x", {}).get("value")),
+                )
+            ),
+            "source_region_center_y_mm": _mean_valid(
+                (
+                    _valid_float(channels.get("bpmz1k1rp_y", {}).get("value")),
+                    _valid_float(channels.get("bpmz1l2rp_y", {}).get("value")),
+                    _valid_float(channels.get("bpmz1k3rp_y", {}).get("value")),
+                    _valid_float(channels.get("bpmz1l4rp_y", {}).get("value")),
+                )
+            ),
         },
         "bump_state": bump,
         "what_can_be_measured_now": [
@@ -910,6 +969,28 @@ def extract_trend_data(samples: Sequence[Dict[str, object]]) -> Dict[str, List[O
         "bpmz1l2rp_y": [_valid_float(sample.get("channels", {}).get("bpmz1l2rp_y", {}).get("value")) for sample in history],
         "bpmz1k3rp_y": [_valid_float(sample.get("channels", {}).get("bpmz1k3rp_y", {}).get("value")) for sample in history],
         "bpmz1l4rp_y": [_valid_float(sample.get("channels", {}).get("bpmz1l4rp_y", {}).get("value")) for sample in history],
+        "source_region_center_x_mm": [
+            _mean_valid(
+                (
+                    _valid_float(sample.get("channels", {}).get("bpmz1k1rp_x", {}).get("value")),
+                    _valid_float(sample.get("channels", {}).get("bpmz1l2rp_x", {}).get("value")),
+                    _valid_float(sample.get("channels", {}).get("bpmz1k3rp_x", {}).get("value")),
+                    _valid_float(sample.get("channels", {}).get("bpmz1l4rp_x", {}).get("value")),
+                )
+            )
+            for sample in history
+        ],
+        "source_region_center_y_mm": [
+            _mean_valid(
+                (
+                    _valid_float(sample.get("channels", {}).get("bpmz1k1rp_y", {}).get("value")),
+                    _valid_float(sample.get("channels", {}).get("bpmz1l2rp_y", {}).get("value")),
+                    _valid_float(sample.get("channels", {}).get("bpmz1k3rp_y", {}).get("value")),
+                    _valid_float(sample.get("channels", {}).get("bpmz1l4rp_y", {}).get("value")),
+                )
+            )
+            for sample in history
+        ],
         "p1_h1_ampl": [_valid_float(sample.get("channels", {}).get("p1_h1_ampl", {}).get("value")) for sample in history],
         "p1_h1_ampl_avg": [_valid_float(sample.get("channels", {}).get("p1_h1_ampl_avg", {}).get("value")) for sample in history],
         "p1_h1_ampl_dev": [_valid_float(sample.get("channels", {}).get("p1_h1_ampl_dev", {}).get("value")) for sample in history],
@@ -1482,18 +1563,26 @@ def format_oscillation_study(summary: Dict[str, object]) -> List[str]:
             "Temp -> BPMZ1L2 corr: %s" % _fmt((thermal.get("temp_to_bpm_l2") or {}).get("corr")),
             "Temp -> BPMZ1L2 x corr: %s" % _fmt((thermal.get("temp_to_bpm_l2_x") or {}).get("corr")),
             "Temp -> BPMZ1L2 y corr: %s" % _fmt((thermal.get("temp_to_bpm_l2_y") or {}).get("corr")),
+            "Temp -> source-center x corr: %s" % _fmt((thermal.get("temp_to_source_center_x") or {}).get("corr")),
+            "Temp -> source-center y corr: %s" % _fmt((thermal.get("temp_to_source_center_y") or {}).get("corr")),
             "Temp -> QPD01 center corr: %s" % _fmt((thermal.get("temp_to_qpd01_center") or {}).get("corr")),
             "Temp -> P1 corr: %s" % _fmt((thermal.get("temp_to_p1") or {}).get("corr")),
             "BPMZ1L2 -> P1 corr: %s" % _fmt((thermal.get("bpm_l2_to_p1") or {}).get("corr")),
             "BPMZ1L2 x -> P1 corr: %s" % _fmt((thermal.get("bpm_l2_x_to_p1") or {}).get("corr")),
             "BPMZ1L2 y -> P1 corr: %s" % _fmt((thermal.get("bpm_l2_y_to_p1") or {}).get("corr")),
+            "Source-center x -> P1 corr: %s" % _fmt((thermal.get("source_center_x_to_p1") or {}).get("corr")),
+            "Source-center y -> P1 corr: %s" % _fmt((thermal.get("source_center_y_to_p1") or {}).get("corr")),
             "QPD01 center -> P1 corr: %s" % _fmt((thermal.get("qpd01_center_to_p1") or {}).get("corr")),
             "Temp slope: %s C/s" % _fmt(thermal.get("temp_slope_c_per_s")),
             "BPMZ1L2 x slope: %s mm/s" % _fmt(thermal.get("bpm_l2_x_slope_mm_per_s")),
             "BPMZ1L2 y slope: %s mm/s" % _fmt(thermal.get("bpm_l2_y_slope_mm_per_s")),
+            "Source-center x slope: %s mm/s" % _fmt(thermal.get("source_center_x_slope_mm_per_s")),
+            "Source-center y slope: %s mm/s" % _fmt(thermal.get("source_center_y_slope_mm_per_s")),
             "QPD01 center slope: %s um/s" % _fmt(thermal.get("qpd01_center_slope_um_per_s")),
             "Temp slope -> BPMZ1L2 x slope corr: %s" % _fmt((thermal.get("temp_slope_to_bpm_l2_x_slope") or {}).get("corr")),
             "Temp slope -> BPMZ1L2 y slope corr: %s" % _fmt((thermal.get("temp_slope_to_bpm_l2_y_slope") or {}).get("corr")),
+            "Temp slope -> source-center x slope corr: %s" % _fmt((thermal.get("temp_slope_to_source_center_x_slope") or {}).get("corr")),
+            "Temp slope -> source-center y slope corr: %s" % _fmt((thermal.get("temp_slope_to_source_center_y_slope") or {}).get("corr")),
             thermal.get("message") or "n/a",
             "",
             "Checked candidates:",
@@ -1596,38 +1685,52 @@ def _summarize_thermal_orbit_monitor(samples: Sequence[Dict[str, object]], summa
     bpm_l2_x_slope_fit = _fit_key_against_time(samples, "bpmz1l2rp_x")
     bpm_l2_y_slope_fit = _fit_key_against_time(samples, "bpmz1l2rp_y")
     qpd01_center_slope_fit = _fit_key_against_time(samples, "qpd_l2_center_x_avg_um")
+    source_center_x_slope_fit = _fit_key_against_time(samples, "source_region_center_x_mm")
+    source_center_y_slope_fit = _fit_key_against_time(samples, "source_region_center_y_mm")
     monitor = {
         "temp_to_bpm_l2": _fit_key_against_key(samples, "climate_kw13_return_temp_c", "bump_bpm_l2_mm"),
         "temp_to_bpm_l2_x": _fit_key_against_key(samples, "climate_kw13_return_temp_c", "bpmz1l2rp_x"),
         "temp_to_bpm_l2_y": _fit_key_against_key(samples, "climate_kw13_return_temp_c", "bpmz1l2rp_y"),
+        "temp_to_source_center_x": _fit_key_against_key(samples, "climate_kw13_return_temp_c", "source_region_center_x_mm"),
+        "temp_to_source_center_y": _fit_key_against_key(samples, "climate_kw13_return_temp_c", "source_region_center_y_mm"),
         "temp_to_qpd01_center": _fit_key_against_key(samples, "climate_kw13_return_temp_c", "qpd_l2_center_x_avg_um"),
         "temp_to_p1": _fit_key_against_key(samples, "climate_kw13_return_temp_c", "p1_h1_ampl_avg"),
         "bpm_l2_to_p1": _fit_key_against_key(samples, "bump_bpm_l2_mm", "p1_h1_ampl_avg"),
         "bpm_l2_x_to_p1": _fit_key_against_key(samples, "bpmz1l2rp_x", "p1_h1_ampl_avg"),
         "bpm_l2_y_to_p1": _fit_key_against_key(samples, "bpmz1l2rp_y", "p1_h1_ampl_avg"),
+        "source_center_x_to_p1": _fit_key_against_key(samples, "source_region_center_x_mm", "p1_h1_ampl_avg"),
+        "source_center_y_to_p1": _fit_key_against_key(samples, "source_region_center_y_mm", "p1_h1_ampl_avg"),
         "qpd01_center_to_p1": _fit_key_against_key(samples, "qpd_l2_center_x_avg_um", "p1_h1_ampl_avg"),
         "temp_slope_c_per_s": None if temp_slope_fit is None else temp_slope_fit.get("slope"),
         "bpm_l2_x_slope_mm_per_s": None if bpm_l2_x_slope_fit is None else bpm_l2_x_slope_fit.get("slope"),
         "bpm_l2_y_slope_mm_per_s": None if bpm_l2_y_slope_fit is None else bpm_l2_y_slope_fit.get("slope"),
         "qpd01_center_slope_um_per_s": None if qpd01_center_slope_fit is None else qpd01_center_slope_fit.get("slope"),
+        "source_center_x_slope_mm_per_s": None if source_center_x_slope_fit is None else source_center_x_slope_fit.get("slope"),
+        "source_center_y_slope_mm_per_s": None if source_center_y_slope_fit is None else source_center_y_slope_fit.get("slope"),
+        "temp_slope_to_source_center_x_slope": _fit_key_slope_against_key_slope(samples, "climate_kw13_return_temp_c", "source_region_center_x_mm"),
+        "temp_slope_to_source_center_y_slope": _fit_key_slope_against_key_slope(samples, "climate_kw13_return_temp_c", "source_region_center_y_mm"),
         "temp_slope_to_bpm_l2_x_slope": _fit_key_slope_against_key_slope(samples, "climate_kw13_return_temp_c", "bpmz1l2rp_x"),
         "temp_slope_to_bpm_l2_y_slope": _fit_key_slope_against_key_slope(samples, "climate_kw13_return_temp_c", "bpmz1l2rp_y"),
     }
     temp_to_bpm = abs(_valid_float((monitor.get("temp_to_bpm_l2") or {}).get("corr")) or 0.0)
     temp_to_bpm_x = abs(_valid_float((monitor.get("temp_to_bpm_l2_x") or {}).get("corr")) or 0.0)
     temp_to_bpm_y = abs(_valid_float((monitor.get("temp_to_bpm_l2_y") or {}).get("corr")) or 0.0)
+    temp_to_center_x = abs(_valid_float((monitor.get("temp_to_source_center_x") or {}).get("corr")) or 0.0)
+    temp_to_center_y = abs(_valid_float((monitor.get("temp_to_source_center_y") or {}).get("corr")) or 0.0)
     temp_to_qpd = abs(_valid_float((monitor.get("temp_to_qpd01_center") or {}).get("corr")) or 0.0)
     bpm_to_p1 = abs(_valid_float((monitor.get("bpm_l2_to_p1") or {}).get("corr")) or 0.0)
     bpm_x_to_p1 = abs(_valid_float((monitor.get("bpm_l2_x_to_p1") or {}).get("corr")) or 0.0)
     bpm_y_to_p1 = abs(_valid_float((monitor.get("bpm_l2_y_to_p1") or {}).get("corr")) or 0.0)
+    center_x_to_p1 = abs(_valid_float((monitor.get("source_center_x_to_p1") or {}).get("corr")) or 0.0)
+    center_y_to_p1 = abs(_valid_float((monitor.get("source_center_y_to_p1") or {}).get("corr")) or 0.0)
     qpd_to_p1 = abs(_valid_float((monitor.get("qpd01_center_to_p1") or {}).get("corr")) or 0.0)
     temp_to_p1 = abs(_valid_float((monitor.get("temp_to_p1") or {}).get("corr")) or 0.0)
-    if max(temp_to_bpm, temp_to_bpm_x) >= 0.5 and max(bpm_to_p1, bpm_x_to_p1) >= 0.5:
+    if max(temp_to_center_y, temp_to_bpm_y) >= 0.5 and max(center_y_to_p1, bpm_y_to_p1) >= 0.5:
+        hypothesis = "thermal_to_vertical_beam_orbit"
+        message = "Temperature drift is plausibly moving the vertical source-region beam center, and that vertical motion is plausibly coupling into P1 or the laser/overlap condition."
+    elif max(temp_to_center_x, temp_to_bpm, temp_to_bpm_x) >= 0.5 and max(center_x_to_p1, bpm_to_p1, bpm_x_to_p1) >= 0.5:
         hypothesis = "thermal_to_beam_orbit"
         message = "Temperature drift is plausibly moving the electron beam near BPMZ1L2RP, and that beam motion is plausibly coupling into P1."
-    elif temp_to_bpm_y >= 0.5 and bpm_y_to_p1 >= 0.5:
-        hypothesis = "thermal_to_vertical_beam_orbit"
-        message = "Temperature drift is plausibly moving the vertical source-region orbit near BPMZ1L2RP, and that vertical motion is plausibly coupling into P1 or the laser/overlap condition."
     elif temp_to_qpd >= 0.5 and qpd_to_p1 >= 0.5:
         hypothesis = "thermal_to_source_point"
         message = "Temperature drift is plausibly moving the source-point / optical-center observable near QPD01, and that motion is plausibly coupling into P1."

@@ -401,12 +401,16 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         thermal = summary["thermal_orbit_monitor"]
         trend_data = summary["trend_data"]
         self.assertEqual(len(trend_data["bpmz1l2rp_y"]), len(samples))
+        self.assertEqual(len(trend_data["source_region_center_y_mm"]), len(samples))
         self.assertIsNotNone((thermal.get("temp_to_bpm_l2") or {}).get("corr"))
         self.assertIsNotNone((thermal.get("temp_to_bpm_l2_y") or {}).get("corr"))
+        self.assertIsNotNone((thermal.get("temp_to_source_center_y") or {}).get("corr"))
         self.assertIsNotNone((thermal.get("bpm_l2_to_p1") or {}).get("corr"))
         self.assertIsNotNone((thermal.get("bpm_l2_y_to_p1") or {}).get("corr"))
+        self.assertIsNotNone((thermal.get("source_center_y_to_p1") or {}).get("corr"))
         self.assertIsNotNone(thermal.get("temp_slope_c_per_s"))
         self.assertIsNotNone((thermal.get("temp_slope_to_bpm_l2_y_slope") or {}).get("corr"))
+        self.assertIsNotNone((thermal.get("temp_slope_to_source_center_y_slope") or {}).get("corr"))
         self.assertIn(
             thermal["hypothesis"],
             (
