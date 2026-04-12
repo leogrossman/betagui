@@ -12,7 +12,14 @@ from typing import Optional, Sequence
 from .config import LoggerConfig, SSMB_ROOT, parse_labeled_pvs
 from .epics_io import EpicsUnavailableError, ReadOnlyEpicsAdapter
 from .lattice import LatticeElement
-from .live_monitor import build_monitor_sections, format_channel_snapshot, format_monitor_summary, summarize_live_monitor
+from .live_monitor import (
+    build_monitor_sections,
+    build_theory_sections,
+    format_channel_snapshot,
+    format_monitor_summary,
+    summarize_live_monitor,
+    trend_definitions,
+)
 from .log_now import BPM_NONLINEAR_MM, BPM_WARNING_MM, build_specs, estimate_passive_session_bytes, inventory_overview_lines, run_stage0_logger
 from .sweep import RF_PV_NAME, SweepRuntimeConfig, build_plan_from_hz, estimate_sweep_session_bytes, preview_lines, run_rf_sweep_session
 
@@ -47,6 +54,7 @@ class SSMBGui:
         self.monitor_stop_event: Optional[threading.Event] = None
         self.monitor_history = collections.deque(maxlen=120)
         self.monitor_window: Optional["tk.Toplevel"] = None
+        self.theory_window: Optional["tk.Toplevel"] = None
         self.lattice_window: Optional["tk.Toplevel"] = None
         self.latest_monitor_sample = None
         self.latest_monitor_summary = None
@@ -221,6 +229,7 @@ class SSMBGui:
         self.stop_monitor_button.state(["disabled"])
         ttk.Button(button_row, text="Reset Monitor Baseline", command=self._reset_monitor_baseline).pack(side="left")
         ttk.Button(button_row, text="Open Monitor Window", command=self._open_monitor_window).pack(side="left", padx=6)
+        ttk.Button(button_row, text="Open Theory Window", command=self._open_theory_window).pack(side="left", padx=6)
         ttk.Button(button_row, text="Open Lattice View", command=self._open_lattice_window).pack(side="left")
         row += 1
         ttk.Label(frame, text="Live SSMB summary").grid(row=row, column=0, columnspan=3, sticky="w")
@@ -585,31 +594,26 @@ class SSMBGui:
         right.grid(row=0, column=1, sticky="nsew")
         left.columnconfigure(0, weight=1)
         left.columnconfigure(1, weight=1)
-        self.monitor_cards_container = left
-        self.monitor_section_widgets = []
-        for index in range(4):
-            card = ttk.Labelframe(left, text="Section", padding=8)
-            card.grid(row=index // 2, column=index % 2, sticky="nsew", padx=4, pady=4)
-            left.rowconfigure(index // 2, weight=1)
-            text = tk.Text(card, wrap="word", height=12)
-            text.pack(fill="both", expand=True)
-            text.configure(state="disabled")
-            self.monitor_section_widgets.append((card, text))
-        ttk.Label(right, text="Rolling SSMB monitor trends").grid(row=0, column=0, sticky="w")
-        self.monitor_plot_canvas = tk.Canvas(right, bg="white", width=440, height=360)
-        self.monitor_plot_canvas.grid(row=1, column=0, sticky="ew")
-        ttk.Label(right, text="Theory and equations").grid(row=2, column=0, sticky="w", pady=(8, 0))
-        self.monitor_equations_text = tk.Text(right, wrap="word", height=10)
-        self.monitor_equations_text.grid(row=3, column=0, sticky="nsew")
-        self.monitor_equations_text.configure(state="disabled")
-        ttk.Label(right, text="Current channel snapshot").grid(row=4, column=0, sticky="w", pady=(8, 0))
-        self.monitor_window_channels_text = tk.Text(right, wrap="none", height=18)
-        self.monitor_window_channels_text.grid(row=5, column=0, sticky="nsew")
-        self.monitor_window_channels_text.configure(state="disabled")
-        right.rowconfigure(5, weight=1)
-        right.columnconfigure(0, weight=1)
         self.monitor_window = window
         self.monitor_window_summary_text = None
+        self.monitor_section_widgets = []
+        self.monitor_plot_controls = {}
+        self.monitor_plot_canvases = {}
+        self.monitor_cards_container = left
+        self.monitor_window_theory_text = None
+        left.columnconfigure(0, weight=1)
+        left.columnconfigure(1, weight=1)
+        right.rowconfigure(3, weight=1)
+        summary_frame = ttk.Labelframe(right, text="Theory And Value Pipeline", padding=8)
+        summary_frame.grid(row=0, column=0, sticky="nsew")
+        self.monitor_window_theory_text = tk.Text(summary_frame, wrap="word", height=18)
+        self.monitor_window_theory_text.pack(fill="both", expand=True)
+        self.monitor_window_theory_text.configure(state="disabled")
+        ttk.Button(right, text="Open Theory Window", command=self._open_theory_window).grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(right, text="Current channel snapshot").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self.monitor_window_channels_text = tk.Text(right, wrap="none", height=18)
+        self.monitor_window_channels_text.grid(row=3, column=0, sticky="nsew")
+        self.monitor_window_channels_text.configure(state="disabled")
         self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
         self._update_monitor_dashboard(self.latest_monitor_summary)
         window.protocol("WM_DELETE_WINDOW", self._close_monitor_window)
@@ -622,57 +626,121 @@ class SSMBGui:
         self.monitor_window_channels_text = None
         self.monitor_cards_container = None
         self.monitor_section_widgets = []
-        self.monitor_plot_canvas = None
-        self.monitor_equations_text = None
+        self.monitor_window_theory_text = None
+        self.monitor_plot_controls = {}
+        self.monitor_plot_canvases = {}
 
     def _update_monitor_dashboard(self, summary) -> None:
         if self.monitor_window is None or not self.monitor_window.winfo_exists() or summary is None:
             return
         sections = build_monitor_sections(summary)
-        for idx, (card, text_widget) in enumerate(getattr(self, "monitor_section_widgets", [])):
-            if idx < len(sections):
-                section = sections[idx]
-                card.configure(text=section["title"])
-                lines = []
-                for label, value in section.get("rows", []):
-                    lines.append("%s: %s" % (label, value))
-                if section.get("note"):
-                    lines.extend(["", section["note"]])
-                self._set_text_widget(text_widget, lines)
-                self._color_text_widget(text_widget, section.get("color", "green"))
-            else:
-                card.configure(text="Section")
-                self._set_text_widget(text_widget, [])
-        eq_lines = []
-        for section in sections:
+        self._ensure_monitor_cards(sections)
+        for section, widgets in self.monitor_section_widgets:
+            card = widgets["card"]
+            text_widget = widgets["text"]
+            card.configure(text=section["title"])
+            lines = []
+            for label, value in section.get("rows", []):
+                lines.append("%s: %s" % (label, value))
             if section.get("equations"):
-                eq_lines.append(section["title"])
-                for eq in section["equations"]:
-                    eq_lines.append("  " + eq)
-                eq_lines.append("")
-        self._set_text_widget(self.monitor_equations_text, eq_lines)
-        self._draw_monitor_plots(summary.get("trend_data", {}))
+                lines.extend(["", "Equations:"])
+                lines.extend(section["equations"])
+            if section.get("note"):
+                lines.extend(["", section["note"]])
+            self._set_text_widget(text_widget, lines)
+            self._color_text_widget(text_widget, section.get("color", "green"))
+            self._draw_section_plot(section)
+        theory_lines = []
+        for theory_section in build_theory_sections(summary):
+            theory_lines.append(theory_section["title"])
+            for eq in theory_section.get("equations", []):
+                theory_lines.append("  " + eq)
+            for line in theory_section.get("lines", []):
+                theory_lines.append("  " + line)
+            theory_lines.append("")
+        self._set_text_widget(self.monitor_window_theory_text, theory_lines)
+        if self.theory_window is not None and self.theory_window.winfo_exists():
+            self._update_theory_window(summary)
 
     def _color_text_widget(self, widget: "tk.Text", color_name: str) -> None:
         colors = {"green": "#1b5e20", "yellow": "#8d6e00", "red": "#b71c1c"}
         widget.configure(fg=colors.get(color_name, "#263238"))
 
-    def _draw_monitor_plots(self, trend_data: dict) -> None:
-        canvas = getattr(self, "monitor_plot_canvas", None)
-        if canvas is None:
+    def _ensure_monitor_cards(self, sections) -> None:
+        container = getattr(self, "monitor_cards_container", None)
+        if container is None:
             return
+        existing = len(self.monitor_section_widgets)
+        for idx in range(existing, len(sections)):
+            row = idx // 2
+            col = idx % 2
+            container.rowconfigure(row, weight=1)
+            card = ttk.Labelframe(container, text="Section", padding=8)
+            card.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
+            card.columnconfigure(0, weight=1)
+            text = tk.Text(card, wrap="word", height=9)
+            text.grid(row=0, column=0, columnspan=2, sticky="nsew")
+            text.configure(state="disabled")
+            card.rowconfigure(0, weight=1)
+            combo_var = tk.StringVar(value="")
+            combo = ttk.Combobox(card, textvariable=combo_var, state="readonly", width=22)
+            combo.grid(row=1, column=0, sticky="w", pady=(6, 4))
+            canvas = tk.Canvas(card, bg="white", width=280, height=120, highlightthickness=1, highlightbackground="#cfd8dc")
+            canvas.grid(row=2, column=0, columnspan=2, sticky="nsew")
+            card.rowconfigure(2, weight=1)
+            self.monitor_section_widgets.append(
+                (
+                    sections[idx],
+                    {
+                        "card": card,
+                        "text": text,
+                        "combo": combo,
+                        "combo_var": combo_var,
+                        "canvas": canvas,
+                    },
+                )
+            )
+        updated = []
+        for idx, section in enumerate(sections):
+            widgets = self.monitor_section_widgets[idx][1]
+            combo = widgets["combo"]
+            combo_var = widgets["combo_var"]
+            options = section.get("trend_options", [])
+            combo["values"] = [trend_definitions()[name]["label"] for name in options]
+            current_key = self.monitor_plot_controls.get(section["key"])
+            if current_key not in options:
+                current_key = section.get("default_trend")
+                self.monitor_plot_controls[section["key"]] = current_key
+            combo_var.set(trend_definitions()[current_key]["label"])
+            combo.bind("<<ComboboxSelected>>", lambda _event, key=section["key"], opts=options, var=combo_var: self._on_monitor_plot_selected(key, opts, var))
+            updated.append((section, widgets))
+        self.monitor_section_widgets = updated
+
+    def _on_monitor_plot_selected(self, section_key: str, options: Sequence[str], var) -> None:
+        label = var.get()
+        for key in options:
+            if trend_definitions()[key]["label"] == label:
+                self.monitor_plot_controls[section_key] = key
+                break
+        self._update_monitor_dashboard(self.latest_monitor_summary)
+
+    def _draw_section_plot(self, section: dict) -> None:
+        widgets = None
+        for existing_section, candidate in self.monitor_section_widgets:
+            if existing_section["key"] == section["key"]:
+                widgets = candidate
+                break
+        if widgets is None:
+            return
+        canvas = widgets["canvas"]
+        metric = self.monitor_plot_controls.get(section["key"], section.get("default_trend"))
+        trend_data = (self.latest_monitor_summary or {}).get("trend_data", {})
+        values = trend_data.get(metric, [])
+        meta = trend_definitions().get(metric, {"label": metric, "color": "#455a64"})
         canvas.delete("all")
-        width = int(canvas.winfo_width() or 440)
-        height = int(canvas.winfo_height() or 260)
-        self._draw_series(canvas, trend_data.get("rf_offset_hz", []), 20, 20, width - 20, 110, "#1e88e5", "ΔfRF [Hz]")
-        self._draw_series(canvas, trend_data.get("delta_s", []), 20, 140, width - 20, 230, "#43a047", "δₛ")
-        self._draw_series(canvas, trend_data.get("p1_h1_ampl_avg", []), 20, 240, width - 20, 330, "#8e24aa", "P1 avg")
-        legacy = trend_data.get("legacy_alpha0", [])
-        bpm_summary = self.latest_monitor_summary or {}
-        bpm_alpha = ((bpm_summary.get("rf_sweep_metrics") or {}).get("alpha0_from_bpm_eta"))
-        if bpm_alpha is not None and legacy:
-            bpm_series = [bpm_alpha] * len(legacy)
-            self._draw_overlay_series(canvas, legacy, bpm_series, 240, 20, width - 20, 110, "#ef6c00", "#8e24aa", "α₀ legacy vs BPM")
+        width = int(canvas.winfo_width() or 280)
+        height = int(canvas.winfo_height() or 120)
+        self._draw_series(canvas, values, 10, 10, width - 10, height - 10, meta["color"], meta["label"])
 
     def _draw_series(self, canvas, values, x0, y0, x1, y1, color, label):
         canvas.create_rectangle(x0, y0, x1, y1, outline="#cfd8dc")
@@ -728,7 +796,7 @@ class SSMBGui:
         outer.columnconfigure(0, weight=1)
         outer.columnconfigure(1, weight=0)
         outer.rowconfigure(0, weight=1)
-        canvas = tk.Canvas(outer, bg="white", height=420)
+        canvas = tk.Canvas(outer, bg="white", height=520)
         canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         info = tk.Text(outer, wrap="word", width=42)
         info.grid(row=0, column=1, sticky="nsew")
@@ -745,11 +813,19 @@ class SSMBGui:
         canvas = self.lattice_canvas
         canvas.delete("all")
         width = int(canvas.winfo_width() or 1000)
-        height = int(canvas.winfo_height() or 420)
+        height = int(canvas.winfo_height() or 520)
         left = 60
         right = width - 40
-        y_mid = 180
-        canvas.create_line(left, y_mid, right, y_mid, fill="#37474f", width=3)
+        y_track = 100
+        row_positions = {
+            "section": 60,
+            "bpm": 160,
+            "qpd": 220,
+            "rf": 280,
+            "magnet": 340,
+            "bump": 410,
+        }
+        canvas.create_line(left, y_track, right, y_track, fill="#37474f", width=3)
         self.lattice_device_items = []
         sections = [("K1", "#fff3e0"), ("L2", "#e8f5e9"), ("K3", "#e3f2fd"), ("L4", "#fce4ec")]
         section_bounds = self._section_bounds(lattice)
@@ -759,16 +835,17 @@ class SSMBGui:
                 continue
             x0 = self._s_to_x(bounds[0], lattice, left, right)
             x1 = self._s_to_x(bounds[1], lattice, left, right)
-            canvas.create_rectangle(x0, y_mid - 28, x1, y_mid + 28, fill=color, outline="")
-            canvas.create_text((x0 + x1) / 2.0, y_mid - 42, text=name, fill="#263238", font=("Helvetica", 11, "bold"))
+            canvas.create_rectangle(x0, y_track - 18, x1, y_track + 18, fill=color, outline="")
+            canvas.create_text((x0 + x1) / 2.0, row_positions["section"], text=name, fill="#263238", font=("Helvetica", 11, "bold"))
+        for row_name, row_y in (("BPMs", row_positions["bpm"]), ("QPD / optics", row_positions["qpd"]), ("RF / tune", row_positions["rf"]), ("Main lattice", row_positions["magnet"]), ("Bump correctors", row_positions["bump"])):
+            canvas.create_text(10, row_y, anchor="w", text=row_name, fill="#455a64", font=("Helvetica", 10, "bold"))
+            canvas.create_line(left, row_y, right, row_y, fill="#eceff1", dash=(3, 3))
         for element in lattice.elements:
             if element.element_type not in ("Monitor", "Quadrupole", "Sextupole", "Octupole", "Dipole", "RFCavity"):
                 continue
             x = self._s_to_x(element.s_center_m, lattice, left, right)
-            color, label = self._element_style(element)
-            y0 = y_mid - 18
-            y1 = y_mid + 18
-            item_id = canvas.create_rectangle(x - 4, y0, x + 4, y1, fill=color, outline="")
+            color, label, row_y = self._element_style(element, row_positions)
+            item_id = canvas.create_rectangle(x - 5, row_y - 12, x + 5, row_y + 12, fill=color, outline="")
             self.lattice_device_items.append(
                 {
                     "item_id": item_id,
@@ -778,23 +855,23 @@ class SSMBGui:
                     "pv": self._match_spec_pv(specs, element),
                     "notes": "%s in %s" % (element.element_type, element.section or "ring"),
                     "x": x,
-                    "y": y_mid,
+                    "y": row_y,
                 }
             )
-            if element.element_type in ("Monitor", "RFCavity"):
-                canvas.create_text(x, y_mid + 36, text=label or element.family_name, angle=45, anchor="w", font=("Helvetica", 8))
+            if element.element_type in ("RFCavity",):
+                canvas.create_text(x, row_y - 18, text=label or element.family_name, anchor="s", font=("Helvetica", 8, "bold"))
         extras = [
-            ("QPD00ZL4RP", "qpd_l4_sigma_x", "QPD00 SR camera/profile monitor in L4", 36.0, "#d81b60"),
-            ("QPD01ZL2RP", "qpd_l2_sigma_x", "QPD01 SR camera/profile monitor in L2", 12.0, "#8e24aa"),
-            ("HS1P2K3RP:setCur", "l4_bump_hcorr_k3_upstream", "Recovered bump corrector", 24.0, "#ef6c00"),
-            ("HS3P1L4RP:setCur", "l4_bump_hcorr_l4_upstream", "Recovered bump corrector", 31.5, "#ef6c00"),
-            ("HS3P2L4RP:setCur", "l4_bump_hcorr_l4_downstream", "Recovered bump corrector", 40.0, "#ef6c00"),
-            ("HS1P1K1RP:setCur", "l4_bump_hcorr_k1_downstream", "Recovered bump corrector", 47.0, "#ef6c00"),
+            ("QPD00ZL4RP", "qpd_l4_sigma_x", "QPD00 SR camera/profile monitor in L4", 36.0, "#d81b60", row_positions["qpd"]),
+            ("QPD01ZL2RP", "qpd_l2_sigma_x", "QPD01 SR camera/profile monitor in L2", 12.0, "#8e24aa", row_positions["qpd"]),
+            ("HS1P2K3RP:setCur", "l4_bump_hcorr_k3_upstream", "Recovered bump corrector", 24.0, "#ef6c00", row_positions["bump"]),
+            ("HS3P1L4RP:setCur", "l4_bump_hcorr_l4_upstream", "Recovered bump corrector", 31.5, "#ef6c00", row_positions["bump"]),
+            ("HS3P2L4RP:setCur", "l4_bump_hcorr_l4_downstream", "Recovered bump corrector", 40.0, "#ef6c00", row_positions["bump"]),
+            ("HS1P1K1RP:setCur", "l4_bump_hcorr_k1_downstream", "Recovered bump corrector", 47.0, "#ef6c00", row_positions["bump"]),
         ]
-        for name, label, notes, s_pos, color in extras:
+        for name, label, notes, s_pos, color, row_y in extras:
             x = self._s_to_x(s_pos, lattice, left, right)
-            item_id = canvas.create_oval(x - 6, y_mid - 40, x + 6, y_mid - 28, fill=color, outline="")
-            canvas.create_text(x, y_mid - 48, text=name.split(":")[0], angle=45, anchor="e", font=("Helvetica", 8))
+            item_id = canvas.create_oval(x - 7, row_y - 7, x + 7, row_y + 7, fill=color, outline="")
+            canvas.create_text(x, row_y - 14, text=name.split(":")[0], anchor="s", font=("Helvetica", 8))
             self.lattice_device_items.append(
                 {
                     "item_id": item_id,
@@ -804,10 +881,10 @@ class SSMBGui:
                     "pv": name if ":" in name else None,
                     "notes": notes,
                     "x": x,
-                    "y": y_mid - 34,
+                    "y": row_y,
                 }
             )
-        canvas.create_text(left, height - 18, anchor="w", text="Click any marker for live value and PV mapping.", fill="#455a64")
+        canvas.create_text(left, height - 18, anchor="w", text="Click a marker for live PV mapping. Rows separate BPMs, QPDs, RF, main lattice, and bump correctors.", fill="#455a64")
 
     def _refresh_lattice_view(self) -> None:
         if self.lattice_window is None or not self.lattice_window.winfo_exists():
@@ -884,16 +961,58 @@ class SSMBGui:
             return left
         return left + (right - left) * float(s_pos) / float(lattice.circumference_m)
 
-    def _element_style(self, element: LatticeElement):
+    def _element_style(self, element: LatticeElement, row_positions):
         styles = {
-            "Monitor": ("#1e88e5", element.family_name),
-            "Quadrupole": ("#43a047", ""),
-            "Sextupole": ("#fdd835", ""),
-            "Octupole": ("#8e24aa", ""),
-            "Dipole": ("#6d4c41", ""),
-            "RFCavity": ("#c62828", "CAV"),
+            "Monitor": ("#1e88e5", element.family_name, row_positions["bpm"]),
+            "Quadrupole": ("#43a047", "", row_positions["magnet"]),
+            "Sextupole": ("#fdd835", "", row_positions["magnet"]),
+            "Octupole": ("#8e24aa", "", row_positions["magnet"]),
+            "Dipole": ("#6d4c41", "", row_positions["magnet"]),
+            "RFCavity": ("#c62828", "CAV", row_positions["rf"]),
         }
-        return styles.get(element.element_type, ("#90a4ae", ""))
+        return styles.get(element.element_type, ("#90a4ae", "", row_positions["magnet"]))
+
+    def _open_theory_window(self) -> None:
+        if self.theory_window is not None and self.theory_window.winfo_exists():
+            self.theory_window.lift()
+            return
+        window = tk.Toplevel(self.root)
+        window.title("SSMB Theory And Derived-Value Pipeline")
+        window.geometry("900x760")
+        frame = ttk.Frame(window, padding=10)
+        frame.pack(fill="both", expand=True)
+        text = tk.Text(frame, wrap="word")
+        text.pack(fill="both", expand=True)
+        text.configure(state="disabled")
+        self.theory_window = window
+        self.theory_window_text = text
+        self._update_theory_window(self.latest_monitor_summary)
+        window.protocol("WM_DELETE_WINDOW", self._close_theory_window)
+
+    def _update_theory_window(self, summary) -> None:
+        if self.theory_window is None or not self.theory_window.winfo_exists():
+            return
+        theory_lines = []
+        if summary is None:
+            theory_lines = ["No live monitor summary yet.", "", "Start Live Monitor to populate the theory pipeline with live values."]
+        else:
+            for section in build_theory_sections(summary):
+                theory_lines.append(section["title"])
+                theory_lines.append("")
+                for eq in section.get("equations", []):
+                    theory_lines.append(eq)
+                if section.get("equations"):
+                    theory_lines.append("")
+                for line in section.get("lines", []):
+                    theory_lines.append(line)
+                theory_lines.append("")
+        self._set_text_widget(self.theory_window_text, theory_lines)
+
+    def _close_theory_window(self) -> None:
+        if self.theory_window is not None and self.theory_window.winfo_exists():
+            self.theory_window.destroy()
+        self.theory_window = None
+        self.theory_window_text = None
 
     def _match_spec_label(self, specs, element: LatticeElement):
         family = element.family_name.lower()

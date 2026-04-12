@@ -1,6 +1,12 @@
 import unittest
 
-from SSMB_experiment.ssmb_tool.live_monitor import build_monitor_sections, detect_rf_sweep_active, summarize_live_monitor
+from SSMB_experiment.ssmb_tool.live_monitor import (
+    build_monitor_sections,
+    build_theory_sections,
+    detect_rf_sweep_active,
+    summarize_live_monitor,
+    trend_definitions,
+)
 
 
 class SSMBExperimentLiveMonitorTest(unittest.TestCase):
@@ -117,6 +123,43 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         self.assertTrue(any(label == "BPM α₀" for label, _value in alpha_section["rows"]))
         light_section = [section for section in sections if section["title"] == "Coherent Light Monitor"][0]
         self.assertTrue(any(label == "P1 avg" for label, _value in light_section["rows"]))
+
+    def test_theory_sections_and_trend_catalog_exist(self):
+        samples = [
+            {
+                "channels": {
+                    "beam_energy_mev": {"value": 250.0},
+                    "beam_current": {"value": 4.2},
+                    "l4_bump_hcorr_k3_upstream": {"value": 0.01},
+                    "l4_bump_hcorr_l4_upstream": {"value": 0.0},
+                    "l4_bump_hcorr_l4_downstream": {"value": 0.0},
+                    "l4_bump_hcorr_k1_downstream": {"value": 0.0},
+                    "l4_bump_feedback_enable": {"value": 1.0},
+                    "p1_h1_ampl": {"value": 0.02},
+                    "p1_h1_ampl_avg": {"value": 0.03},
+                    "p1_h1_ampl_dev": {"value": 0.01},
+                },
+                "derived": {
+                    "rf_readback": 499688.388,
+                    "rf_offset_hz": 1.0,
+                    "delta_l4_bpm_first_order": 1.0e-4,
+                    "beam_energy_from_bpm_mev": 250.01,
+                    "qpd_l4_sigma_delta_first_order": 2.0e-4,
+                    "qpd_l4_sigma_energy_mev": 0.05,
+                    "legacy_alpha0_corrected": 6.3e-4,
+                    "tune_y_unitless": 0.12,
+                    "tune_s_unitless": 0.013,
+                    "alpha0_from_live_eta": 2.1e-5,
+                    "bpm_x_nonlinear_labels": [],
+                },
+            }
+        ]
+        summary = summarize_live_monitor(samples)
+        theory = build_theory_sections(summary)
+        self.assertTrue(any(section["title"] == "2. Momentum Offset δₛ" for section in theory))
+        self.assertIn("delta_s", summary["trend_data"])
+        self.assertIn("alpha_difference", summary["trend_data"])
+        self.assertIn("p1_h1_ampl_avg", trend_definitions())
 
 
 if __name__ == "__main__":

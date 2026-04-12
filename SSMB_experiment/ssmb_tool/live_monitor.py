@@ -9,6 +9,25 @@ RF_SWEEP_ACTIVE_MIN_POINTS = 4
 BUMP_CORRECTOR_ACTIVE_THRESHOLD_A = 0.002
 ALPHA_CONTAMINATION_THRESHOLD = 5.0e-5
 
+TREND_DEFINITIONS: Dict[str, Dict[str, object]] = {
+    "rf_offset_hz": {"label": "Δf_RF [Hz]", "color": "#1e88e5"},
+    "delta_s": {"label": "δₛ", "color": "#43a047"},
+    "beam_energy_mev": {"label": "E_BPM [MeV]", "color": "#00897b"},
+    "sigma_delta": {"label": "σδ", "color": "#6d4c41"},
+    "legacy_alpha0": {"label": "α₀ legacy", "color": "#ef6c00"},
+    "bpm_alpha0": {"label": "α₀ BPM", "color": "#8e24aa"},
+    "alpha_difference": {"label": "α₀ legacy - BPM", "color": "#c62828"},
+    "tune_y": {"label": "Qᵧ", "color": "#3949ab"},
+    "tune_s": {"label": "Qₛ", "color": "#5e35b1"},
+    "p1_h1_ampl": {"label": "P1 live", "color": "#00acc1"},
+    "p1_h1_ampl_avg": {"label": "P1 avg", "color": "#8e24aa"},
+    "p1_h1_ampl_dev": {"label": "P1 std", "color": "#7b1fa2"},
+    "p3_h1_ampl": {"label": "P3 live", "color": "#f4511e"},
+    "p3_h1_ampl_avg": {"label": "P3 avg", "color": "#fb8c00"},
+    "beam_current": {"label": "Beam current [mA]", "color": "#2e7d32"},
+    "bump_strength_a": {"label": "max |I_bump| [A]", "color": "#ad1457"},
+}
+
 
 def _valid_float(value) -> Optional[float]:
     try:
@@ -176,16 +195,36 @@ def assess_alpha_monitor(summary: Dict[str, object]) -> Dict[str, object]:
 
 def extract_trend_data(samples: Sequence[Dict[str, object]]) -> Dict[str, List[Optional[float]]]:
     history = list(samples)[-120:]
+    bpm_alpha_series = []
+    alpha_difference_series = []
+    for sample in history:
+        bpm_alpha = _valid_float(sample.get("derived", {}).get("alpha0_from_live_eta"))
+        legacy = _valid_float(sample.get("derived", {}).get("legacy_alpha0_corrected"))
+        bpm_alpha_series.append(bpm_alpha)
+        alpha_difference_series.append(None if bpm_alpha is None or legacy is None else legacy - bpm_alpha)
     return {
         "index": [sample.get("sample_index") for sample in history],
         "rf_offset_hz": [_valid_float(sample.get("derived", {}).get("rf_offset_hz")) for sample in history],
         "delta_s": [_valid_float(sample.get("derived", {}).get("delta_l4_bpm_first_order")) for sample in history],
         "legacy_alpha0": [_valid_float(sample.get("derived", {}).get("legacy_alpha0_corrected")) for sample in history],
+        "bpm_alpha0": bpm_alpha_series,
+        "alpha_difference": alpha_difference_series,
         "beam_energy_mev": [_valid_float(sample.get("derived", {}).get("beam_energy_from_bpm_mev")) for sample in history],
         "sigma_delta": [_valid_float(sample.get("derived", {}).get("qpd_l4_sigma_delta_first_order")) for sample in history],
+        "tune_y": [_valid_float(sample.get("derived", {}).get("tune_y_unitless")) for sample in history],
+        "tune_s": [_valid_float(sample.get("derived", {}).get("tune_s_unitless")) for sample in history],
+        "beam_current": [_valid_float(sample.get("channels", {}).get("beam_current", {}).get("value")) for sample in history],
+        "bump_strength_a": [
+            _valid_float(
+                _summarize_bump_state(sample.get("channels", {})).get("max_abs_corrector_a")
+            )
+            for sample in history
+        ],
         "p1_h1_ampl": [_valid_float(sample.get("channels", {}).get("p1_h1_ampl", {}).get("value")) for sample in history],
         "p1_h1_ampl_avg": [_valid_float(sample.get("channels", {}).get("p1_h1_ampl_avg", {}).get("value")) for sample in history],
+        "p1_h1_ampl_dev": [_valid_float(sample.get("channels", {}).get("p1_h1_ampl_dev", {}).get("value")) for sample in history],
         "p3_h1_ampl": [_valid_float(sample.get("channels", {}).get("p3_h1_ampl", {}).get("value")) for sample in history],
+        "p3_h1_ampl_avg": [_valid_float(sample.get("channels", {}).get("p3_h1_ampl_avg", {}).get("value")) for sample in history],
     }
 
 
@@ -196,6 +235,7 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
     alpha = summary.get("alpha_assessment", {})
     sections = [
         {
+            "key": "machine_state",
             "title": "Machine State",
             "color": "green" if not current.get("nonlinear_bpms") else "yellow",
             "rows": [
@@ -210,8 +250,11 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
             ],
             "equations": [],
             "note": "This section is available even when no RF sweep is running.",
+            "default_trend": "beam_current",
+            "trend_options": ["beam_current", "rf_offset_hz", "bump_strength_a"],
         },
         {
+            "key": "coherent_light",
             "title": "Coherent Light Monitor",
             "color": "green" if current.get("p1_h1_ampl") is not None or current.get("p1_h1_ampl_avg") is not None else "yellow",
             "rows": [
@@ -228,8 +271,11 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 "Track P1(f_RF) and P1(δₛ) together with α₀ and η",
             ],
             "note": "For this experiment, P1 versus f_RF is the key observable. Compare it against BPM-derived δₛ and phase-slip fits.",
+            "default_trend": "p1_h1_ampl_avg",
+            "trend_options": ["p1_h1_ampl_avg", "p1_h1_ampl", "p1_h1_ampl_dev", "p3_h1_ampl", "p3_h1_ampl_avg", "rf_offset_hz", "delta_s"],
         },
         {
+            "key": "energy_momentum",
             "title": "Energy And Momentum",
             "color": "green",
             "rows": [
@@ -246,8 +292,11 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 "σₓ² ≈ βₓεₓ + (ηₓσδ)²",
             ],
             "note": "This is the practical energy/spread chain for L4: BPMs for centroid, QPD00 for spread proxy.",
+            "default_trend": "delta_s",
+            "trend_options": ["delta_s", "beam_energy_mev", "sigma_delta", "rf_offset_hz"],
         },
         {
+            "key": "alpha_phase_slip",
             "title": "α₀ And Phase Slip",
             "color": alpha.get("color", "yellow"),
             "rows": [
@@ -263,8 +312,11 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 "α₀,legacy ∝ Qₛ² · E / (f_RF² · U_cav)",
             ],
             "note": alpha.get("message"),
+            "default_trend": "alpha_difference",
+            "trend_options": ["alpha_difference", "bpm_alpha0", "legacy_alpha0", "delta_s", "rf_offset_hz"],
         },
         {
+            "key": "tunes_chromatic",
             "title": "Tunes And Chromatic Cross-Checks",
             "color": "green" if sweep.get("available") else "yellow",
             "rows": [
@@ -280,9 +332,87 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 "Qᵧ(δ) ≈ Qᵧ0 + ξᵧ δ",
             ],
             "note": "Treat tune slopes as cross-checks. The strongest SSMB chain remains RF → δₛ → η → α₀.",
+            "default_trend": "tune_y",
+            "trend_options": ["tune_y", "tune_s", "delta_s", "rf_offset_hz"],
         },
     ]
     return sections
+
+
+def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]:
+    current = summary.get("current", {})
+    bump = summary.get("bump_state", {})
+    sweep = summary.get("rf_sweep_metrics", {})
+    return [
+        {
+            "title": "1. Raw Instruments",
+            "lines": [
+                "L4 BPM chain: BPMZ3L4RP, BPMZ4L4RP, BPMZ5L4RP, BPMZ6L4RP",
+                "Profile monitor: QPD00ZL4RP (σx, σy)",
+                "Coherent-light observables: SCOPE1ZULP:h1p1:* and h1p3:*",
+                "RF references: MCLKHGP:setFrq, MCLKHGP:rdFrq499",
+                "Tunes: tune_x_raw, tune_y_raw, tune_s_raw",
+                "Bump-state context: HS1P2K3RP, HS3P1L4RP, HS3P2L4RP, HS1P1K1RP, AKC10VP",
+            ],
+        },
+        {
+            "title": "2. Momentum Offset δₛ",
+            "equations": [
+                "Δx_i = x_i - x_{i,ref}",
+                "Δx_i ≈ D_{x,i} · δₛ",
+                "δₛ ≈ (Σ_i w_i D_{x,i} Δx_i) / (Σ_i w_i D_{x,i}²)",
+            ],
+            "lines": [
+                "Raw data: horizontal L4 BPM offsets relative to the stored baseline.",
+                "Meaning: synchronous off-momentum state occupied during the RF sweep.",
+                "Current live value: δₛ = %s" % _fmt(current.get("delta_l4_bpm_first_order")),
+            ],
+        },
+        {
+            "title": "3. Phase Slip Factor η",
+            "equations": [
+                "-Δf_RF / f_RF ≈ η · δₛ",
+                "η = -(1/f_RF) · d f_RF / dδₛ",
+            ],
+            "lines": [
+                "Raw data: RF readback plus reconstructed δₛ history.",
+                "Fit performed only when enough RF motion is detected.",
+                "Current live fit: η = %s" % _fmt(sweep.get("phase_slip_factor_eta")),
+            ],
+        },
+        {
+            "title": "4. Momentum Compaction α₀",
+            "equations": [
+                "α₀ = η + 1/γ²",
+                "α₀,legacy ∝ Qₛ² · E / (f_RF² · U_cav)",
+            ],
+            "lines": [
+                "Preferred chain: BPMs → δₛ → η → α₀.",
+                "Legacy shortcut uses tune_s, RF, voltage, and energy only, so it misses bump contamination and nonlinear beam-state effects.",
+                "Current live values: α₀,legacy = %s, α₀,BPM = %s" % (
+                    _fmt(current.get("legacy_alpha0_corrected")),
+                    _fmt(sweep.get("alpha0_from_bpm_eta")),
+                ),
+            ],
+        },
+        {
+            "title": "5. Spread And Coherent-Light Observables",
+            "equations": [
+                "σₓ² ≈ βₓ εₓ + (ηₓ σδ)²",
+                "σ_E ≈ E₀ · σδ",
+                "P1 = P1(f_RF) or P1(δₛ)",
+            ],
+            "lines": [
+                "QPD00ZL4RP provides the first-order spread proxy through σx in a dispersive region.",
+                "P1 is the main SSMB observable; compare P1(f_RF) and P1(δₛ) against α₀ and bump state.",
+                "Bump status now: %s, max |I| = %s A" % (bump.get("state_label", "unknown"), _fmt(bump.get("max_abs_corrector_a"))),
+            ],
+        },
+    ]
+
+
+def trend_definitions() -> Dict[str, Dict[str, object]]:
+    return TREND_DEFINITIONS
 
 
 def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
