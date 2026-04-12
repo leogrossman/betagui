@@ -4,6 +4,8 @@ from typing import Dict, List, Optional, Sequence
 
 from .analyze_session import _linear_fit, alpha0_from_eta, fit_slip_factor
 
+SPEED_OF_LIGHT_M_PER_S = 299792458.0
+MLS_CIRCUMFERENCE_M = 48.0
 RF_SWEEP_ACTIVE_THRESHOLD_KHZ = 0.002
 RF_SWEEP_ACTIVE_MIN_POINTS = 4
 BUMP_CORRECTOR_ACTIVE_THRESHOLD_A = 0.002
@@ -36,6 +38,30 @@ def _valid_float(value) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _tune_period_seconds(tune_value) -> Optional[float]:
+    tune = _valid_float(tune_value)
+    if tune is None or tune <= 0.0:
+        return None
+    revolution_period = MLS_CIRCUMFERENCE_M / SPEED_OF_LIGHT_M_PER_S
+    return revolution_period / tune
+
+
+def _fmt_duration(value) -> str:
+    seconds = _valid_float(value)
+    if seconds is None:
+        return "n/a"
+    abs_s = abs(seconds)
+    if abs_s >= 60.0:
+        return "%.3f min" % (seconds / 60.0)
+    if abs_s >= 1.0:
+        return "%.3f s" % seconds
+    if abs_s >= 1.0e-3:
+        return "%.3f ms" % (seconds * 1.0e3)
+    if abs_s >= 1.0e-6:
+        return "%.3f µs" % (seconds * 1.0e6)
+    return "%.3f ns" % (seconds * 1.0e9)
 
 
 def detect_rf_sweep_active(samples: Sequence[Dict[str, object]]) -> Dict[str, object]:
@@ -72,6 +98,9 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
             "tune_x_unitless": _valid_float(derived.get("tune_x_unitless")),
             "tune_y_unitless": _valid_float(derived.get("tune_y_unitless")),
             "tune_s_unitless": _valid_float(derived.get("tune_s_unitless")),
+            "tune_x_period_s": _tune_period_seconds(derived.get("tune_x_unitless")),
+            "tune_y_period_s": _tune_period_seconds(derived.get("tune_y_unitless")),
+            "tune_s_period_s": _tune_period_seconds(derived.get("tune_s_unitless")),
             "tune_s_khz": _valid_float(derived.get("tune_s_khz")),
             "beam_current": _valid_float(channels.get("beam_current", {}).get("value")),
             "beam_current_scope": _valid_float(channels.get("beam_current_scope", {}).get("value")),
@@ -395,6 +424,9 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 ("Qₓ", _fmt(current.get("tune_x_unitless"))),
                 ("Qᵧ", _fmt(current.get("tune_y_unitless"))),
                 ("Qₛ", _fmt(current.get("tune_s_unitless"))),
+                ("Tₓ oscillation", _fmt_duration(current.get("tune_x_period_s"))),
+                ("Tᵧ oscillation", _fmt_duration(current.get("tune_y_period_s"))),
+                ("Tₛ oscillation", _fmt_duration(current.get("tune_s_period_s"))),
                 ("dQₓ/dδ", _fmt((sweep.get("qx_vs_delta") or {}).get("slope"))),
                 ("dQᵧ/dδ", _fmt((sweep.get("qy_vs_delta") or {}).get("slope"))),
                 ("dQₛ/dδ", _fmt((sweep.get("qs_vs_delta") or {}).get("slope"))),
@@ -544,6 +576,11 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
                 _fmt(current.get("tune_x_unitless")),
                 _fmt(current.get("tune_y_unitless")),
                 _fmt(current.get("tune_s_unitless")),
+            ),
+            "Oscillation periods (Tx, Ty, Ts): %s, %s, %s" % (
+                _fmt_duration(current.get("tune_x_period_s")),
+                _fmt_duration(current.get("tune_y_period_s")),
+                _fmt_duration(current.get("tune_s_period_s")),
             ),
             "Tune_s monitor: %s kHz" % _fmt(current.get("tune_s_khz")),
             "Beam current: %s" % _fmt(current.get("beam_current")),

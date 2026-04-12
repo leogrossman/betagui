@@ -129,17 +129,22 @@ class SSMBGui:
         safety_frame = ttk.Frame(control)
         safety_frame.pack(fill="x", pady=(0, 8))
         ttk.Label(safety_frame, text="Machine Safety").pack(anchor="w")
-        self.safe_mode_button = tk.Button(
+        self.safe_mode_button = tk.Checkbutton(
             safety_frame,
             text="SAFE MODE ON",
-            bg="#b71c1c",
+            variable=self.safe_mode_var,
+            indicatoron=False,
+            onvalue=True,
+            offvalue=False,
+            bg="#2e7d32",
             fg="white",
-            activebackground="#c62828",
+            selectcolor="#2e7d32",
+            activebackground="#388e3c",
             activeforeground="white",
             relief="raised",
             padx=12,
             pady=8,
-            command=self._toggle_safe_mode,
+            command=self._on_safe_mode_changed,
         )
         self.safe_mode_button.pack(fill="x")
         self.safe_mode_hint = ttk.Label(
@@ -406,10 +411,6 @@ class SSMBGui:
                 self.run_sweep_button.state(["disabled"])
         self._update_safe_mode_visuals()
 
-    def _toggle_safe_mode(self) -> None:
-        self.safe_mode_var.set(not self.safe_mode_var.get())
-        self._on_safe_mode_changed()
-
     def _on_safe_mode_changed(self) -> None:
         self._update_write_controls()
 
@@ -419,9 +420,10 @@ class SSMBGui:
         if self.safe_mode_var.get():
             self.safe_mode_button.configure(
                 text="SAFE MODE ON",
-                bg="#b71c1c",
+                bg="#2e7d32",
                 fg="white",
-                activebackground="#c62828",
+                selectcolor="#2e7d32",
+                activebackground="#388e3c",
                 activeforeground="white",
             )
             self.safe_mode_hint.configure(
@@ -430,10 +432,11 @@ class SSMBGui:
         else:
             self.safe_mode_button.configure(
                 text="WRITE MODE ENABLED",
-                bg="#f9a825",
-                fg="black",
-                activebackground="#fbc02d",
-                activeforeground="black",
+                bg="#c62828",
+                fg="white",
+                selectcolor="#c62828",
+                activebackground="#d32f2f",
+                activeforeground="white",
             )
             self.safe_mode_hint.configure(
                 text="Writes are possible. RF sweep and experimental bump control still require explicit confirmation."
@@ -775,15 +778,21 @@ class SSMBGui:
             card = ttk.Labelframe(container, text="Section", padding=8)
             card.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
             card.columnconfigure(0, weight=1)
-            text = tk.Text(card, wrap="word", height=9)
-            text.grid(row=0, column=0, columnspan=2, sticky="nsew")
+            card.columnconfigure(1, weight=0)
+            top = ttk.Frame(card)
+            top.grid(row=0, column=0, columnspan=2, sticky="nsew")
+            top.columnconfigure(0, weight=1)
+            text = tk.Text(top, wrap="word", height=9, width=34)
+            text.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
             text.configure(state="disabled")
-            card.rowconfigure(0, weight=1)
-            selector = tk.Listbox(card, selectmode="multiple", exportselection=False, height=4)
-            selector.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 4))
+            selector_frame = ttk.Frame(top)
+            selector_frame.grid(row=0, column=1, sticky="ns")
+            ttk.Label(selector_frame, text="Plot").pack(anchor="w")
+            selector = tk.Listbox(selector_frame, selectmode="multiple", exportselection=False, height=5, width=18)
+            selector.pack(fill="y", expand=False)
             canvas = tk.Canvas(card, bg="white", width=280, height=120, highlightthickness=1, highlightbackground="#cfd8dc")
-            canvas.grid(row=2, column=0, columnspan=2, sticky="nsew")
-            card.rowconfigure(2, weight=1)
+            canvas.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
+            card.rowconfigure(1, weight=1)
             self.monitor_section_widgets.append(
                 (
                     sections[idx],
