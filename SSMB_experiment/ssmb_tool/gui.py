@@ -83,7 +83,11 @@ def _filter_live_monitor_specs(specs, extra_labels: Sequence[str]):
             continue
         if spec.kind == "waveform":
             continue
-        if any(tag in LIVE_MONITOR_EXCLUDED_TAGS for tag in (spec.tags or ())):
+        tags = set(spec.tags or ())
+        if "bpm" in tags:
+            filtered.append(spec)
+            continue
+        if any(tag in LIVE_MONITOR_EXCLUDED_TAGS for tag in tags):
             continue
         filtered.append(spec)
     return filtered

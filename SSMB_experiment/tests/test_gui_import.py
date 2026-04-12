@@ -49,10 +49,11 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         filtered = gui._filter_live_monitor_specs(specs, [])
         labels = {spec.label for spec in filtered}
         self.assertNotIn("bpm_buffer_raw", labels)
-        self.assertNotIn("bpmz1k1rp_x", labels)
+        self.assertIn("bpmz1k1rp_x", labels)
         self.assertIn("p1_h1_ampl_avg", labels)
         self.assertIn("climate_kw13_return_temp_c", labels)
         self.assertIn("qpd_l4_sigma_x", labels)
+        self.assertNotIn("q1p1l2rp", labels)
 
     def test_downsample_tail_keeps_last_point(self):
         import SSMB_experiment.ssmb_tool.gui as gui
