@@ -26,6 +26,11 @@ TREND_DEFINITIONS: Dict[str, Dict[str, object]] = {
     "p1_h1_ampl_dev": {"label": "P1 std", "color": "#7b1fa2"},
     "p3_h1_ampl": {"label": "P3 live", "color": "#f4511e"},
     "p3_h1_ampl_avg": {"label": "P3 avg", "color": "#fb8c00"},
+    "qpd_l4_center_x_avg_um": {"label": "QPD00 X center avg [um]", "color": "#6a1b9a"},
+    "qpd_l2_center_x_avg_um": {"label": "QPD01 X center avg [um]", "color": "#8e24aa"},
+    "climate_kw13_return_temp_c": {"label": "KW13 return temp [C]", "color": "#00838f"},
+    "climate_sr_temp_c": {"label": "SR temp [C]", "color": "#00695c"},
+    "climate_sr_temp1_c": {"label": "SR temp1 [C]", "color": "#2e7d32"},
     "beam_current": {"label": "Beam current [mA]", "color": "#2e7d32"},
     "bump_strength_a": {"label": "max |I_bump| [A]", "color": "#ad1457"},
     "bump_bpm_avg_mm": {"label": "⟨x_bump BPM⟩ [mm]", "color": "#00838f"},
@@ -111,6 +116,11 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
             "p1_h1_ampl_dev": _valid_float(channels.get("p1_h1_ampl_dev", {}).get("value")),
             "p3_h1_ampl": _valid_float(channels.get("p3_h1_ampl", {}).get("value")),
             "p3_h1_ampl_avg": _valid_float(channels.get("p3_h1_ampl_avg", {}).get("value")),
+            "qpd_l4_center_x_avg_um": _valid_float(channels.get("qpd_l4_center_x_avg_um", {}).get("value")),
+            "qpd_l2_center_x_avg_um": _valid_float(channels.get("qpd_l2_center_x_avg_um", {}).get("value")),
+            "climate_kw13_return_temp_c": _valid_float(channels.get("climate_kw13_return_temp_c", {}).get("value")),
+            "climate_sr_temp_c": _valid_float(channels.get("climate_sr_temp_c", {}).get("value")),
+            "climate_sr_temp1_c": _valid_float(channels.get("climate_sr_temp1_c", {}).get("value")),
             "nonlinear_bpms": list(derived.get("bpm_x_nonlinear_labels") or []),
             "bump_bpm_avg_mm": bump.get("bpm_avg_mm"),
             "bump_orbit_error_mm": bump.get("orbit_error_mm"),
@@ -127,6 +137,7 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
         "what_can_be_measured_now": [
             "Passive readout: tunes, synchrotron monitor, beam current, orbit BPMs, QPD beam-size proxies, bump states, cavity voltage, beam energy readback.",
             "Passive readout of coherent-light observables P1 and P3 from the scope channels.",
+            "Passive readout of SR-camera center drifts and environmental temperatures that may correlate with slow P1 motion.",
             "From passive L4 BPM orbit: first-order delta_s and BPM-based beam energy shift relative to the monitor baseline.",
             "From QPD00ZL4RP sigma_x: first-order momentum spread proxy and corresponding sigma_E estimate.",
             "From the 4-corrector bump PVs: whether the L4 bump is active, and whether bump feedback is enabled.",
@@ -213,6 +224,13 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
             [y for _x, y in bump_error_series if y is not None],
         ) if len([1 for _x, y in bump_error_series if y is not None]) >= 2 else None,
     }
+    summary["environment_monitor"] = {
+        "p1_avg_vs_kw13_temp": _fit_channel_against_p1avg(samples, "climate_kw13_return_temp_c"),
+        "p1_avg_vs_sr_temp": _fit_channel_against_p1avg(samples, "climate_sr_temp_c"),
+        "p1_avg_vs_sr_temp1": _fit_channel_against_p1avg(samples, "climate_sr_temp1_c"),
+        "p1_avg_vs_qpd00_center": _fit_channel_against_p1avg(samples, "qpd_l4_center_x_avg_um"),
+        "p1_avg_vs_qpd01_center": _fit_channel_against_p1avg(samples, "qpd_l2_center_x_avg_um"),
+    }
     summary["alpha_assessment"] = assess_alpha_monitor(summary)
     summary["trend_data"] = extract_trend_data(samples)
     return summary
@@ -298,6 +316,11 @@ def extract_trend_data(samples: Sequence[Dict[str, object]]) -> Dict[str, List[O
         "p1_h1_ampl_dev": [_valid_float(sample.get("channels", {}).get("p1_h1_ampl_dev", {}).get("value")) for sample in history],
         "p3_h1_ampl": [_valid_float(sample.get("channels", {}).get("p3_h1_ampl", {}).get("value")) for sample in history],
         "p3_h1_ampl_avg": [_valid_float(sample.get("channels", {}).get("p3_h1_ampl_avg", {}).get("value")) for sample in history],
+        "qpd_l4_center_x_avg_um": [_valid_float(sample.get("channels", {}).get("qpd_l4_center_x_avg_um", {}).get("value")) for sample in history],
+        "qpd_l2_center_x_avg_um": [_valid_float(sample.get("channels", {}).get("qpd_l2_center_x_avg_um", {}).get("value")) for sample in history],
+        "climate_kw13_return_temp_c": [_valid_float(sample.get("channels", {}).get("climate_kw13_return_temp_c", {}).get("value")) for sample in history],
+        "climate_sr_temp_c": [_valid_float(sample.get("channels", {}).get("climate_sr_temp_c", {}).get("value")) for sample in history],
+        "climate_sr_temp1_c": [_valid_float(sample.get("channels", {}).get("climate_sr_temp1_c", {}).get("value")) for sample in history],
     }
 
 
@@ -306,6 +329,7 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
     bump = summary.get("bump_state", {})
     sweep = summary.get("rf_sweep_metrics", {})
     bump_monitor = summary.get("bump_monitor", {})
+    environment = summary.get("environment_monitor", {})
     alpha = summary.get("alpha_assessment", {})
     sections = [
         {
@@ -374,6 +398,28 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
             "note": "For this experiment, P1 versus f_RF is the key observable. Compare it against BPM-derived δₛ and phase-slip fits.",
             "default_trend": "p1_h1_ampl_avg",
             "trend_options": ["p1_h1_ampl_avg", "p1_h1_ampl", "p1_h1_ampl_dev", "p3_h1_ampl", "p3_h1_ampl_avg", "rf_offset_hz", "delta_s"],
+        },
+        {
+            "key": "camera_environment",
+            "title": "Camera Centers And Temperature",
+            "color": "yellow",
+            "rows": [
+                ("QPD00 center X avg", "%s um" % _fmt(current.get("qpd_l4_center_x_avg_um"))),
+                ("QPD01 center X avg", "%s um" % _fmt(current.get("qpd_l2_center_x_avg_um"))),
+                ("KW13 return temp", "%s C" % _fmt(current.get("climate_kw13_return_temp_c"))),
+                ("SR temp", "%s C" % _fmt(current.get("climate_sr_temp_c"))),
+                ("SR temp1", "%s C" % _fmt(current.get("climate_sr_temp1_c"))),
+                ("P1avg vs QPD00 center", _fmt((environment.get("p1_avg_vs_qpd00_center") or {}).get("slope"))),
+                ("P1avg vs KW13 temp", _fmt((environment.get("p1_avg_vs_kw13_temp") or {}).get("slope"))),
+                ("P1avg vs SR temp", _fmt((environment.get("p1_avg_vs_sr_temp") or {}).get("slope"))),
+            ],
+            "equations": [
+                "Check P1(t) against slow thermal drift and camera-center motion",
+                "Correlate P1avg with QPD centers and temperature channels to separate beam physics from diagnostics/environment drift",
+            ],
+            "note": "These are strong candidates for the ~5 minute P1 oscillation: slow thermal drift, SR-camera center drift, or optical transport changes.",
+            "default_trend": "climate_kw13_return_temp_c",
+            "trend_options": ["climate_kw13_return_temp_c", "climate_sr_temp_c", "climate_sr_temp1_c", "qpd_l4_center_x_avg_um", "qpd_l2_center_x_avg_um", "p1_h1_ampl_avg"],
         },
         {
             "key": "energy_momentum",
@@ -451,14 +497,16 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
     bump = summary.get("bump_state", {})
     sweep = summary.get("rf_sweep_metrics", {})
     bump_monitor = summary.get("bump_monitor", {})
+    environment = summary.get("environment_monitor", {})
     return [
         {
             "title": "1. Raw Instruments",
             "lines": [
                 "L4 BPM chain: BPMZ3L4RP, BPMZ4L4RP, BPMZ5L4RP, BPMZ6L4RP",
                 "Bump-loop BPM chain: BPMZ1K1RP, BPMZ1L2RP, BPMZ1K3RP, BPMZ1L4RP",
-                "Profile monitor: QPD00ZL4RP (σx, σy)",
+                "Profile monitors: QPD00ZL4RP and QPD01ZL2RP (σx, σy, center X avg)",
                 "Coherent-light observables: SCOPE1ZULP:h1p1:* and h1p3:*",
+                "Environment candidates: KLIMAC1CP:coolKW13:rdRetTemp, KLIMAC1CP:sr:rdTemp, KLIMAC1CP:sr:rd1Temp",
                 "RF references: MCLKHGP:setFrq, MCLKHGP:rdFrq499",
                 "Tunes: Qx from TUNEZRP:measX, Qy from TUNEZRP:measY, Qs from cumz4x003gp:tuneSyn",
                 "Bump-state context: HS1P2K3RP, HS3P1L4RP, HS3P2L4RP, HS1P1K1RP, AKC10VP",
@@ -530,8 +578,12 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             ],
             "lines": [
                 "QPD00ZL4RP provides the first-order spread proxy through σx in a dispersive region.",
-                "P1 is the main SSMB observable; compare P1(f_RF), P1(δₛ), and P1 versus bump activity against α₀ and bump state.",
+                "P1 is the main SSMB observable; compare P1(f_RF), P1(δₛ), and P1 versus bump, camera-center, and temperature activity against α₀ and bump state.",
                 "Bump status now: %s, max |I| = %s A" % (bump.get("state_label", "unknown"), _fmt(bump.get("max_abs_corrector_a"))),
+                "Current env slopes: P1avg-vs-KW13 temp = %s, P1avg-vs-QPD00 center = %s" % (
+                    _fmt((environment.get("p1_avg_vs_kw13_temp") or {}).get("slope")),
+                    _fmt((environment.get("p1_avg_vs_qpd00_center") or {}).get("slope")),
+                ),
             ],
         },
     ]
@@ -575,6 +627,12 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
             "Legacy alpha0 shortcut: %s" % _fmt(current.get("legacy_alpha0_corrected")),
             "P1 live / avg / std: %s / %s / %s" % (_fmt(current.get("p1_h1_ampl")), _fmt(current.get("p1_h1_ampl_avg")), _fmt(current.get("p1_h1_ampl_dev"))),
             "P3 live / avg: %s / %s" % (_fmt(current.get("p3_h1_ampl")), _fmt(current.get("p3_h1_ampl_avg"))),
+            "QPD00 / QPD01 center X avg: %s / %s um" % (_fmt(current.get("qpd_l4_center_x_avg_um")), _fmt(current.get("qpd_l2_center_x_avg_um"))),
+            "KW13 return temp / SR temp / SR temp1: %s / %s / %s C" % (
+                _fmt(current.get("climate_kw13_return_temp_c")),
+                _fmt(current.get("climate_sr_temp_c")),
+                _fmt(current.get("climate_sr_temp1_c")),
+            ),
             "Tunes (x, y, s): %s, %s, %s" % (
                 _fmt(current.get("tune_x_unitless")),
                 _fmt(current.get("tune_y_unitless")),
@@ -623,6 +681,8 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
                 "P3 vs f_RF slope: %s" % _fmt((sweep_metrics.get("p3_vs_rf") or {}).get("slope")),
                 "P1avg vs bump |I| slope: %s" % _fmt((bump_monitor.get("p1_avg_vs_bump_strength") or {}).get("slope")),
                 "P1avg vs bump error slope: %s" % _fmt((bump_monitor.get("p1_avg_vs_bump_error") or {}).get("slope")),
+                "P1avg vs KW13 temp slope: %s" % _fmt((summary.get("environment_monitor", {}).get("p1_avg_vs_kw13_temp") or {}).get("slope")),
+                "P1avg vs QPD00 center slope: %s" % _fmt((summary.get("environment_monitor", {}).get("p1_avg_vs_qpd00_center") or {}).get("slope")),
                 "Qx vs delta slope: %s" % _fmt((sweep_metrics.get("qx_vs_delta") or {}).get("slope")),
                 "Qy vs delta slope: %s" % _fmt((sweep_metrics.get("qy_vs_delta") or {}).get("slope")),
                 "Qs vs delta slope: %s" % _fmt((sweep_metrics.get("qs_vs_delta") or {}).get("slope")),
@@ -650,6 +710,21 @@ def format_channel_snapshot(sample: Dict[str, object]) -> List[str]:
         else:
             lines.append("%s = %s    (%s)" % (label, value, payload.get("pv")))
     return lines
+
+
+def _fit_channel_against_p1avg(samples: Sequence[Dict[str, object]], channel_label: str):
+    x_values = []
+    y_values = []
+    for sample in samples:
+        x_value = _valid_float(sample.get("channels", {}).get(channel_label, {}).get("value"))
+        y_value = _valid_float(sample.get("channels", {}).get("p1_h1_ampl_avg", {}).get("value"))
+        if x_value is None or y_value is None:
+            continue
+        x_values.append(x_value)
+        y_values.append(y_value)
+    if len(x_values) < 2:
+        return None
+    return _linear_fit(x_values, y_values)
 
 
 def _summarize_bump_state(channels: Dict[str, object]) -> Dict[str, object]:

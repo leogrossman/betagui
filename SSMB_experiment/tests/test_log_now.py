@@ -86,6 +86,11 @@ class SSMBExperimentLogNowTest(unittest.TestCase):
         self.assertEqual(lookup["l4_bump_orbit_bpm_l4"].pv, "BPMZ1L4RP:rdX")
         self.assertEqual(lookup["qpd_l4_sigma_y_avg"].pv, "QPD00ZL4RP:rdSigmaYav")
         self.assertEqual(lookup["qpd_l2_sigma_y_avg"].pv, "QPD01ZL2RP:rdSigmaYav")
+        self.assertEqual(lookup["qpd_l4_center_x_avg_um"].pv, "QPD00ZL4RP:rdCenterXav")
+        self.assertEqual(lookup["qpd_l2_center_x_avg_um"].pv, "QPD01ZL2RP:rdCenterXav")
+        self.assertEqual(lookup["climate_kw13_return_temp_c"].pv, "KLIMAC1CP:coolKW13:rdRetTemp")
+        self.assertEqual(lookup["climate_sr_temp_c"].pv, "KLIMAC1CP:sr:rdTemp")
+        self.assertEqual(lookup["climate_sr_temp1_c"].pv, "KLIMAC1CP:sr:rd1Temp")
 
     def test_manual_stop_event_still_writes_outputs(self):
         with tempfile.TemporaryDirectory() as tmpdir:

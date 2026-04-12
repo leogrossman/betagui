@@ -161,6 +161,11 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
                     "p1_h1_ampl": {"value": 0.02},
                     "p1_h1_ampl_avg": {"value": 0.03},
                     "p1_h1_ampl_dev": {"value": 0.01},
+                    "qpd_l4_center_x_avg_um": {"value": 480.0},
+                    "qpd_l2_center_x_avg_um": {"value": 950.0},
+                    "climate_kw13_return_temp_c": {"value": 29.5},
+                    "climate_sr_temp_c": {"value": 26.3},
+                    "climate_sr_temp1_c": {"value": 26.1},
                 },
                 "derived": {
                     "rf_readback": 499688.388,
@@ -182,10 +187,14 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         self.assertTrue(any(section["title"] == "2. Bump-Controlled Orbit Family" for section in theory))
         raw_section = [section for section in theory if section["title"] == "1. Raw Instruments"][0]
         self.assertTrue(any("TUNEZRP:measX" in line for line in raw_section["lines"]))
+        self.assertTrue(any("KLIMAC1CP:coolKW13:rdRetTemp" in line for line in raw_section["lines"]))
+        env_section = [section for section in build_monitor_sections(summary) if section["title"] == "Camera Centers And Temperature"][0]
+        self.assertTrue(any(label == "QPD00 center X avg" for label, _value in env_section["rows"]))
         self.assertIn("delta_s", summary["trend_data"])
         self.assertIn("alpha_difference", summary["trend_data"])
         self.assertIn("bump_orbit_error_mm", summary["trend_data"])
         self.assertIn("p1_h1_ampl_avg", trend_definitions())
+        self.assertIn("climate_kw13_return_temp_c", trend_definitions())
 
 
 if __name__ == "__main__":
