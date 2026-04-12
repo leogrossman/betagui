@@ -84,19 +84,18 @@ Session directories are timestamped and unique. Runtime logs live under the
 gitignored `.ssmb_local/` tree, so a normal `git pull` should not overwrite
 captured data.
 
-## Recommended Environment
+## Control-Room Startup
 
-This tool was validated against the repo-style `pyenv` environment:
+In the control room, prefer the machine's local Python and the checked-out repo
+directly. Do not rely on `pyenv` there unless you explicitly need it as a
+fallback.
 
-- Python `3.9.0`
-- `pyenv` env name: `betagui`
-
-Recommended startup:
+Recommended passive / read-only startup:
 
 ```bash
 cd SSMB_experiment
 export MPLCONFIGDIR="$PWD/.ssmb_local/mplconfig"
-~/.pyenv/versions/betagui/bin/python ssmb_experiment_gui.py
+python3 ssmb_experiment_gui.py
 ```
 
 Write-capable RF sweep mode:
@@ -104,8 +103,30 @@ Write-capable RF sweep mode:
 ```bash
 cd SSMB_experiment
 export MPLCONFIGDIR="$PWD/.ssmb_local/mplconfig"
-~/.pyenv/versions/betagui/bin/python ssmb_experiment_gui.py --allow-writes
+python3 ssmb_experiment_gui.py --allow-writes
 ```
+
+Notes:
+
+- the GUI starts in `Safe / read-only mode` by default
+- passive logging does not write any PVs
+- RF sweep writes stay blocked until:
+  - the GUI was started with `--allow-writes`
+  - `Safe / read-only mode` is turned off
+  - the write confirmation popup is accepted
+- the confirmation dialog shows the exact planned RF PV writes before anything
+  is sent
+
+## Environment Notes
+
+This tool was validated against Python `3.9.0`, matching the original
+`betagui` development environment. If the control-room machine already has a
+working local `python3`, use that first.
+
+If you ever need the older repo-style fallback, the validated `pyenv`
+interpreter was:
+
+- `~/.pyenv/versions/betagui/bin/python`
 
 ## Recommended Measurement Flow
 
@@ -186,19 +207,22 @@ Run the self-contained `SSMB_experiment` tests:
 
 ```bash
 cd /path/to/betagui
-~/.pyenv/versions/betagui/bin/python -m pytest SSMB_experiment/tests
+python3 -m pytest SSMB_experiment/tests
 ```
 
 To also verify the original SSMB path still behaves:
 
 ```bash
 cd /path/to/betagui
-~/.pyenv/versions/betagui/bin/python -m pytest \
+python3 -m pytest \
   tests/test_ssmb_analysis.py \
   tests/test_ssmb_gui_import.py \
   tests/test_ssmb_stage0.py \
   tests/test_ssmb_sweep.py
 ```
+
+If the control-room machine does not have the needed packages on its default
+`python3`, then fall back to the validated `pyenv` interpreter.
 
 ## Rollback
 
@@ -206,7 +230,7 @@ If the experiment path misbehaves in the control room, switch back immediately:
 
 ```bash
 cd ../SSMB
-~/.pyenv/versions/betagui/bin/python ssmb_gui.py --allow-writes
+python3 ssmb_gui.py --allow-writes
 ```
 
 No changes to the original `SSMB/` folder are required for that rollback.
