@@ -1401,9 +1401,10 @@ class SSMBGui:
         canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         side = ttk.Frame(body)
         side.grid(row=0, column=1, sticky="ns")
+        side.columnconfigure(0, weight=1)
         selector_header = ttk.Frame(side)
         selector_header.grid(row=0, column=0, sticky="ew")
-        ttk.Label(selector_header, text="Plot (dbl-click toggles overlay)").pack(side="left")
+        ttk.Label(selector_header, text="Plot (click Use to toggle overlay)").pack(side="left")
         help_button = ttk.Button(selector_header, text="?", width=2)
         help_button.pack(side="right")
         settings_button = ttk.Button(selector_header, text="⚙", width=2)
@@ -1416,8 +1417,8 @@ class SSMBGui:
         selector.column("metric", width=180, anchor="w")
         selector.column("value", width=96, anchor="e")
         selector.grid(row=1, column=0, sticky="ns")
-        text = tk.Text(detail, wrap="word", height=4, width=100)
-        text.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        text = tk.Text(side, wrap="word", height=8, width=38)
+        text.grid(row=2, column=0, sticky="ew", pady=(6, 0))
         text.configure(state="disabled")
         self.monitor_section_tree = section_tree
         self.monitor_section_widgets = [({"key": ""}, {"card": detail, "text": text, "help_button": help_button, "settings_button": settings_button, "selector": selector, "canvas": canvas})]
@@ -1769,16 +1770,18 @@ class SSMBGui:
                 else:
                     norm_values = list(values)
                 normalized_payload.append((series_label, norm_values, color))
+            actual_samples = max((len(values) for _series_label, values, _color in normalized_payload), default=0)
             self._draw_multi_series(
                 canvas,
                 normalized_payload,
                 10,
-                10,
+                24,
                 width - 10,
                 height - 10,
                 max(10, self._window_samples_for_seconds(LONG_STUDY_PLOT_WINDOW_S)),
+                actual_samples=actual_samples,
             )
-            canvas.create_text(width / 2, 12, anchor="n", text=title, fill="#37474f", font=("Helvetica", 10, "bold"))
+            canvas.create_text(width / 2, 6, anchor="n", text=title, fill="#37474f", font=("Helvetica", 10, "bold"))
 
     def _update_monitor_dashboard(self, summary) -> None:
         if self.monitor_window is None or not self.monitor_window.winfo_exists():
@@ -1891,7 +1894,7 @@ class SSMBGui:
                     values=("[x]" if key in current_keys else "[ ]", trend_definitions()[key]["label"], self._format_plot_value(latest)),
                 )
             selector.bind("<<TreeviewSelect>>", lambda _event, key=section["key"], opts=options, tree=selector: self._on_monitor_plot_selected(key, opts, tree))
-            selector.bind("<Double-1>", lambda event, key=section["key"], opts=options, tree=selector: self._on_monitor_plot_toggle(key, opts, tree, event))
+            selector.bind("<Button-1>", lambda event, key=section["key"], opts=options, tree=selector: self._on_monitor_plot_click(key, opts, tree, event))
             widgets["selector_options"] = list(options)
         else:
             for key in options:
@@ -1970,6 +1973,14 @@ class SSMBGui:
             if tree.exists(key):
                 tree.set(key, "enabled", "[x]" if key in current else "[ ]")
         self._update_monitor_dashboard(self.latest_monitor_summary)
+
+    def _on_monitor_plot_click(self, section_key: str, options: Sequence[str], tree, event):
+        region = tree.identify("region", event.x, event.y)
+        column = tree.identify_column(event.x)
+        row_id = tree.identify_row(event.y)
+        if region == "cell" and column == "#1" and row_id and row_id in options:
+            return self._on_monitor_plot_toggle(section_key, options, tree, event)
+        return None
 
     def _on_monitor_plot_toggle(self, section_key: str, options: Sequence[str], tree, event) -> str:
         row_id = tree.identify_row(event.y)
@@ -2104,7 +2115,7 @@ class SSMBGui:
             return
         pts = self._series_to_points(values, x0 + 8, y0 + 20, x1 - 8, y1 - 8)
         if len(pts) >= 4:
-            canvas.create_line(*pts, fill=color, width=2, smooth=True)
+            canvas.create_line(*pts, fill=color, width=2)
 
     def _draw_multi_series(self, canvas, series_payload, x0, y0, x1, y1, window_samples: int, use_log_override=None, actual_samples=None):
         canvas.create_rectangle(x0, y0, x1, y1, outline="#cfd8dc")
@@ -2966,17 +2977,27 @@ class SSMBGui:
         self._set_text_widget(self.ssmb_study_text, lines)
         trend_data = safe_summary.get("trend_data", {}) or {}
         plot_defs = [
-            ("P1/P3 vs RF", [("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa"), ("P3 avg", list(trend_data.get("p3_h1_ampl_avg", [])), "#fb8c00"), ("Δf_RF [Hz]", list(trend_data.get("rf_offset_hz", [])), "#1e88e5")]),
-            ("P1 vs δₛ / E", [("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa"), ("δₛ", list(trend_data.get("delta_s", [])), "#43a047"), ("E_BPM [MeV]", list(trend_data.get("beam_energy_mev", [])), "#00897b")]),
-            ("α₀ / η chain", [("α₀ legacy", list(trend_data.get("legacy_alpha0", [])), "#ef6c00"), ("α₀ BPM", list(trend_data.get("bpm_alpha0", [])), "#8e24aa"), ("σδ", list(trend_data.get("sigma_delta", [])), "#6d4c41")]),
-            ("Slow-driver context", [("KW13 temp", list(trend_data.get("climate_kw13_return_temp_c", [])), "#00838f"), ("QPD00 center", list(trend_data.get("qpd_l4_center_x_avg_um", [])), "#6a1b9a"), ("Bump error", list(trend_data.get("bump_orbit_error_mm", [])), "#c2185b")]),
+            ("P1/P3 vs RF", [("P1 avg", self._prepare_plot_series(list(trend_data.get("p1_h1_ampl_avg", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa"), ("P3 avg", self._prepare_plot_series(list(trend_data.get("p3_h1_ampl_avg", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#fb8c00"), ("Δf_RF [Hz]", self._prepare_plot_series(list(trend_data.get("rf_offset_hz", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#1e88e5")]),
+            ("P1 vs δₛ / E", [("P1 avg", self._prepare_plot_series(list(trend_data.get("p1_h1_ampl_avg", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa"), ("δₛ", self._prepare_plot_series(list(trend_data.get("delta_s", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#43a047"), ("E_BPM [MeV]", self._prepare_plot_series(list(trend_data.get("beam_energy_mev", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#00897b")]),
+            ("α₀ / η chain", [("α₀ legacy", self._prepare_plot_series(list(trend_data.get("legacy_alpha0", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#ef6c00"), ("α₀ BPM", self._prepare_plot_series(list(trend_data.get("bpm_alpha0", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa"), ("σδ", self._prepare_plot_series(list(trend_data.get("sigma_delta", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#6d4c41")]),
+            ("Slow-driver context", [("KW13 temp", self._prepare_plot_series(list(trend_data.get("climate_kw13_return_temp_c", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#00838f"), ("QPD00 center", self._prepare_plot_series(list(trend_data.get("qpd_l4_center_x_avg_um", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#6a1b9a"), ("Bump error", self._prepare_plot_series(list(trend_data.get("bump_orbit_error_mm", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#c2185b")]),
         ]
         for canvas, (title, payload) in zip(self.ssmb_study_canvases, plot_defs):
             canvas.delete("all")
             width = int(canvas.winfo_width() or 520)
             height = int(canvas.winfo_height() or 220)
-            self._draw_multi_series(canvas, payload, 10, 10, width - 10, height - 10, max(20, len(payload[0][1]) if payload[0][1] else 20))
-            canvas.create_text(width / 2, 12, anchor="n", text=title, fill="#37474f", font=("Helvetica", 10, "bold"))
+            actual_samples = max((len(values) for _series_label, values, _color in payload), default=0)
+            self._draw_multi_series(
+                canvas,
+                payload,
+                10,
+                24,
+                width - 10,
+                height - 10,
+                max(20, self._window_samples_for_seconds(LONG_STUDY_PLOT_WINDOW_S)),
+                actual_samples=actual_samples,
+            )
+            canvas.create_text(width / 2, 6, anchor="n", text=title, fill="#37474f", font=("Helvetica", 10, "bold"))
 
     def _open_bump_lab_window(self) -> None:
         if self.bump_lab_window is not None and self.bump_lab_window.winfo_exists():
@@ -3130,23 +3151,43 @@ class SSMBGui:
             width = int(bump_canvas.winfo_width() or 420)
             height = int(bump_canvas.winfo_height() or 210)
             payload = [
-                ("Orbit error [mm]", list(trend_data.get("bump_orbit_error_mm", [])), "#c2185b"),
-                ("BPM avg [mm]", list(trend_data.get("bump_bpm_avg_mm", [])), "#00838f"),
-                ("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa"),
+                ("Orbit error [mm]", self._prepare_plot_series(list(trend_data.get("bump_orbit_error_mm", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#c2185b"),
+                ("BPM avg [mm]", self._prepare_plot_series(list(trend_data.get("bump_bpm_avg_mm", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#00838f"),
+                ("P1 avg", self._prepare_plot_series(list(trend_data.get("p1_h1_ampl_avg", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa"),
             ]
-            self._draw_multi_series(bump_canvas, payload, 10, 10, width - 10, height - 10, max(20, len(payload[0][1]) if payload[0][1] else 20))
-            bump_canvas.create_text(width / 2, 12, anchor="n", text="Bump loop vs P1", fill="#37474f", font=("Helvetica", 10, "bold"))
+            actual_samples = max((len(values) for _series_label, values, _color in payload), default=0)
+            self._draw_multi_series(
+                bump_canvas,
+                payload,
+                10,
+                24,
+                width - 10,
+                height - 10,
+                max(20, self._window_samples_for_seconds(LONG_STUDY_PLOT_WINDOW_S)),
+                actual_samples=actual_samples,
+            )
+            bump_canvas.create_text(width / 2, 6, anchor="n", text="Bump loop vs P1", fill="#37474f", font=("Helvetica", 10, "bold"))
         if und_canvas is not None:
             width = int(und_canvas.winfo_width() or 420)
             height = int(und_canvas.winfo_height() or 210)
             payload = [
-                ("BPMZ1L2 [mm]", list(trend_data.get("bump_bpm_l2_mm", [])), "#1565c0"),
-                ("δs", list(trend_data.get("delta_s", [])), "#43a047"),
-                ("σδ", list(trend_data.get("sigma_delta", [])), "#6d4c41"),
-                ("QPD01 center [um]", list(trend_data.get("qpd_l2_center_x_avg_um", [])), "#8e24aa"),
+                ("BPMZ1L2 [mm]", self._prepare_plot_series(list(trend_data.get("bump_bpm_l2_mm", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#1565c0"),
+                ("δs", self._prepare_plot_series(list(trend_data.get("delta_s", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#43a047"),
+                ("σδ", self._prepare_plot_series(list(trend_data.get("sigma_delta", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#6d4c41"),
+                ("QPD01 center [um]", self._prepare_plot_series(list(trend_data.get("qpd_l2_center_x_avg_um", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa"),
             ]
-            self._draw_multi_series(und_canvas, payload, 10, 10, width - 10, height - 10, max(20, len(payload[0][1]) if payload[0][1] else 20))
-            und_canvas.create_text(width / 2, 12, anchor="n", text="Undulator-side anchor and spread proxies", fill="#37474f", font=("Helvetica", 10, "bold"))
+            actual_samples = max((len(values) for _series_label, values, _color in payload), default=0)
+            self._draw_multi_series(
+                und_canvas,
+                payload,
+                10,
+                24,
+                width - 10,
+                height - 10,
+                max(20, self._window_samples_for_seconds(LONG_STUDY_PLOT_WINDOW_S)),
+                actual_samples=actual_samples,
+            )
+            und_canvas.create_text(width / 2, 6, anchor="n", text="Undulator-side anchor and spread proxies", fill="#37474f", font=("Helvetica", 10, "bold"))
 
     def _start_bump_lab_observer(self) -> None:
         if self.bump_lab_stop_event is not None:

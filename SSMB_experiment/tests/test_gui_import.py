@@ -244,6 +244,39 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         self.assertEqual(app.monitor_plot_controls["machine_state"], ["beam_current", "rf_offset_hz"])
         app._update_monitor_dashboard.assert_not_called()
 
+    def test_monitor_plot_click_on_use_column_toggles_overlay(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        class FakeTree:
+            def identify(self, kind, _x, _y):
+                if kind == "region":
+                    return "cell"
+                return ""
+
+            def identify_column(self, _x):
+                return "#1"
+
+            def identify_row(self, _y):
+                return "rf_offset_hz"
+
+        class Event:
+            x = 2
+            y = 6
+
+        app = object.__new__(gui.SSMBGui)
+        app._on_monitor_plot_toggle = mock.Mock(return_value="break")
+
+        result = gui.SSMBGui._on_monitor_plot_click(
+            app,
+            "machine_state",
+            ["beam_current", "rf_offset_hz"],
+            FakeTree(),
+            Event(),
+        )
+
+        self.assertEqual(result, "break")
+        app._on_monitor_plot_toggle.assert_called_once()
+
     def test_monitor_window_render_smoke(self):
         import SSMB_experiment.ssmb_tool.gui as gui
         from SSMB_experiment.ssmb_tool.live_monitor import format_channel_snapshot, format_monitor_summary, summarize_live_monitor
