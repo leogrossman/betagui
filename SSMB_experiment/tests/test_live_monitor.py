@@ -205,9 +205,9 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         period_s = 40.0
         for index in range(160):
             phase = 2.0 * math.pi * index * dt_s / period_s
-            p1 = 0.05 + 0.01 * math.sin(phase)
-            climate_temp = 29.5 - 0.4 * math.sin(phase + 0.1)
-            qpd_center = 450.0 + 20.0 * math.sin(phase * 2.0)
+            p1 = 0.05 + 0.008 * math.sin(phase) + 0.003 * math.sin(2.0 * phase + 0.35) + 0.0012 * math.sin(3.0 * phase - 0.2)
+            climate_temp = 29.5 - 0.35 * math.sin(phase + 0.1) - 0.08 * math.sin(2.0 * phase + 0.45)
+            qpd_center = 450.0 + 20.0 * math.sin(2.0 * phase) + 6.0 * math.sin(phase + 1.0)
             samples.append(
                 {
                     "timestamp_epoch_s": 1_000_000.0 + index * dt_s,
@@ -223,6 +223,7 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         analysis = analyze_p1_oscillation(samples)
         self.assertTrue(analysis["available"])
         self.assertAlmostEqual(analysis["dominant_period_s"], period_s, delta=5.0)
+        self.assertAlmostEqual(analysis["autocorr_period_s"], period_s, delta=6.0)
         self.assertEqual((analysis["top_candidate"] or {}).get("key"), "climate_kw13_return_temp_c")
         lines = format_oscillation_study({"oscillation_study": analysis})
         self.assertTrue(any("Dominant P1 period" in line for line in lines))

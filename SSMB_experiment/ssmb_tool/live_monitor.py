@@ -50,6 +50,12 @@ OSCILLATION_CANDIDATE_KEYS = (
     "bump_strength_a",
     "rf_offset_hz",
     "delta_s",
+    "beam_energy_mev",
+    "sigma_delta",
+    "legacy_alpha0",
+    "bpm_alpha0",
+    "alpha_difference",
+    "beam_current",
     "qpd_l4_center_x_avg_um",
     "qpd_l2_center_x_avg_um",
     "climate_kw13_return_temp_c",
@@ -57,6 +63,7 @@ OSCILLATION_CANDIDATE_KEYS = (
     "climate_sr_temp1_c",
     "tune_y",
     "tune_s",
+    "p1_h1_ampl_dev",
     "p3_h1_ampl_avg",
 )
 
@@ -202,10 +209,54 @@ def _harmonic_similarity(period_a_s: Optional[float], period_b_s: Optional[float
     return max(0.0, 1.0 - best / math.log(2.0))
 
 
+def _autocorr_period(values: Sequence[Optional[float]], dt_s: Optional[float]) -> Dict[str, object]:
+    dt = _valid_float(dt_s)
+    if dt is None or dt <= 0.0:
+        return {"available": False, "reason": "missing_dt"}
+    valid = np.asarray([float(value) for value in values if isinstance(value, (int, float))], dtype=float)
+    if valid.size < OSCILLATION_MIN_POINTS:
+        return {"available": False, "reason": "not_enough_points", "sample_count": int(valid.size)}
+    if np.std(valid) <= 0.0:
+        return {"available": False, "reason": "flat_signal", "sample_count": int(valid.size)}
+    if valid.size >= 3:
+        x = np.arange(valid.size, dtype=float)
+        coeffs = np.polyfit(x, valid, 1)
+        valid = valid - np.polyval(coeffs, x)
+    else:
+        valid = valid - np.mean(valid)
+    ac = np.correlate(valid, valid, mode="full")[valid.size - 1 :]
+    if ac.size < 3 or ac[0] <= 0.0:
+        return {"available": False, "reason": "bad_autocorr", "sample_count": int(valid.size)}
+    ac = ac / ac[0]
+    min_lag = max(1, int(round(4.0 / dt)))
+    max_lag = max(min_lag + 1, int(valid.size * 0.75))
+    search = ac[min_lag:max_lag]
+    if search.size < 3:
+        return {"available": False, "reason": "search_window_small", "sample_count": int(valid.size)}
+    peak_rel = None
+    peak_val = None
+    for idx in range(1, search.size - 1):
+        if search[idx] > search[idx - 1] and search[idx] >= search[idx + 1]:
+            if peak_val is None or search[idx] > peak_val:
+                peak_val = float(search[idx])
+                peak_rel = idx
+    if peak_rel is None:
+        peak_rel = int(np.argmax(search))
+        peak_val = float(search[peak_rel])
+    lag = min_lag + peak_rel
+    return {
+        "available": True,
+        "period_s": lag * dt,
+        "peak_autocorr": peak_val,
+        "sample_count": int(valid.size),
+    }
+
+
 def analyze_p1_oscillation(samples: Sequence[Dict[str, object]]) -> Dict[str, object]:
     dt_s = _estimate_sample_dt_seconds(samples)
     p1_values = _extract_series(samples, "p1_h1_ampl_avg")
     p1_period = _dominant_period(p1_values, dt_s)
+    p1_autocorr = _autocorr_period(p1_values, dt_s)
     if not p1_period.get("available"):
         return {
             "available": False,
@@ -241,8 +292,11 @@ def analyze_p1_oscillation(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
         best_corr = float(local[best_local_idx])
         best_lag_samples = (start + best_local_idx) - center
         candidate_period = _dominant_period(values, dt_s)
-        period_similarity = _harmonic_similarity(candidate_period.get("period_s"), p1_period.get("period_s"))
-        score = 0.45 * abs(corr) + 0.35 * abs(best_corr) + 0.20 * period_similarity
+        candidate_autocorr = _autocorr_period(values, dt_s)
+        fft_similarity = _harmonic_similarity(candidate_period.get("period_s"), p1_period.get("period_s"))
+        ac_similarity = _harmonic_similarity(candidate_autocorr.get("period_s"), p1_autocorr.get("period_s"))
+        period_similarity = max(fft_similarity, ac_similarity)
+        score = 0.35 * abs(corr) + 0.25 * abs(best_corr) + 0.25 * period_similarity + 0.15 * abs(_valid_float(candidate_autocorr.get("peak_autocorr")) or 0.0)
         candidates.append(
             {
                 "key": key,
@@ -252,6 +306,7 @@ def analyze_p1_oscillation(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
                 "lag_samples": best_lag_samples,
                 "lag_s": None if dt_s is None else best_lag_samples * dt_s,
                 "candidate_period_s": candidate_period.get("period_s") if candidate_period.get("available") else None,
+                "candidate_autocorr_period_s": candidate_autocorr.get("period_s") if candidate_autocorr.get("available") else None,
                 "harmonic_similarity": period_similarity,
                 "score": score,
             }
@@ -269,9 +324,11 @@ def analyze_p1_oscillation(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
         "dt_s": dt_s,
         "sample_count": p1_period.get("sample_count"),
         "dominant_period_s": p1_period.get("period_s"),
+        "autocorr_period_s": p1_autocorr.get("period_s") if p1_autocorr.get("available") else None,
         "dominant_frequency_hz": p1_period.get("frequency_hz"),
         "dominant_frequency_mhz": p1_period.get("frequency_mhz"),
         "peak_power_fraction": p1_period.get("peak_power_fraction"),
+        "autocorr_peak": p1_autocorr.get("peak_autocorr") if p1_autocorr.get("available") else None,
         "cycles_seen": cycles_seen,
         "span_s": p1_period.get("span_s"),
         "certainty": certainty,
@@ -642,20 +699,22 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
             "color": {"high": "green", "medium": "yellow"}.get(oscillation.get("certainty"), "red" if oscillation.get("available") else "yellow"),
             "rows": [
                 ("Dominant period", _fmt_duration(oscillation.get("dominant_period_s"))),
+                ("Autocorr period", _fmt_duration(oscillation.get("autocorr_period_s"))),
                 ("Frequency", "%s Hz" % _fmt(oscillation.get("dominant_frequency_hz"))),
                 ("Samples / span", "%s / %s" % (_fmt(oscillation.get("sample_count")), _fmt_duration(oscillation.get("span_s")))),
                 ("Cycles seen", _fmt(oscillation.get("cycles_seen"))),
                 ("Spectral confidence", _fmt(oscillation.get("peak_power_fraction"))),
+                ("Autocorr confidence", _fmt(oscillation.get("autocorr_peak"))),
                 ("Certainty", oscillation.get("certainty", "waiting")),
                 ("Top candidate", ((oscillation.get("top_candidate") or {}).get("label")) or "n/a"),
                 ("Top candidate lag", _fmt_duration((oscillation.get("top_candidate") or {}).get("lag_s"))),
                 ("Top candidate r", _fmt((oscillation.get("top_candidate") or {}).get("pearson_r"))),
             ],
             "equations": [
-                "Use rolling FFT/autocorrelation on P1avg to estimate dominant period",
+                "Use rolling FFT and autocorrelation on P1avg to estimate dominant period without assuming a pure sine wave",
                 "Rank candidate channels by Pearson correlation, lagged cross-correlation, and harmonic-period match",
             ],
-            "note": "Good for the slow ~5 minute effect. Confidence rises once the monitor history spans at least ~2 cycles; before that, treat candidate rankings as provisional.",
+            "note": "Designed for quasi-periodic, non-sinusoidal P1 motion. Confidence rises once the monitor history spans at least ~2 cycles; before that, treat rankings as provisional.",
             "default_trend": "p1_h1_ampl_avg",
             "trend_options": ["p1_h1_ampl_avg", "bump_orbit_error_mm", "bump_strength_a", "qpd_l4_center_x_avg_um", "climate_kw13_return_temp_c", "climate_sr_temp_c", "rf_offset_hz", "delta_s", "p3_h1_ampl_avg"],
         },
@@ -833,7 +892,11 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             ],
             "lines": [
                 "This is designed for the slow ~5 minute problem without requiring a separate heavyweight offline run.",
-                "Current dominant P1 period: %s with certainty %s" % (_fmt_duration(oscillation.get("dominant_period_s")), oscillation.get("certainty", "waiting")),
+                "Current dominant P1 period: %s, autocorr period: %s, certainty %s" % (
+                    _fmt_duration(oscillation.get("dominant_period_s")),
+                    _fmt_duration(oscillation.get("autocorr_period_s")),
+                    oscillation.get("certainty", "waiting"),
+                ),
                 "Current top candidate: %s, lag = %s, r = %s" % (
                     ((oscillation.get("top_candidate") or {}).get("label")) or "n/a",
                     _fmt_duration((oscillation.get("top_candidate") or {}).get("lag_s")),
@@ -890,6 +953,7 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
                 _fmt(current.get("climate_sr_temp1_c")),
             ),
             "P1 oscillation period / certainty: %s / %s" % (_fmt_duration(oscillation.get("dominant_period_s")), oscillation.get("certainty", "waiting")),
+            "P1 autocorr period: %s" % _fmt_duration(oscillation.get("autocorr_period_s")),
             "P1 top candidate: %s" % ((((oscillation.get("top_candidate") or {}).get("label")) or "n/a")),
             "Tunes (x, y, s): %s, %s, %s" % (
                 _fmt(current.get("tune_x_unitless")),
@@ -942,6 +1006,7 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
                 "P1avg vs KW13 temp slope: %s" % _fmt((summary.get("environment_monitor", {}).get("p1_avg_vs_kw13_temp") or {}).get("slope")),
                 "P1avg vs QPD00 center slope: %s" % _fmt((summary.get("environment_monitor", {}).get("p1_avg_vs_qpd00_center") or {}).get("slope")),
                 "P1 dominant period: %s" % _fmt_duration(oscillation.get("dominant_period_s")),
+                "P1 autocorr period: %s" % _fmt_duration(oscillation.get("autocorr_period_s")),
                 "P1 top candidate lag: %s" % _fmt_duration((oscillation.get("top_candidate") or {}).get("lag_s")),
                 "Qx vs delta slope: %s" % _fmt((sweep_metrics.get("qx_vs_delta") or {}).get("slope")),
                 "Qy vs delta slope: %s" % _fmt((sweep_metrics.get("qy_vs_delta") or {}).get("slope")),

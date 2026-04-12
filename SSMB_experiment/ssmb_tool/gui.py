@@ -1116,12 +1116,54 @@ class SSMBGui:
                     fill=label_fill,
                 )
         extras = [
-            ("QPD00ZL4RP", "qpd_l4_sigma_x", "QPD00 SR camera/profile monitor in L4", 36.0, "#d81b60", row_positions["qpd"]),
-            ("QPD01ZL2RP", "qpd_l2_sigma_x", "QPD01 SR camera/profile monitor in L2", 12.0, "#8e24aa", row_positions["qpd"]),
-            ("HS1P2K3RP:setCur", "l4_bump_hcorr_k3_upstream", "Recovered bump corrector", 24.0, "#ef6c00", row_positions["bump"]),
-            ("HS3P1L4RP:setCur", "l4_bump_hcorr_l4_upstream", "Recovered bump corrector", 31.5, "#ef6c00", row_positions["bump"]),
-            ("HS3P2L4RP:setCur", "l4_bump_hcorr_l4_downstream", "Recovered bump corrector", 40.0, "#ef6c00", row_positions["bump"]),
-            ("HS1P1K1RP:setCur", "l4_bump_hcorr_k1_downstream", "Recovered bump corrector", 47.0, "#ef6c00", row_positions["bump"]),
+            (
+                "QPD00ZL4RP",
+                "qpd_l4_sigma_x",
+                "QPD00 SR camera/profile monitor in L4. Marker is placed at the inferred source dipole BM1L4RP, not the camera head itself.",
+                self._element_s_position(lattice, "BM1L4RP", fallback=31.175),
+                "#d81b60",
+                row_positions["qpd"],
+            ),
+            (
+                "QPD01ZL2RP",
+                "qpd_l2_sigma_x",
+                "QPD01 SR camera/profile monitor in L2. Marker is placed at the inferred source dipole BM1L2RP, near the U125-side source point.",
+                self._element_s_position(lattice, "BM1L2RP", fallback=7.175),
+                "#8e24aa",
+                row_positions["qpd"],
+            ),
+            (
+                "HS1P2K3RP:setCur",
+                "l4_bump_hcorr_k3_upstream",
+                "Recovered bump corrector, mapped to the associated S1 sextupole package in K3 (inferred position).",
+                self._element_s_position(lattice, "S1M1K3RP", fallback=19.45),
+                "#ef6c00",
+                row_positions["bump"],
+            ),
+            (
+                "HS3P1L4RP:setCur",
+                "l4_bump_hcorr_l4_upstream",
+                "Recovered bump corrector, mapped to the associated S3 sextupole package in L4 (P1 family, inferred position).",
+                self._element_s_position(lattice, "S3M2L4RP", fallback=39.05),
+                "#ef6c00",
+                row_positions["bump"],
+            ),
+            (
+                "HS3P2L4RP:setCur",
+                "l4_bump_hcorr_l4_downstream",
+                "Recovered bump corrector, mapped to the associated S3 sextupole package in L4 (P2 family, inferred position).",
+                self._element_s_position(lattice, "S3M1L4RP", fallback=32.95),
+                "#ef6c00",
+                row_positions["bump"],
+            ),
+            (
+                "HS1P1K1RP:setCur",
+                "l4_bump_hcorr_k1_downstream",
+                "Recovered bump corrector, mapped to the associated S1 sextupole package in K1 (P1 family, inferred position).",
+                self._element_s_position(lattice, "S1M2K1RP", fallback=4.55),
+                "#ef6c00",
+                row_positions["bump"],
+            ),
         ]
         for name, label, notes, s_pos, color, row_y in extras:
             x = self._s_to_x(s_pos, lattice, left, right)
@@ -1143,7 +1185,8 @@ class SSMBGui:
                     fill = "#ffcc80"
                     outline = "#ef6c00"
             item_id = canvas.create_oval(x - 7, row_y - 7, x + 7, row_y + 7, fill=fill, outline=outline, width=width_px)
-            canvas.create_text(x, row_y - 14, text=name.split(":")[0], anchor="s", font=("Helvetica", 8))
+            short_label = "QPD00@BM1L4" if name == "QPD00ZL4RP" else "QPD01@BM1L2" if name == "QPD01ZL2RP" else name.split(":")[0]
+            canvas.create_text(x, row_y - 14, text=short_label, anchor="s", font=("Helvetica", 8))
             if isinstance(live_value, (int, float)):
                 canvas.create_text(x, row_y + 12, text="%.3f" % float(live_value), anchor="n", font=("Helvetica", 7), fill="#5d4037")
             self.lattice_device_items.append(
@@ -1310,6 +1353,12 @@ class SSMBGui:
         if element.element_type == "RFCavity":
             return 8
         return 6
+
+    def _element_s_position(self, lattice, family_name: str, fallback: float) -> float:
+        for element in lattice.elements:
+            if element.family_name == family_name:
+                return float(element.s_center_m)
+        return float(fallback)
 
     def _live_marker_style(self, element: LatticeElement, live_value, default_color: str):
         if element.element_type != "Monitor":
