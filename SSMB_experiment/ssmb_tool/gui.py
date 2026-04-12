@@ -945,6 +945,8 @@ class SSMBGui:
         preset_row.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(0, 8))
         ttk.Button(preset_row, text="Preset: sweep bump OFF", command=lambda: self._preset_sweep("rf_sweep_bump_off")).pack(side="left")
         ttk.Button(preset_row, text="Preset: sweep bump ON", command=lambda: self._preset_sweep("rf_sweep_bump_on")).pack(side="left", padx=4)
+        ttk.Button(preset_row, text="Preset: quick phase test ON", command=lambda: self._preset_quick_phase_sweep("quick_phase_bump_on")).pack(side="left", padx=4)
+        ttk.Button(preset_row, text="Preset: quick phase test OFF", command=lambda: self._preset_quick_phase_sweep("quick_phase_bump_off")).pack(side="left", padx=4)
         row += 1
         for label, var in (
             ("Center RF PV value", self.center_rf_var),
@@ -1131,6 +1133,27 @@ class SSMBGui:
         self.settle_var.set("1.2")
         self.samples_per_point_var.set("5")
         self.sample_spacing_var.set("0.25")
+        self._toggle_heavy_mode()
+        self.include_bpm_buffer_var.set(False)
+        self._refresh_inventory()
+
+    def _preset_quick_phase_sweep(self, label: str) -> None:
+        bump_note = "ON" if "on" in label.lower() else "OFF"
+        self.label_var.set(label)
+        self.heavy_mode_var.set(True)
+        self.log_profile_var.set("heavy")
+        self.sample_hz_var.set("1")
+        self.laser_shots_var.set("10")
+        self.note_var.set(
+            "Quick SSMB phase scan with laser ON and external bump %s. Compare RF -> delta_s/eta/alpha0/P1/P3 while checking source-region BPM x/y stability and QPD center drift."
+            % bump_note
+        )
+        self.delta_min_hz_var.set("-20")
+        self.delta_max_hz_var.set("20")
+        self.points_var.set("21")
+        self.settle_var.set("1.0")
+        self.samples_per_point_var.set("10")
+        self.sample_spacing_var.set("1.0")
         self._toggle_heavy_mode()
         self.include_bpm_buffer_var.set(False)
         self._refresh_inventory()

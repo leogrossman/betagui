@@ -118,6 +118,45 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         self.assertFalse(app.include_octupole_var.get())
         self.assertIn("15 minutes", app.note_var.get())
 
+    def test_quick_phase_sweep_preset_sets_rf_scan_defaults(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        app = object.__new__(gui.SSMBGui)
+        app.label_var = _FakeVar("")
+        app.log_profile_var = _FakeVar("ssmb_standard")
+        app.sample_hz_var = _FakeVar("1")
+        app.laser_shots_var = _FakeVar("0")
+        app.note_var = _FakeVar("")
+        app.heavy_mode_var = _FakeVar(False)
+        app.include_bpm_buffer_var = _FakeVar(True)
+        app.include_candidate_bpm_var = _FakeVar(False)
+        app.include_ring_bpm_var = _FakeVar(False)
+        app.include_quadrupole_var = _FakeVar(False)
+        app.include_sextupole_var = _FakeVar(False)
+        app.include_octupole_var = _FakeVar(False)
+        app.delta_min_hz_var = _FakeVar("0")
+        app.delta_max_hz_var = _FakeVar("0")
+        app.points_var = _FakeVar("0")
+        app.settle_var = _FakeVar("0")
+        app.samples_per_point_var = _FakeVar("0")
+        app.sample_spacing_var = _FakeVar("0")
+        app._refresh_inventory = mock.Mock()
+
+        gui.SSMBGui._preset_quick_phase_sweep(app, "quick_phase_bump_on")
+
+        self.assertEqual(app.label_var.get(), "quick_phase_bump_on")
+        self.assertEqual(app.log_profile_var.get(), "heavy")
+        self.assertEqual(app.laser_shots_var.get(), "10")
+        self.assertEqual(app.delta_min_hz_var.get(), "-20")
+        self.assertEqual(app.delta_max_hz_var.get(), "20")
+        self.assertEqual(app.points_var.get(), "21")
+        self.assertEqual(app.settle_var.get(), "1.0")
+        self.assertEqual(app.samples_per_point_var.get(), "10")
+        self.assertEqual(app.sample_spacing_var.get(), "1.0")
+        self.assertFalse(app.include_bpm_buffer_var.get())
+        self.assertTrue(app.heavy_mode_var.get())
+        self.assertIn("laser ON", app.note_var.get())
+
     def test_lattice_inspection_config_uses_replace_for_frozen_logger_config(self):
         import SSMB_experiment.ssmb_tool.gui as gui
         from SSMB_experiment.ssmb_tool.config import LoggerConfig
