@@ -89,26 +89,40 @@ class SSMBGui:
         self._refresh_inventory()
         self.root.after(50, self._finish_startup)
         self.root.after(100, self._drain_queue)
+        self.root.after(250, self._signal_heartbeat)
 
     def _finish_startup(self) -> None:
         self._debug("startup: loading cached monitor history")
         self._load_monitor_history_cache()
-        self._debug("startup: opening live monitor window")
-        self._open_monitor_window()
         try:
             self.root.deiconify()
+            self.root.update_idletasks()
             self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.after(600, lambda: self._clear_topmost(self.root))
             self.root.focus_force()
         except Exception as exc:
             self._debug("root focus/lift failed: %s" % exc)
         try:
-            if self.monitor_window is not None and self.monitor_window.winfo_exists():
-                self.monitor_window.deiconify()
-                self.monitor_window.lift()
-                self.monitor_window.focus_force()
-        except Exception as exc:
-            self._debug("monitor window focus/lift failed: %s" % exc)
-        self._debug("startup: gui ready")
+            self._debug("startup: root geometry=%s state=%s mapped=%s" % (self.root.winfo_geometry(), self.root.state(), self.root.winfo_ismapped()))
+        except Exception:
+            pass
+        self._debug("startup: gui ready (open popups from main window as needed)")
+
+    def _clear_topmost(self, window) -> None:
+        try:
+            if window is not None and window.winfo_exists():
+                window.attributes("-topmost", False)
+        except Exception:
+            pass
+
+    def _signal_heartbeat(self) -> None:
+        try:
+            if self.root is None or not self.root.winfo_exists():
+                return
+            self.root.after(250, self._signal_heartbeat)
+        except Exception:
+            return
 
     def _build_vars(self) -> None:
         self.duration_var = tk.StringVar(value="60")
@@ -1120,8 +1134,11 @@ class SSMBGui:
         self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
         self._update_monitor_dashboard(self.latest_monitor_summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates()))
         try:
+            window.update_idletasks()
             window.deiconify()
             window.lift()
+            window.attributes("-topmost", True)
+            window.after(600, lambda: self._clear_topmost(window))
             window.focus_force()
         except Exception as exc:
             self._debug("open monitor window focus/lift failed: %s" % exc)
