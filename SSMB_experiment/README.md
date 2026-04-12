@@ -12,6 +12,30 @@ Use it when you want:
 
 The fallback remains the original `SSMB/` folder.
 
+Recovered from the bump-correction notebook, the present L4 bump uses four
+horizontal corrector dipoles rather than the main ring dipoles:
+
+- `HS1P2K3RP:setCur`
+- `HS3P1L4RP:setCur`
+- `HS3P2L4RP:setCur`
+- `HS1P1K1RP:setCur`
+
+Those correctors appear to be integrated as local corrector windings inside
+sextupole packages. The same notebook also uses these controller PVs:
+
+- `AKC10VP`
+- `AKC11VP`
+- `AKC12VP`
+- `AKC13VP`
+- `MCLKHGP:ctrl:enable`
+
+and averages these BPMs for bump feedback:
+
+- `BPMZ1K1RP:rdX`
+- `BPMZ1L2RP:rdX`
+- `BPMZ1K3RP:rdX`
+- `BPMZ1L4RP:rdX`
+
 ## What This Adds
 
 Compared with the baseline `SSMB/` tool, this experiment copy adds:
