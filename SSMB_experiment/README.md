@@ -45,6 +45,8 @@ Compared with the baseline `SSMB/` tool, this experiment copy adds:
 - live first-order `δ_s` reconstruction from the L4 BPM set
 - live slip-factor and BPM-based `α₀` estimates during RF sweeps
 - first-order spread proxies from `QPD00ZL4RP`
+- per-panel rolling trend plots with selectable signals and visible scales
+- an experimental bump-lab window for investigating the external L4 bump loop
 - SSMB-oriented RF sweep presets tuned for low-risk control-room use
 - local bundled lattice images and exports for quick reference
 
@@ -173,6 +175,16 @@ It gives you:
 
 The pop-out monitor window is useful if you want the live readout on a second
 screen while using the logger or sweep tabs.
+
+`Open Experimental Bump Lab` opens a more advanced window for investigating the
+external bump loop. It includes:
+
+- the copied notebook-export source at
+  `references/OrbitControlL4Bump_test_20250307.py`
+- editable BPM/corrector selection
+- live bump-loop summary and `P1` / bump correlations
+- an explicitly experimental controller mode that is gated behind the normal
+  GUI safety checks and should be used cautiously, if at all
 
 What you can estimate without RF sweep:
 

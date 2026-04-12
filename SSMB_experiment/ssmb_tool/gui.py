@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from .config import LoggerConfig, SSMB_ROOT, parse_labeled_pvs
-from .epics_io import EpicsUnavailableError, ReadOnlyEpicsAdapter
+from .epics_io import EpicsAdapter, EpicsUnavailableError, ReadOnlyEpicsAdapter
 from .lattice import LatticeElement
 from .live_monitor import (
     build_monitor_sections,
@@ -56,6 +56,9 @@ class SSMBGui:
         self.monitor_window: Optional["tk.Toplevel"] = None
         self.theory_window: Optional["tk.Toplevel"] = None
         self.lattice_window: Optional["tk.Toplevel"] = None
+        self.bump_lab_window: Optional["tk.Toplevel"] = None
+        self.bump_lab_thread: Optional[threading.Thread] = None
+        self.bump_lab_stop_event: Optional[threading.Event] = None
         self.lattice_context = None
         self.lattice_specs = None
         self.latest_monitor_sample = None
@@ -94,6 +97,20 @@ class SSMBGui:
         self.samples_per_point_var = tk.StringVar(value="1")
         self.sample_spacing_var = tk.StringVar(value="0.0")
         self.monitor_interval_var = tk.StringVar(value="0.5")
+        self.rolling_window_var = tk.StringVar(value="120")
+        self.bump_lab_poll_var = tk.StringVar(value="0.5")
+        self.bump_lab_bpm_vars = {
+            "BPMZ1K1RP:rdX": tk.BooleanVar(value=True),
+            "BPMZ1L2RP:rdX": tk.BooleanVar(value=True),
+            "BPMZ1K3RP:rdX": tk.BooleanVar(value=True),
+            "BPMZ1L4RP:rdX": tk.BooleanVar(value=True),
+        }
+        self.bump_lab_steerer_vars = {
+            "HS1P2K3RP:setCur": tk.StringVar(value="0.03226"),
+            "HS3P1L4RP:setCur": tk.StringVar(value="0.014116"),
+            "HS3P2L4RP:setCur": tk.StringVar(value="0.014123"),
+            "HS1P1K1RP:setCur": tk.StringVar(value="0.031103"),
+        }
 
     def _build_ui(self) -> None:
         self.root.title("SSMB Experiment Stage 0 / RF Sweep")
@@ -221,9 +238,11 @@ class SSMBGui:
         row += 1
         ttk.Label(frame, text="Monitor interval [s]").grid(row=row, column=0, sticky="w")
         ttk.Entry(frame, textvariable=self.monitor_interval_var, width=12).grid(row=row, column=1, sticky="w", pady=2)
+        ttk.Label(frame, text="Rolling window [samples]").grid(row=row, column=2, sticky="w")
+        ttk.Entry(frame, textvariable=self.rolling_window_var, width=12).grid(row=row, column=3, sticky="w", pady=2)
         row += 1
         button_row = ttk.Frame(frame)
-        button_row.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 8))
+        button_row.grid(row=row, column=0, columnspan=4, sticky="ew", pady=(8, 8))
         self.start_monitor_button = ttk.Button(button_row, text="Start Live Monitor", command=self._start_monitor)
         self.start_monitor_button.pack(side="left")
         self.stop_monitor_button = ttk.Button(button_row, text="Stop Live Monitor", command=self._stop_monitor)
@@ -233,20 +252,21 @@ class SSMBGui:
         ttk.Button(button_row, text="Open Monitor Window", command=self._open_monitor_window).pack(side="left", padx=6)
         ttk.Button(button_row, text="Open Theory Window", command=self._open_theory_window).pack(side="left", padx=6)
         ttk.Button(button_row, text="Open Lattice View", command=self._open_lattice_window).pack(side="left")
+        ttk.Button(button_row, text="Open Experimental Bump Lab", command=self._open_bump_lab_window).pack(side="left", padx=6)
         row += 1
         ttk.Label(frame, text="Live SSMB summary").grid(row=row, column=0, columnspan=3, sticky="w")
         row += 1
         self.monitor_summary_text = tk.Text(frame, wrap="word", height=18)
-        self.monitor_summary_text.grid(row=row, column=0, columnspan=3, sticky="nsew")
+        self.monitor_summary_text.grid(row=row, column=0, columnspan=4, sticky="nsew")
         self.monitor_summary_text.configure(state="disabled")
         row += 1
-        ttk.Label(frame, text="Current channel snapshot").grid(row=row, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Label(frame, text="Current channel snapshot").grid(row=row, column=0, columnspan=4, sticky="w", pady=(8, 0))
         row += 1
         self.monitor_channels_text = tk.Text(frame, wrap="none", height=16)
-        self.monitor_channels_text.grid(row=row, column=0, columnspan=3, sticky="nsew")
+        self.monitor_channels_text.grid(row=row, column=0, columnspan=4, sticky="nsew")
         self.monitor_channels_text.configure(state="disabled")
         frame.rowconfigure(row - 1, weight=1)
-        frame.columnconfigure(2, weight=1)
+        frame.columnconfigure(3, weight=1)
 
     def _build_sweep_tab(self, frame: "ttk.Frame") -> None:
         row = 0
@@ -432,6 +452,11 @@ class SSMBGui:
                         self.start_monitor_button.state(["!disabled"])
                         self.stop_monitor_button.state(["disabled"])
                         self._append_log("Live monitor stopped.")
+                    elif message.get("kind") == "bump_lab_update":
+                        self._update_bump_lab(payload=message)
+                    elif message.get("kind") == "bump_lab_done":
+                        self.bump_lab_stop_event = None
+                        self._append_log("Experimental bump-lab loop stopped.")
                 else:
                     self._append_log(str(message))
             except Exception as exc:
@@ -694,9 +719,8 @@ class SSMBGui:
             text.grid(row=0, column=0, columnspan=2, sticky="nsew")
             text.configure(state="disabled")
             card.rowconfigure(0, weight=1)
-            combo_var = tk.StringVar(value="")
-            combo = ttk.Combobox(card, textvariable=combo_var, state="readonly", width=22)
-            combo.grid(row=1, column=0, sticky="w", pady=(6, 4))
+            selector = tk.Listbox(card, selectmode="multiple", exportselection=False, height=4)
+            selector.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 4))
             canvas = tk.Canvas(card, bg="white", width=280, height=120, highlightthickness=1, highlightbackground="#cfd8dc")
             canvas.grid(row=2, column=0, columnspan=2, sticky="nsew")
             card.rowconfigure(2, weight=1)
@@ -706,8 +730,7 @@ class SSMBGui:
                     {
                         "card": card,
                         "text": text,
-                        "combo": combo,
-                        "combo_var": combo_var,
+                        "selector": selector,
                         "canvas": canvas,
                     },
                 )
@@ -715,25 +738,32 @@ class SSMBGui:
         updated = []
         for idx, section in enumerate(sections):
             widgets = self.monitor_section_widgets[idx][1]
-            combo = widgets["combo"]
-            combo_var = widgets["combo_var"]
+            selector = widgets["selector"]
             options = section.get("trend_options", [])
-            combo["values"] = [trend_definitions()[name]["label"] for name in options]
-            current_key = self.monitor_plot_controls.get(section["key"])
-            if current_key not in options:
-                current_key = section.get("default_trend")
-                self.monitor_plot_controls[section["key"]] = current_key
-            combo_var.set(trend_definitions()[current_key]["label"])
-            combo.bind("<<ComboboxSelected>>", lambda _event, key=section["key"], opts=options, var=combo_var: self._on_monitor_plot_selected(key, opts, var))
+            selector.delete(0, "end")
+            for name in options:
+                selector.insert("end", trend_definitions()[name]["label"])
+            current_keys = self.monitor_plot_controls.get(section["key"])
+            if not current_keys:
+                current_keys = [section.get("default_trend")] if section.get("default_trend") else []
+            current_keys = [key for key in current_keys if key in options]
+            if not current_keys and options:
+                current_keys = [options[0]]
+            self.monitor_plot_controls[section["key"]] = current_keys
+            for i, key in enumerate(options):
+                if key in current_keys:
+                    selector.selection_set(i)
+            selector.bind("<<ListboxSelect>>", lambda _event, key=section["key"], opts=options, listbox=selector: self._on_monitor_plot_selected(key, opts, listbox))
             updated.append((section, widgets))
         self.monitor_section_widgets = updated
 
-    def _on_monitor_plot_selected(self, section_key: str, options: Sequence[str], var) -> None:
-        label = var.get()
-        for key in options:
-            if trend_definitions()[key]["label"] == label:
-                self.monitor_plot_controls[section_key] = key
-                break
+    def _on_monitor_plot_selected(self, section_key: str, options: Sequence[str], listbox) -> None:
+        indices = listbox.curselection()
+        selected = [options[index] for index in indices if 0 <= index < len(options)]
+        if not selected and options:
+            selected = [options[0]]
+            listbox.selection_set(0)
+        self.monitor_plot_controls[section_key] = selected
         self._update_monitor_dashboard(self.latest_monitor_summary)
 
     def _draw_section_plot(self, section: dict) -> None:
@@ -745,14 +775,25 @@ class SSMBGui:
         if widgets is None:
             return
         canvas = widgets["canvas"]
-        metric = self.monitor_plot_controls.get(section["key"], section.get("default_trend"))
+        selected_metrics = self.monitor_plot_controls.get(section["key"])
+        if not selected_metrics:
+            default_metric = section.get("default_trend")
+            selected_metrics = [default_metric] if default_metric else []
+            self.monitor_plot_controls[section["key"]] = selected_metrics
         trend_data = (self.latest_monitor_summary or {}).get("trend_data", {})
-        values = trend_data.get(metric, [])
-        meta = trend_definitions().get(metric, {"label": metric, "color": "#455a64"})
         canvas.delete("all")
         width = int(canvas.winfo_width() or 280)
         height = int(canvas.winfo_height() or 120)
-        self._draw_series(canvas, values, 10, 10, width - 10, height - 10, meta["color"], meta["label"])
+        try:
+            window_samples = max(10, int(float(self.rolling_window_var.get())))
+        except Exception:
+            window_samples = 120
+        series_payload = []
+        for metric in selected_metrics:
+            values = list(trend_data.get(metric, []))[-window_samples:]
+            meta = trend_definitions().get(metric, {"label": metric, "color": "#455a64"})
+            series_payload.append((meta["label"], values, meta["color"]))
+        self._draw_multi_series(canvas, series_payload, 10, 10, width - 10, height - 10, window_samples)
 
     def _draw_series(self, canvas, values, x0, y0, x1, y1, color, label):
         canvas.create_rectangle(x0, y0, x1, y1, outline="#cfd8dc")
@@ -764,6 +805,29 @@ class SSMBGui:
         pts = self._series_to_points(values, x0 + 8, y0 + 20, x1 - 8, y1 - 8)
         if len(pts) >= 4:
             canvas.create_line(*pts, fill=color, width=2, smooth=True)
+
+    def _draw_multi_series(self, canvas, series_payload, x0, y0, x1, y1, window_samples: int):
+        canvas.create_rectangle(x0, y0, x1, y1, outline="#cfd8dc")
+        clean_all = []
+        for _label, values, _color in series_payload:
+            clean_all.extend(float(v) for v in values if isinstance(v, (int, float)))
+        if not clean_all:
+            canvas.create_text((x0 + x1) / 2, (y0 + y1) / 2, text="waiting for data", fill="#90a4ae")
+            return
+        vmin = min(clean_all)
+        vmax = max(clean_all)
+        if vmax == vmin:
+            vmax = vmin + 1.0
+        canvas.create_text(x0 + 4, y0 + 4, anchor="nw", text="last %d samples" % window_samples, fill="#607d8b", font=("Helvetica", 8))
+        canvas.create_text(x1 - 4, y0 + 4, anchor="ne", text="max %.3g" % vmax, fill="#607d8b", font=("Helvetica", 8))
+        canvas.create_text(x1 - 4, y1 - 4, anchor="se", text="min %.3g" % vmin, fill="#607d8b", font=("Helvetica", 8))
+        legend_y = y0 + 18
+        for idx, (label, values, color) in enumerate(series_payload):
+            canvas.create_rectangle(x0 + 6, legend_y + idx * 12, x0 + 14, legend_y + 8 + idx * 12, fill=color, outline=color)
+            canvas.create_text(x0 + 18, legend_y + 4 + idx * 12, anchor="w", text=label, fill="#37474f", font=("Helvetica", 8))
+            pts = self._series_to_points(values, x0 + 8, y0 + 48, x1 - 8, y1 - 12, reference=clean_all)
+            if len(pts) >= 4:
+                canvas.create_line(*pts, fill=color, width=2, smooth=True)
 
     def _draw_overlay_series(self, canvas, series_a, series_b, x0, y0, x1, y1, color_a, color_b, label):
         canvas.create_rectangle(x0, y0, x1, y1, outline="#cfd8dc")
@@ -1105,6 +1169,211 @@ class SSMBGui:
             self.theory_window.destroy()
         self.theory_window = None
         self.theory_window_text = None
+
+    def _open_bump_lab_window(self) -> None:
+        if self.bump_lab_window is not None and self.bump_lab_window.winfo_exists():
+            self.bump_lab_window.lift()
+            return
+        window = tk.Toplevel(self.root)
+        window.title("Experimental Bump Lab")
+        window.geometry("1200x860")
+        outer = ttk.Frame(window, padding=10)
+        outer.pack(fill="both", expand=True)
+        outer.columnconfigure(0, weight=0)
+        outer.columnconfigure(1, weight=1)
+        outer.rowconfigure(0, weight=1)
+        left = ttk.Frame(outer)
+        left.grid(row=0, column=0, sticky="nsw", padx=(0, 10))
+        right = ttk.Frame(outer)
+        right.grid(row=0, column=1, sticky="nsew")
+        right.rowconfigure(1, weight=1)
+        right.rowconfigure(3, weight=1)
+        right.columnconfigure(0, weight=1)
+
+        ttk.Label(left, text="Highly experimental bump investigation / controller lab.", foreground="#b71c1c", wraplength=320).grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(left, text="Poll interval [s]").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(left, textvariable=self.bump_lab_poll_var, width=10).grid(row=1, column=1, sticky="w", pady=(8, 0))
+
+        ttk.Label(left, text="Feedback BPMs").grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        row = 3
+        for pv_name, var in self.bump_lab_bpm_vars.items():
+            ttk.Checkbutton(left, text=pv_name, variable=var).grid(row=row, column=0, columnspan=2, sticky="w")
+            row += 1
+
+        ttk.Label(left, text="Corrector factors").grid(row=row, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        row += 1
+        for pv_name, var in self.bump_lab_steerer_vars.items():
+            ttk.Label(left, text=pv_name).grid(row=row, column=0, sticky="w")
+            ttk.Entry(left, textvariable=var, width=12).grid(row=row, column=1, sticky="w")
+            row += 1
+
+        button_row = ttk.Frame(left)
+        button_row.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        ttk.Button(button_row, text="Refresh Snapshot", command=self._refresh_bump_lab_snapshot).pack(side="left")
+        ttk.Button(button_row, text="Start Observe Loop", command=self._start_bump_lab_observer).pack(side="left", padx=4)
+        ttk.Button(button_row, text="Stop Loop", command=self._stop_bump_lab_loop).pack(side="left", padx=4)
+        ttk.Button(button_row, text="Run Experimental Controller", command=self._start_bump_lab_controller).pack(side="left", padx=4)
+        ttk.Button(button_row, text="Open Theory Window", command=self._open_theory_window).pack(side="left", padx=4)
+        row += 1
+
+        ttk.Label(right, text="Experimental bump-lab live summary").grid(row=0, column=0, sticky="w")
+        self.bump_lab_summary_text = tk.Text(right, wrap="word", height=18)
+        self.bump_lab_summary_text.grid(row=1, column=0, sticky="nsew")
+        self.bump_lab_summary_text.configure(state="disabled")
+        ttk.Label(right, text="Notebook-export source reference").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self.bump_lab_source_text = tk.Text(right, wrap="none", height=18)
+        self.bump_lab_source_text.grid(row=3, column=0, sticky="nsew")
+        self.bump_lab_source_text.configure(state="disabled")
+        source_path = SSMB_ROOT / "references" / "OrbitControlL4Bump_test_20250307.py"
+        try:
+            self._set_text_widget(self.bump_lab_source_text, source_path.read_text().splitlines())
+        except Exception as exc:
+            self._set_text_widget(self.bump_lab_source_text, ["Could not load reference source: %s" % exc])
+
+        self.bump_lab_window = window
+        self._refresh_bump_lab_snapshot()
+        window.protocol("WM_DELETE_WINDOW", self._close_bump_lab_window)
+
+    def _close_bump_lab_window(self) -> None:
+        if self.bump_lab_window is not None and self.bump_lab_window.winfo_exists():
+            self.bump_lab_window.destroy()
+        self.bump_lab_window = None
+        self.bump_lab_summary_text = None
+        self.bump_lab_source_text = None
+
+    def _selected_bump_lab_bpms(self):
+        return [pv for pv, var in self.bump_lab_bpm_vars.items() if var.get()]
+
+    def _selected_bump_lab_steerers(self):
+        result = []
+        for pv, var in self.bump_lab_steerer_vars.items():
+            try:
+                factor = float(var.get())
+            except Exception:
+                factor = 0.0
+            result.append((pv, factor))
+        return result
+
+    def _refresh_bump_lab_snapshot(self) -> None:
+        summary = self.latest_monitor_summary or summarize_live_monitor([])
+        self._update_bump_lab({"summary": summary, "mode": "snapshot"})
+
+    def _update_bump_lab(self, payload: dict) -> None:
+        if self.bump_lab_window is None or not self.bump_lab_window.winfo_exists():
+            return
+        summary = payload.get("summary") or self.latest_monitor_summary or summarize_live_monitor([])
+        bump_state = summary.get("bump_state", {})
+        current = summary.get("current", {})
+        lines = [
+            "Mode: %s" % payload.get("mode", "snapshot"),
+            "",
+            "Feedback state: %s" % bump_state.get("state_label", "unknown"),
+            "RF ctrl enable: %s" % bump_state.get("rf_frequency_control_enable"),
+            "Gain: %s" % current.get("bump_feedback_gain"),
+            "Reference orbit: %s mm" % current.get("bump_feedback_ref_mm"),
+            "Deadband: %s mm" % current.get("bump_feedback_deadband_mm"),
+            "4-BPM average: %s mm" % current.get("bump_bpm_avg_mm"),
+            "Orbit error: %s mm" % current.get("bump_orbit_error_mm"),
+            "Estimated step: %s" % current.get("bump_step_estimate"),
+            "",
+            "Selected feedback BPMs: %s" % (", ".join(self._selected_bump_lab_bpms()) or "none"),
+            "Selected correctors: %s" % ", ".join("%s * %s" % (pv, factor) for pv, factor in self._selected_bump_lab_steerers()),
+            "",
+            "P1 avg: %s" % current.get("p1_h1_ampl_avg"),
+            "P1 std: %s" % current.get("p1_h1_ampl_dev"),
+            "P1avg vs bump |I| slope: %s" % ((summary.get("bump_monitor") or {}).get("p1_avg_vs_bump_strength") or {}).get("slope"),
+            "P1avg vs bump error slope: %s" % ((summary.get("bump_monitor") or {}).get("p1_avg_vs_bump_error") or {}).get("slope"),
+            "",
+            "Interpretation:",
+            "The recovered controller is a scalar orbit-lock loop: it drives the average of the 4 selected BPMs toward AKC12VP.",
+            "Because BPMZ1L2RP is near the L2 / undulator side and the others are spread through K3 and L4, this is a global closed-orbit constraint, not a local undulator-only correction.",
+        ]
+        self._set_text_widget(self.bump_lab_summary_text, lines)
+
+    def _start_bump_lab_observer(self) -> None:
+        if self.bump_lab_stop_event is not None:
+            self._append_log("Experimental bump-lab loop is already running.")
+            return
+        self.bump_lab_stop_event = threading.Event()
+        self.bump_lab_thread = threading.Thread(target=self._bump_lab_loop, args=(False,), daemon=True)
+        self.bump_lab_thread.start()
+        self._append_log("Started experimental bump-lab observer.")
+
+    def _start_bump_lab_controller(self) -> None:
+        if not self.allow_writes or self.safe_mode_var.get():
+            self._append_log("Experimental bump controller is blocked. Disable Safe / read-only mode first.")
+            return
+        if self.bump_lab_stop_event is not None:
+            self._append_log("Experimental bump-lab loop is already running.")
+            return
+        lines = [
+            "This is highly experimental.",
+            "",
+            "It will write to these steerer PVs:",
+        ]
+        lines.extend(["- %s" % pv for pv, _factor in self._selected_bump_lab_steerers()])
+        lines.extend(
+            [
+                "",
+                "Using BPMs:",
+            ]
+        )
+        lines.extend(["- %s" % pv for pv in self._selected_bump_lab_bpms()])
+        lines.extend(
+            [
+                "",
+                "The control law is the notebook-style scalar loop:",
+                "step = gain * (ref - avg_bpm) if outside deadband",
+            ]
+        )
+        if not messagebox.askokcancel("Run Experimental Bump Controller", "\n".join(lines)):
+            self._append_log("Experimental bump controller cancelled.")
+            return
+        self.bump_lab_stop_event = threading.Event()
+        self.bump_lab_thread = threading.Thread(target=self._bump_lab_loop, args=(True,), daemon=True)
+        self.bump_lab_thread.start()
+        self._append_log("Started experimental bump controller.")
+
+    def _stop_bump_lab_loop(self) -> None:
+        if self.bump_lab_stop_event is None:
+            self._append_log("Experimental bump-lab loop is not running.")
+            return
+        self.bump_lab_stop_event.set()
+
+    def _bump_lab_loop(self, write_enabled: bool) -> None:
+        try:
+            interval = max(0.1, float(self.bump_lab_poll_var.get()))
+            adapter = EpicsAdapter(timeout=float(self.timeout_var.get())) if write_enabled else ReadOnlyEpicsAdapter(timeout=float(self.timeout_var.get()))
+            while self.bump_lab_stop_event is not None and not self.bump_lab_stop_event.is_set():
+                bpm_values = []
+                for bpm_pv in self._selected_bump_lab_bpms():
+                    value = adapter.get(bpm_pv, None)
+                    if value is not None:
+                        bpm_values.append(float(value))
+                gain = adapter.get("AKC11VP", None)
+                ref = adapter.get("AKC12VP", None)
+                deadband = adapter.get("AKC13VP", None)
+                rf_ctrl = adapter.get("MCLKHGP:ctrl:enable", None)
+                avg_bpm = sum(bpm_values) / len(bpm_values) if bpm_values else None
+                error = None if avg_bpm is None or ref is None else float(ref) - float(avg_bpm)
+                step = None
+                if error is not None and gain is not None:
+                    if deadband is None or abs(error) > abs(float(deadband)):
+                        step = float(gain) * error
+                if write_enabled and step not in (None, 0.0):
+                    for pv, factor in self._selected_bump_lab_steerers():
+                        old = adapter.get(pv, None)
+                        if old is None:
+                            continue
+                        adapter.put(pv, float(old) + step * factor)
+                summary = self.latest_monitor_summary or summarize_live_monitor([])
+                self.queue.put({"kind": "bump_lab_update", "summary": summary, "mode": "controller" if write_enabled else "observe"})
+                if self.bump_lab_stop_event.wait(interval):
+                    break
+        except Exception as exc:
+            self.queue.put("Experimental bump-lab failed: %s" % exc)
+        finally:
+            self.queue.put({"kind": "bump_lab_done"})
 
     def _match_spec_label(self, specs, element: LatticeElement):
         family = element.family_name.lower()
