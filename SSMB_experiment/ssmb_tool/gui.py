@@ -46,13 +46,11 @@ LIVE_MONITOR_EXCLUDED_TAGS = {"ring", "quadrupole", "sextupole", "octupole"}
 LIVE_MONITOR_PLOT_WINDOW_S = 60.0
 DETAIL_PLOT_WINDOW_S = 60.0
 LONG_STUDY_PLOT_WINDOW_S = 600.0
-DETAIL_PLOT_MAX_POINTS = 220
-OVERVIEW_PLOT_MAX_POINTS = 120
-LONG_STUDY_PLOT_MAX_POINTS = 320
+DEFAULT_PLOT_MAX_POINTS = 320
+LONG_STUDY_PLOT_MAX_POINTS = 480
 MONITOR_DASHBOARD_RENDER_MIN_S = 1.0
 MONITOR_WINDOW_RENDER_MIN_S = 1.0
 MONITOR_WINDOW_REFRESH_MS = 2000
-PLOT_SMOOTH_POINT_LIMIT = 90
 
 
 def _parse_text_mapping(text: str) -> dict[str, str]:
@@ -90,10 +88,6 @@ def _downsample_tail(values, max_points: int):
     return sampled
 
 
-def _joined_lines(lines) -> str:
-    return "\n".join(lines or [])
-
-
 class SSMBGui:
     def __init__(self, root: "tk.Tk", allow_writes: bool = True, start_safe_mode: bool = True):
         self.root = root
@@ -111,14 +105,11 @@ class SSMBGui:
         self._dashboard_render_scheduled = False
         self._last_dashboard_render_monotonic = 0.0
         self.monitor_window: Optional["tk.Toplevel"] = None
-        self.monitor_overview_window: Optional["tk.Toplevel"] = None
         self.monitor_dashboard_sections = []
         self.monitor_active_section_key = None
         self._monitor_window_auto_refresh_job = None
-        self._monitor_overview_auto_refresh_job = None
         self._updating_monitor_section_tree = False
         self._updating_monitor_plot_selector = False
-        self.monitor_overview_section_widgets = []
         self.theory_window: Optional["tk.Toplevel"] = None
         self.oscillation_window: Optional["tk.Toplevel"] = None
         self.lattice_window: Optional["tk.Toplevel"] = None
@@ -981,16 +972,12 @@ class SSMBGui:
         self.inventory_text.configure(state="disabled")
 
     def _set_text_widget(self, widget: "tk.Text", lines: list[str]) -> None:
-        rendered = _joined_lines(lines)
-        if getattr(widget, "_ssmb_last_text", None) == rendered:
-            return
         yview = widget.yview()
         xview = widget.xview()
         widget.configure(state="normal")
         widget.delete("1.0", "end")
-        widget.insert("1.0", rendered)
+        widget.insert("1.0", "\n".join(lines))
         widget.configure(state="disabled")
-        widget._ssmb_last_text = rendered
         try:
             if yview != (0.0, 1.0):
                 widget.yview_moveto(yview[0])
@@ -1119,15 +1106,10 @@ class SSMBGui:
         self._dashboard_render_scheduled = False
         summary = self._pending_dashboard_summary
         self._pending_dashboard_summary = None
-        has_monitor = self.monitor_window is not None and self.monitor_window.winfo_exists()
-        has_overview = self.monitor_overview_window is not None and self.monitor_overview_window.winfo_exists()
-        if not has_monitor and not has_overview:
+        if self.monitor_window is None or not self.monitor_window.winfo_exists():
             return
         started = time.monotonic()
-        if has_monitor:
-            self._update_monitor_dashboard(summary)
-        if has_overview:
-            self._update_monitor_overview(summary)
+        self._update_monitor_dashboard(summary)
         self._last_dashboard_render_monotonic = time.monotonic()
         elapsed = self._last_dashboard_render_monotonic - started
         if elapsed > 0.25:
@@ -1476,43 +1458,6 @@ class SSMBGui:
         self.monitor_window_temp_state = None
         self.monitor_window_logger_state = None
 
-    def _open_monitor_overview_window(self) -> None:
-        if self.monitor_overview_window is not None and self.monitor_overview_window.winfo_exists():
-            self.monitor_overview_window.lift()
-            return
-        window = tk.Toplevel(self.root)
-        window.title("SSMB Live Monitor Overview")
-        self._place_window_on_screen(window, 1820, 1080, x=110, y=90, relative_to_root=True)
-        outer = ttk.Frame(window, padding=10)
-        outer.pack(fill="both", expand=True)
-        outer.columnconfigure(0, weight=1)
-        outer.rowconfigure(1, weight=1)
-        controls = ttk.Frame(outer)
-        controls.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        ttk.Button(controls, text="Refresh From Buffer", command=self._refresh_monitor_overview_snapshot).pack(side="left")
-        ttk.Button(controls, text="Reload From Cache", command=self._reload_monitor_overview_from_cache).pack(side="left", padx=6)
-        ttk.Checkbutton(controls, text="Log y-axis", variable=self.monitor_log_scale_var, command=self._refresh_monitor_overview_snapshot).pack(side="right")
-        container = ttk.Frame(outer)
-        container.grid(row=1, column=0, sticky="nsew")
-        container.columnconfigure(0, weight=1)
-        container.columnconfigure(1, weight=1)
-        for row in range(4):
-            container.rowconfigure(row, weight=1)
-        self.monitor_overview_window = window
-        self.monitor_overview_container = container
-        self.monitor_overview_section_widgets = []
-        self._refresh_monitor_overview_snapshot()
-        self._schedule_monitor_overview_refresh()
-        window.protocol("WM_DELETE_WINDOW", self._close_monitor_overview_window)
-
-    def _close_monitor_overview_window(self) -> None:
-        if self.monitor_overview_window is not None and self.monitor_overview_window.winfo_exists():
-            self.monitor_overview_window.destroy()
-        self.monitor_overview_window = None
-        self.monitor_overview_container = None
-        self.monitor_overview_section_widgets = []
-        self._cancel_monitor_overview_refresh()
-
     def _refresh_monitor_window_snapshot(self) -> None:
         if self.monitor_window is None or not self.monitor_window.winfo_exists():
             return
@@ -1554,36 +1499,11 @@ class SSMBGui:
         self._load_monitor_history_cache()
         self._refresh_monitor_window_snapshot()
 
-    def _refresh_monitor_overview_snapshot(self) -> None:
-        if self.monitor_overview_window is None or not self.monitor_overview_window.winfo_exists():
-            return
-        summary = self.latest_monitor_summary
-        if summary is None and self.monitor_history:
-            summary = summarize_live_monitor(
-                list(self.monitor_history),
-                extra_candidate_keys=self._extra_oscillation_candidates(),
-                include_oscillation=False,
-                include_extended=False,
-            )
-        self._update_monitor_overview(summary)
-
-    def _reload_monitor_overview_from_cache(self) -> None:
-        if self.monitor_overview_window is None or not self.monitor_overview_window.winfo_exists():
-            return
-        self._load_monitor_history_cache()
-        self._refresh_monitor_overview_snapshot()
-
     def _schedule_monitor_window_refresh(self) -> None:
         if self.monitor_window is None or not self.monitor_window.winfo_exists():
             return
         self._cancel_monitor_window_refresh()
         self._monitor_window_auto_refresh_job = self.root.after(MONITOR_WINDOW_REFRESH_MS, self._auto_refresh_monitor_window)
-
-    def _schedule_monitor_overview_refresh(self) -> None:
-        if self.monitor_overview_window is None or not self.monitor_overview_window.winfo_exists():
-            return
-        self._cancel_monitor_overview_refresh()
-        self._monitor_overview_auto_refresh_job = self.root.after(max(MONITOR_WINDOW_REFRESH_MS, 3000), self._auto_refresh_monitor_overview)
 
     def _cancel_monitor_window_refresh(self) -> None:
         job = getattr(self, "_monitor_window_auto_refresh_job", None)
@@ -1594,15 +1514,6 @@ class SSMBGui:
                 pass
         self._monitor_window_auto_refresh_job = None
 
-    def _cancel_monitor_overview_refresh(self) -> None:
-        job = getattr(self, "_monitor_overview_auto_refresh_job", None)
-        if job is not None:
-            try:
-                self.root.after_cancel(job)
-            except Exception:
-                pass
-        self._monitor_overview_auto_refresh_job = None
-
     def _auto_refresh_monitor_window(self) -> None:
         self._monitor_window_auto_refresh_job = None
         if self.monitor_window is None or not self.monitor_window.winfo_exists():
@@ -1610,14 +1521,6 @@ class SSMBGui:
         if self.monitor_stop_event is not None:
             self._refresh_monitor_window_snapshot()
         self._schedule_monitor_window_refresh()
-
-    def _auto_refresh_monitor_overview(self) -> None:
-        self._monitor_overview_auto_refresh_job = None
-        if self.monitor_overview_window is None or not self.monitor_overview_window.winfo_exists():
-            return
-        if self.monitor_stop_event is not None:
-            self._refresh_monitor_overview_snapshot()
-        self._schedule_monitor_overview_refresh()
 
     def _focus_rf_sweep_tab(self) -> None:
         notebook = getattr(self, "control_notebook", None)
@@ -2043,27 +1946,13 @@ class SSMBGui:
         if self._updating_monitor_plot_selector:
             return
         selected = [item for item in tree.selection() if item in options]
-        if not selected:
-            return
-        clicked = selected[-1]
-        current = list(self.monitor_plot_controls.get(section_key) or [])
-        if clicked in current:
-            if len(current) > 1:
-                current = [item for item in current if item != clicked]
-        else:
-            current.append(clicked)
-        current = [item for item in current if item in options]
-        if not current and options:
-            current = [options[0]]
-        self.monitor_plot_controls[section_key] = current
-        self._updating_monitor_plot_selector = True
-        try:
-            tree.selection_set(tuple(current))
-        finally:
-            self._updating_monitor_plot_selector = False
+        if not selected and options:
+            selected = [options[0]]
+            tree.selection_set(options[0])
+        self.monitor_plot_controls[section_key] = selected
         for key in options:
             if tree.exists(key):
-                tree.set(key, "enabled", "[x]" if key in current else "[ ]")
+                tree.set(key, "enabled", "[x]" if key in selected else "[ ]")
         self._update_monitor_dashboard(self.latest_monitor_summary)
 
     def _show_monitor_section_help(self, section: dict) -> None:
@@ -2148,7 +2037,7 @@ class SSMBGui:
             values = list(trend_data.get(metric, []))
             if fixed_window:
                 values = values[-window_samples:]
-            values = _downsample_tail(values, DETAIL_PLOT_MAX_POINTS)
+            values = _downsample_tail(values, DEFAULT_PLOT_MAX_POINTS)
             meta = trend_definitions().get(metric, {"label": metric, "color": "#455a64"})
             series_payload.append((meta["label"], values, meta["color"]))
         actual_samples = max((len(values) for _label, values, _color in series_payload), default=0)
@@ -2163,100 +2052,6 @@ class SSMBGui:
             use_log_override=settings.get("log_y"),
             actual_samples=actual_samples,
         )
-
-    def _update_monitor_overview(self, summary) -> None:
-        container = getattr(self, "monitor_overview_container", None)
-        if container is None:
-            return
-        if summary is None:
-            summary = summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates())
-        sections = build_monitor_sections(summary)
-        existing = len(self.monitor_overview_section_widgets)
-        for idx in range(existing, len(sections)):
-            row = idx // 2
-            col = idx % 2
-            card = ttk.Labelframe(container, text="Section", padding=8)
-            card.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
-            card.columnconfigure(0, weight=1)
-            card.rowconfigure(0, weight=1)
-            body = ttk.Frame(card)
-            body.grid(row=0, column=0, sticky="nsew")
-            body.columnconfigure(0, weight=1)
-            body.columnconfigure(1, weight=0)
-            canvas = tk.Canvas(body, bg="white", width=760, height=240, highlightthickness=1, highlightbackground="#cfd8dc")
-            canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-            side = ttk.Frame(body)
-            side.grid(row=0, column=1, sticky="ns")
-            selector = ttk.Treeview(side, columns=("enabled", "metric", "value"), show="headings", height=6, selectmode="extended")
-            selector.heading("enabled", text="Use")
-            selector.heading("metric", text="Metric")
-            selector.heading("value", text="Latest")
-            selector.column("enabled", width=40, anchor="center")
-            selector.column("metric", width=160, anchor="w")
-            selector.column("value", width=88, anchor="e")
-            selector.grid(row=0, column=0, sticky="ns")
-            text = tk.Text(side, wrap="word", height=7, width=34)
-            text.grid(row=1, column=0, sticky="ew", pady=(6, 0))
-            text.configure(state="disabled")
-            self.monitor_overview_section_widgets.append({"card": card, "canvas": canvas, "selector": selector, "text": text})
-        for idx, section in enumerate(sections):
-            widgets = self.monitor_overview_section_widgets[idx]
-            widgets["card"].configure(text=section["title"])
-            lines = ["%s: %s" % (label, value) for label, value in section.get("rows", [])]
-            if section.get("equations"):
-                lines.extend(["", "Equations:"])
-                lines.extend(section["equations"])
-            if section.get("note"):
-                lines.extend(["", section["note"]])
-            self._set_text_widget(widgets["text"], lines)
-            self._color_text_widget(widgets["text"], section.get("color", "green"))
-            selector = widgets["selector"]
-            options = section.get("trend_options", [])
-            current = self.monitor_plot_controls.get(section["key"])
-            if not current:
-                current = [section.get("default_trend")] if section.get("default_trend") else []
-            current = [key for key in current if key in options]
-            if not current and options:
-                current = options[: min(2, len(options))]
-            self.monitor_plot_controls[section["key"]] = current
-            previous_options = widgets.get("selector_options", [])
-            if list(previous_options) != list(options):
-                for item in selector.get_children():
-                    selector.delete(item)
-                for key in options:
-                    values = [value for value in (summary.get("trend_data", {}) or {}).get(key, []) if isinstance(value, (int, float))]
-                    latest = values[-1] if values else None
-                    selector.insert("", "end", iid=key, values=("[x]" if key in current else "[ ]", trend_definitions()[key]["label"], self._format_plot_value(latest)))
-                selector.bind("<<TreeviewSelect>>", lambda _event, key=section["key"], opts=options, tree=selector: self._on_monitor_plot_selected(key, opts, tree))
-                widgets["selector_options"] = list(options)
-            else:
-                for key in options:
-                    if not selector.exists(key):
-                        continue
-                    values = [value for value in (summary.get("trend_data", {}) or {}).get(key, []) if isinstance(value, (int, float))]
-                    latest = values[-1] if values else None
-                    selector.set(key, "enabled", "[x]" if key in current else "[ ]")
-                    selector.set(key, "value", self._format_plot_value(latest))
-            self._updating_monitor_plot_selector = True
-            try:
-                selector.selection_set(tuple(current))
-            finally:
-                self._updating_monitor_plot_selector = False
-            trend_data = (summary.get("trend_data") or {})
-            payload = []
-            for metric in current:
-                values = list(trend_data.get(metric, []))
-                values = values[-self._window_samples_for_seconds(LIVE_MONITOR_PLOT_WINDOW_S):]
-                values = _downsample_tail(values, OVERVIEW_PLOT_MAX_POINTS)
-                meta = trend_definitions().get(metric, {"label": metric, "color": "#455a64"})
-                payload.append((meta["label"], values, meta["color"]))
-            canvas = widgets["canvas"]
-            canvas.delete("all")
-            width = int(canvas.winfo_width() or 760)
-            height = int(canvas.winfo_height() or 240)
-            actual_samples = max((len(values) for _label, values, _color in payload), default=0)
-            self._draw_multi_series(canvas, payload, 10, 10, width - 10, height - 10, self._window_samples_for_seconds(LIVE_MONITOR_PLOT_WINDOW_S), actual_samples=actual_samples)
-            canvas.create_text(width / 2, 12, anchor="n", text=section["title"], fill="#37474f", font=("Helvetica", 10, "bold"))
 
     def _draw_series(self, canvas, values, x0, y0, x1, y1, color, label):
         canvas.create_rectangle(x0, y0, x1, y1, outline="#cfd8dc")
@@ -2342,8 +2137,7 @@ class SSMBGui:
                     transformed.append(numeric)
             pts = self._series_to_points(transformed, plot_x0, plot_y0, plot_x1, plot_y1, reference=clean_all)
             if len(pts) >= 4:
-                point_count = max(0, len(pts) // 2)
-                canvas.create_line(*pts, fill=color, width=2, smooth=point_count <= PLOT_SMOOTH_POINT_LIMIT)
+                canvas.create_line(*pts, fill=color, width=2, smooth=True)
 
     def _draw_beam_proxy(self, canvas, center_x, sigma_x, sigma_y, x0, y0, x1, y1, title):
         canvas.create_rectangle(x0, y0, x1, y1, outline="#d7ccc8")

@@ -89,13 +89,11 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         app.latest_monitor_summary = None
         app.monitor_summary_text = mock.Mock()
         app.monitor_channels_text = mock.Mock()
-        app.monitor_window = None
-        app.monitor_overview_window = None
+        app.monitor_window = _Exists()
         app.oscillation_window = None
         app._set_text_widget = mock.Mock()
         app._update_rf_sweep_jump_label = mock.Mock()
         app._refresh_lattice_view = mock.Mock()
-        app._queue_monitor_dashboard_render = mock.Mock()
         app._append_log = mock.Mock()
         payload = {
             "summary_lines": ["a"],
@@ -107,7 +105,6 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         self.assertEqual(app.latest_monitor_sample, payload["sample"])
         self.assertEqual(app.latest_monitor_summary, payload["summary"])
         app._refresh_lattice_view.assert_called_once()
-        app._queue_monitor_dashboard_render.assert_not_called()
 
     def test_refresh_monitor_window_snapshot_updates_widgets_and_dashboard(self):
         import SSMB_experiment.ssmb_tool.gui as gui
@@ -179,166 +176,6 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         app._update_monitor_dashboard = mock.Mock()
         gui.SSMBGui._on_monitor_plot_selected(app, "machine_state", ["beam_current"], tree)
         app._update_monitor_dashboard.assert_not_called()
-
-    def test_monitor_plot_selected_toggles_multiple_metrics(self):
-        import SSMB_experiment.ssmb_tool.gui as gui
-
-        class FakeTree:
-            def __init__(self, selection):
-                self._selection = list(selection)
-                self.set_calls = []
-                self.selection_set_calls = []
-
-            def selection(self):
-                return tuple(self._selection)
-
-            def selection_set(self, values):
-                self.selection_set_calls.append(tuple(values))
-                self._selection = list(values)
-
-            def exists(self, key):
-                return True
-
-            def set(self, key, column, value):
-                self.set_calls.append((key, column, value))
-
-        app = object.__new__(gui.SSMBGui)
-        app._updating_monitor_plot_selector = False
-        app.monitor_plot_controls = {"machine_state": ["beam_current"]}
-        app.latest_monitor_summary = {}
-        app._update_monitor_dashboard = mock.Mock()
-        tree = FakeTree(["rf_offset_hz"])
-        gui.SSMBGui._on_monitor_plot_selected(app, "machine_state", ["beam_current", "rf_offset_hz"], tree)
-        self.assertEqual(app.monitor_plot_controls["machine_state"], ["beam_current", "rf_offset_hz"])
-        app._update_monitor_dashboard.assert_called_once()
-
-    def test_set_text_widget_skips_identical_content(self):
-        import SSMB_experiment.ssmb_tool.gui as gui
-
-        class FakeText:
-            def __init__(self):
-                self.deleted = 0
-                self.inserted = []
-                self.state = None
-                self._ssmb_last_text = None
-
-            def yview(self):
-                return (0.0, 1.0)
-
-            def xview(self):
-                return (0.0, 1.0)
-
-            def configure(self, **kwargs):
-                self.state = kwargs.get("state", self.state)
-
-            def delete(self, *_args):
-                self.deleted += 1
-
-            def insert(self, _index, text):
-                self.inserted.append(text)
-
-        app = object.__new__(gui.SSMBGui)
-        widget = FakeText()
-        gui.SSMBGui._set_text_widget(app, widget, ["a", "b"])
-        gui.SSMBGui._set_text_widget(app, widget, ["a", "b"])
-        self.assertEqual(widget.deleted, 1)
-        self.assertEqual(widget.inserted, ["a\nb"])
-
-    def test_update_monitor_overview_reuses_selector_rows_when_options_stable(self):
-        import SSMB_experiment.ssmb_tool.gui as gui
-
-        class FakeSelector:
-            def __init__(self):
-                self._children = {}
-                self._selection = ()
-                self.insert_calls = 0
-                self.delete_calls = 0
-                self.set_calls = []
-                self.bind_calls = 0
-
-            def get_children(self):
-                return tuple(self._children.keys())
-
-            def delete(self, item):
-                self.delete_calls += 1
-                self._children.pop(item, None)
-
-            def insert(self, _parent, _where, iid=None, values=()):
-                self.insert_calls += 1
-                self._children[iid] = list(values)
-
-            def bind(self, *_args, **_kwargs):
-                self.bind_calls += 1
-
-            def selection_set(self, values):
-                self._selection = tuple(values)
-
-            def exists(self, key):
-                return key in self._children
-
-            def set(self, key, column, value):
-                self.set_calls.append((key, column, value))
-                cols = {"enabled": 0, "metric": 1, "value": 2}
-                row = self._children[key]
-                row[cols[column]] = value
-
-        class FakeCard:
-            def configure(self, **_kwargs):
-                pass
-
-        class FakeCanvas:
-            def delete(self, *_args):
-                pass
-
-            def winfo_width(self):
-                return 760
-
-            def winfo_height(self):
-                return 240
-
-            def create_text(self, *_args, **_kwargs):
-                pass
-
-        app = object.__new__(gui.SSMBGui)
-        app.monitor_overview_container = object()
-        app.monitor_overview_section_widgets = [{
-            "card": FakeCard(),
-            "canvas": FakeCanvas(),
-            "selector": FakeSelector(),
-            "text": mock.Mock(),
-            "selector_options": [],
-        }]
-        app.monitor_plot_controls = {}
-        app.monitor_log_scale_var = mock.Mock(get=lambda: False)
-        app.monitor_interval_var = mock.Mock(get=lambda: "0.5")
-        app._set_text_widget = mock.Mock()
-        app._color_text_widget = mock.Mock()
-        app._window_samples_for_seconds = lambda _seconds: 120
-        app._format_plot_value = lambda value: "n/a" if value is None else str(value)
-        app._draw_multi_series = mock.Mock()
-        summary = {
-            "trend_data": {
-                "beam_current": [1.0, 1.1],
-                "rf_offset_hz": [0.0, 0.2],
-            }
-        }
-        with mock.patch.object(gui, "build_monitor_sections", return_value=[{
-            "key": "machine_state",
-            "title": "Machine State",
-            "rows": [("Beam", "1.1")],
-            "trend_options": ["beam_current", "rf_offset_hz"],
-            "default_trend": "beam_current",
-            "color": "green",
-        }]), mock.patch.object(gui, "trend_definitions", return_value={
-            "beam_current": {"label": "Beam current", "color": "#111"},
-            "rf_offset_hz": {"label": "RF offset", "color": "#222"},
-        }):
-            gui.SSMBGui._update_monitor_overview(app, summary)
-            first_inserts = app.monitor_overview_section_widgets[0]["selector"].insert_calls
-            gui.SSMBGui._update_monitor_overview(app, summary)
-            second_inserts = app.monitor_overview_section_widgets[0]["selector"].insert_calls
-        self.assertEqual(first_inserts, second_inserts)
-        self.assertTrue(app.monitor_overview_section_widgets[0]["selector"].set_calls)
 
     def test_monitor_window_render_smoke(self):
         import SSMB_experiment.ssmb_tool.gui as gui
