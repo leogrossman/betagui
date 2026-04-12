@@ -1,6 +1,7 @@
 import math
 import unittest
 
+from SSMB_experiment.ssmb_tool.inventory import ChannelSpec
 from SSMB_experiment.ssmb_tool.live_monitor import (
     analyze_p1_oscillation,
     build_monitor_sections,
@@ -10,9 +11,37 @@ from SSMB_experiment.ssmb_tool.live_monitor import (
     summarize_live_monitor,
     trend_definitions,
 )
+from SSMB_experiment.ssmb_tool.log_now import capture_sample_tolerant
 
 
 class SSMBExperimentLiveMonitorTest(unittest.TestCase):
+    def test_capture_sample_tolerant_continues_past_bad_pv(self):
+        class FlakyAdapter:
+            def get(self, name, default=None):
+                if name == "BAD:PV":
+                    raise RuntimeError("boom")
+                return 1.23
+
+        calls = []
+
+        def per_channel(spec, payload, elapsed):
+            calls.append((spec.label, payload.get("missing"), elapsed))
+
+        sample = capture_sample_tolerant(
+            FlakyAdapter(),
+            [
+                ChannelSpec("good", "GOOD:PV", "scalar"),
+                ChannelSpec("bad", "BAD:PV", "scalar"),
+            ],
+            sample_index=0,
+            t_rel_s=0.0,
+            per_channel_callback=per_channel,
+        )
+        self.assertEqual(sample["channels"]["good"]["value"], 1.23)
+        self.assertTrue(sample["channels"]["bad"]["missing"])
+        self.assertEqual(sample["channels"]["bad"]["reason"], "exception")
+        self.assertEqual([item[0] for item in calls], ["good", "bad"])
+
     def test_detect_rf_sweep_active_uses_rf_span(self):
         samples = [
             {"derived": {"rf_readback": 499688.38770}},

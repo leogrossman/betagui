@@ -170,6 +170,13 @@ def _sample_channel(adapter: ReadOnlyEpicsAdapter, spec: ChannelSpec) -> Dict[st
     return {"pv": spec.pv, "value": value, "missing": missing}
 
 
+def _sample_channel_tolerant(adapter: ReadOnlyEpicsAdapter, spec: ChannelSpec) -> Dict[str, object]:
+    try:
+        return _sample_channel(adapter, spec)
+    except Exception as exc:
+        return {"pv": spec.pv, "value": None, "missing": True, "reason": "exception", "error": str(exc)}
+
+
 def _derived_metrics(sample: Dict[str, object], derived_context: Optional[Dict[str, object]] = None) -> Dict[str, object]:
     channels = sample["channels"]
     derived_context = derived_context or {}
@@ -335,6 +342,37 @@ def capture_sample(
     }
     for spec in specs:
         sample["channels"][spec.label] = _sample_channel(adapter, spec)
+    sample["derived"] = _derived_metrics(sample, derived_context=derived_context)
+    if extra_fields:
+        sample.update(extra_fields)
+    return sample
+
+
+def capture_sample_tolerant(
+    adapter,
+    specs: Sequence[ChannelSpec],
+    sample_index: int,
+    t_rel_s: float,
+    extra_fields: Optional[Dict[str, object]] = None,
+    derived_context: Optional[Dict[str, object]] = None,
+    per_channel_callback=None,
+) -> Dict[str, object]:
+    sample = {
+        "timestamp_epoch_s": time.time(),
+        "t_rel_s": t_rel_s,
+        "sample_index": sample_index,
+        "channels": {},
+    }
+    for spec in specs:
+        t0 = time.monotonic()
+        payload = _sample_channel_tolerant(adapter, spec)
+        elapsed = time.monotonic() - t0
+        sample["channels"][spec.label] = payload
+        if per_channel_callback is not None:
+            try:
+                per_channel_callback(spec, payload, elapsed)
+            except Exception:
+                pass
     sample["derived"] = _derived_metrics(sample, derived_context=derived_context)
     if extra_fields:
         sample.update(extra_fields)

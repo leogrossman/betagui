@@ -1105,6 +1105,7 @@ class SSMBGui:
         interval = float(self.monitor_interval_var.get())
         if interval <= 0.0:
             raise ValueError("Monitor interval must be positive.")
+        self._debug("start monitor requested: interval=%s history_span=%s" % (interval, self.monitor_history_span_var.get()))
         self.monitor_history.clear()
         self.monitor_stop_event = threading.Event()
         self.start_monitor_button.state(["disabled"])
@@ -1130,12 +1131,14 @@ class SSMBGui:
             adapter = ReadOnlyEpicsAdapter(timeout=min(config.timeout_seconds, 0.15))
             _lattice, specs = self._build_monitor_specs()
             self.live_spec_lookup = spec_index(specs)
+            self._debug("monitor loop starting with %d PVs timeout=%.3f" % (len(specs), min(config.timeout_seconds, 0.15)))
             self.queue.put("Live monitor using %d PV channels (lean subset + selected extras)." % len(specs))
             sample_index = 0
             start = time.monotonic()
             derived_context = None
             while self.monitor_stop_event is not None and not self.monitor_stop_event.is_set():
                 sample_started = time.monotonic()
+                self._debug("monitor sample %d begin" % sample_index)
                 sample = self._capture_monitor_sample(adapter, specs, sample_index, time.monotonic() - start, derived_context)
                 if derived_context is None:
                     derived_context = {
@@ -1163,6 +1166,7 @@ class SSMBGui:
                     }
                 )
                 elapsed = time.monotonic() - sample_started
+                self._debug("monitor sample %d done in %.3f s" % (sample_index, elapsed))
                 effective_interval = interval * (4.0 if self._logger_priority_active() else 1.0)
                 if elapsed > max(1.0, 1.5 * effective_interval):
                     self.queue.put("Live monitor sample %d took %.2f s for %d PVs." % (sample_index, elapsed, len(specs)))
@@ -1172,21 +1176,42 @@ class SSMBGui:
                 if self.monitor_stop_event.wait(effective_interval):
                     break
         except Exception as exc:
+            self._debug("monitor loop failed: %s" % exc)
             self.queue.put("Live monitor failed: %s" % exc)
         finally:
+            self._debug("monitor loop exiting")
             self.queue.put({"kind": "monitor_done"})
 
     def _capture_monitor_sample(self, adapter, specs, sample_index: int, t_rel_s: float, derived_context):
-        from .log_now import capture_sample
+        from .log_now import capture_sample_tolerant
 
-        return capture_sample(
+        slow_channels = []
+        error_channels = []
+
+        def per_channel(spec, payload, elapsed):
+            if elapsed >= 0.2:
+                slow_channels.append((spec.label, spec.pv, elapsed))
+            if payload.get("missing") and payload.get("reason") not in (None, "unconfigured_optional"):
+                error_channels.append((spec.label, payload.get("reason"), payload.get("error")))
+
+        sample = capture_sample_tolerant(
             adapter,
             specs,
             sample_index=sample_index,
             t_rel_s=t_rel_s,
             extra_fields={"phase": "live_monitor"},
             derived_context=derived_context,
+            per_channel_callback=per_channel,
         )
+        if slow_channels:
+            slow_channels.sort(key=lambda item: item[2], reverse=True)
+            top = slow_channels[:5]
+            self.queue.put("Slow live-monitor PVs: %s" % ", ".join("%s=%.2fs" % (label, elapsed) for label, _pv, elapsed in top))
+            self._debug("sample %d slow PVs: %s" % (sample_index, ", ".join("%s[%s]=%.3fs" % (label, pv, elapsed) for label, pv, elapsed in top)))
+        if error_channels:
+            top_errors = error_channels[:5]
+            self._debug("sample %d PV errors: %s" % (sample_index, ", ".join("%s(%s)" % (label, reason) for label, reason, _err in top_errors)))
+        return sample
 
     def _ensure_extended_monitor_summary(self):
         summary = self.latest_monitor_summary
