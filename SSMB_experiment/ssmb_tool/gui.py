@@ -106,6 +106,7 @@ class SSMBGui:
         self.rolling_window_var = tk.StringVar(value="600")
         self.monitor_log_scale_var = tk.BooleanVar(value=False)
         self.monitor_candidate_keys_var = tk.StringVar(value="")
+        self.oscillation_ignore_rf_var = tk.BooleanVar(value=True)
         self.bump_lab_poll_var = tk.StringVar(value="0.5")
         self.bump_lab_bpm_vars = {
             "BPMZ1K1RP:rdX": tk.BooleanVar(value=True),
@@ -550,10 +551,19 @@ class SSMBGui:
         self.inventory_text.configure(state="disabled")
 
     def _set_text_widget(self, widget: "tk.Text", lines: list[str]) -> None:
+        yview = widget.yview()
+        xview = widget.xview()
         widget.configure(state="normal")
         widget.delete("1.0", "end")
         widget.insert("1.0", "\n".join(lines))
         widget.configure(state="disabled")
+        try:
+            if yview != (0.0, 1.0):
+                widget.yview_moveto(yview[0])
+            if xview != (0.0, 1.0):
+                widget.xview_moveto(xview[0])
+        except Exception:
+            pass
 
     def _drain_queue(self) -> None:
         while True:
@@ -757,8 +767,8 @@ class SSMBGui:
         window.geometry("1920x1080")
         outer = ttk.Frame(window, padding=10)
         outer.pack(fill="both", expand=True)
-        outer.columnconfigure(0, weight=11)
-        outer.columnconfigure(1, weight=2)
+        outer.columnconfigure(0, weight=12)
+        outer.columnconfigure(1, weight=0)
         outer.rowconfigure(0, weight=1)
         left = ttk.Frame(outer)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
@@ -778,34 +788,44 @@ class SSMBGui:
         self.monitor_window_bump_state = None
         left.columnconfigure(0, weight=1)
         left.columnconfigure(1, weight=1)
-        for row in range(4):
+        for row in range(3):
             left.rowconfigure(row, weight=1)
-        right.rowconfigure(3, weight=1)
         right.columnconfigure(0, weight=1)
-        button_row = ttk.Frame(right)
-        button_row.grid(row=0, column=0, sticky="ew")
+        right.columnconfigure(1, weight=1)
+        right.rowconfigure(1, weight=0)
+        right.columnconfigure(0, weight=1)
+        top = ttk.Frame(right)
+        top.grid(row=0, column=0, columnspan=2, sticky="nsew")
+        top.columnconfigure(0, weight=1)
+        top.columnconfigure(1, weight=1)
+        button_row = ttk.Frame(top)
+        button_row.grid(row=0, column=0, sticky="nw")
         ttk.Button(button_row, text="Open Theory Window", command=self._open_theory_window).pack(side="left")
         ttk.Button(button_row, text="Open Oscillation Study", command=self._open_oscillation_window).pack(side="left", padx=6)
         self.monitor_window_jump_sweep_button = ttk.Button(button_row, text="Go To RF Sweep", command=self._focus_rf_sweep_tab)
         self.monitor_window_jump_sweep_button.pack(side="left", padx=6)
         ttk.Checkbutton(button_row, text="Log y-axis", variable=self.monitor_log_scale_var, command=lambda: self._update_monitor_dashboard(self.latest_monitor_summary)).pack(side="right")
-        state_row = ttk.Frame(right)
-        state_row.grid(row=1, column=0, sticky="ew", pady=(8, 6))
+        state_row = ttk.Frame(top)
+        state_row.grid(row=1, column=0, sticky="nw", pady=(8, 6))
         ttk.Label(state_row, text="Machine state").pack(side="left")
         self.monitor_window_rf_state = tk.Label(state_row, text="RF sweep OFF", bg="#607d8b", fg="white", padx=10, pady=4)
         self.monitor_window_rf_state.pack(side="left", padx=6)
         self.monitor_window_bump_state = tk.Label(state_row, text="Bump OFF", bg="#2e7d32", fg="white", padx=10, pady=4)
         self.monitor_window_bump_state.pack(side="left", padx=6)
         helper = ttk.Label(
-            right,
+            top,
             text="Theory and derivations live in the separate Theory window so the monitor plots stay large enough to interpret.",
-            wraplength=360,
+            wraplength=300,
             justify="left",
         )
-        helper.grid(row=2, column=0, sticky="w", pady=(0, 8))
-        ttk.Label(right, text="Current channel snapshot").grid(row=3, column=0, sticky="w", pady=(0, 0))
-        self.monitor_window_channels_text = tk.Text(right, wrap="none", height=14)
-        self.monitor_window_channels_text.grid(row=4, column=0, sticky="nsew")
+        helper.grid(row=2, column=0, sticky="nw", pady=(0, 8))
+        snap_frame = ttk.Frame(top)
+        snap_frame.grid(row=0, column=1, rowspan=3, sticky="nsew", padx=(10, 0))
+        snap_frame.columnconfigure(0, weight=1)
+        snap_frame.rowconfigure(1, weight=1)
+        ttk.Label(snap_frame, text="Current channel snapshot").grid(row=0, column=0, sticky="w")
+        self.monitor_window_channels_text = tk.Text(snap_frame, wrap="none", height=12, width=46)
+        self.monitor_window_channels_text.grid(row=1, column=0, sticky="nsew")
         self.monitor_window_channels_text.configure(state="disabled")
         self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
         self._update_monitor_dashboard(self.latest_monitor_summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates()))
@@ -852,6 +872,7 @@ class SSMBGui:
         top_buttons = ttk.Frame(frame)
         top_buttons.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         ttk.Button(top_buttons, text="Open Theory Window", command=self._open_theory_window).pack(side="left")
+        ttk.Checkbutton(top_buttons, text="Ignore during RF sweep", variable=self.oscillation_ignore_rf_var, command=lambda: self._update_oscillation_window(self.latest_monitor_summary)).pack(side="left", padx=8)
         text = tk.Text(frame, wrap="word", height=16)
         text.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
         text.configure(state="disabled")
@@ -906,6 +927,13 @@ class SSMBGui:
         if self.oscillation_window is None or not self.oscillation_window.winfo_exists():
             return
         safe_summary = summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates())
+        if self.oscillation_ignore_rf_var.get() and bool((safe_summary.get("rf_sweep_detection") or {}).get("active")):
+            safe_summary = dict(safe_summary)
+            safe_summary["oscillation_study"] = {
+                "available": False,
+                "reason": "rf_sweep_active_ignored",
+                "checked_candidate_keys": list(((safe_summary.get("oscillation_study") or {}).get("checked_candidate_keys")) or []),
+            }
         self._set_text_widget(self.oscillation_window_text, format_oscillation_study(safe_summary))
         self._update_oscillation_candidate_table(safe_summary)
         self._draw_oscillation_candidate_plots(safe_summary)
@@ -925,6 +953,8 @@ class SSMBGui:
         for item in table.get_children():
             table.delete(item)
         candidates = ((summary or {}).get("oscillation_study", {}) or {}).get("candidates", [])
+        if not candidates:
+            self.oscillation_selected_candidate_key = None
         for candidate in candidates:
             table.insert(
                 "",
@@ -1002,19 +1032,27 @@ class SSMBGui:
             if candidate.get("key") == selected_key:
                 selected_candidate = candidate
                 break
-        forced_candidates = []
-        for forced_key in ("climate_kw13_return_temp_c", "climate_sr_temp_c"):
-            for candidate in osc.get("candidates", []):
-                if candidate.get("key") == forced_key:
-                    forced_candidates.append(candidate)
-                    break
+        if selected_candidate is None and osc.get("candidates"):
+            selected_candidate = osc.get("candidates", [None])[2] if len(osc.get("candidates", [])) >= 3 else osc.get("candidates", [None])[-1]
         plot_defs = [
             ("P1 avg only", [("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa")]),
         ]
-        comparison_candidates = [selected_candidate] + forced_candidates
+        top_candidates = list(osc.get("candidates", []))[:2]
+        comparison_candidates = top_candidates + [selected_candidate]
         while len(comparison_candidates) < 3:
             comparison_candidates.append(None)
-        for candidate in comparison_candidates[:3]:
+        seen = set()
+        deduped = []
+        for candidate in comparison_candidates:
+            key = None if candidate is None else candidate.get("key")
+            marker = key or "__none__"
+            if marker in seen and key is not None:
+                continue
+            seen.add(marker)
+            deduped.append(candidate)
+        while len(deduped) < 3:
+            deduped.append(None)
+        for candidate in deduped[:3]:
             if candidate is None:
                 plot_defs.append(("Candidate pending", []))
                 continue

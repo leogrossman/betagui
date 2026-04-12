@@ -364,6 +364,15 @@ def analyze_p1_oscillation(samples: Sequence[Dict[str, object]], extra_candidate
     }
 
 
+def estimate_monitor_history_bytes(samples: Sequence[Dict[str, object]]) -> int:
+    total = 0
+    for sample in samples:
+        total += 512
+        total += 160 * len(sample.get("channels", {}))
+        total += 64 * len(sample.get("derived", {}))
+    return total
+
+
 def detect_rf_sweep_active(samples: Sequence[Dict[str, object]]) -> Dict[str, object]:
     rf_values = []
     for sample in samples:
@@ -385,6 +394,8 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]], extra_candidate
     derived = latest.get("derived", {})
     channels = latest.get("channels", {})
     bump = _summarize_bump_state(channels)
+    history_bytes = estimate_monitor_history_bytes(samples)
+    dt_estimate = _estimate_sample_dt_seconds(samples)
     summary: Dict[str, object] = {
         "current": {
             "rf_readback_khz": _valid_float(derived.get("rf_readback")),
@@ -443,6 +454,11 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]], extra_candidate
             "Tune slopes versus delta_s as chromaticity cross-checks in x, y, and synchrotron channels.",
             "P1 and P3 versus f_RF or versus delta_s as the key SSMB observables during the sweep.",
         ],
+        "monitor_health": {
+            "sample_count": len(samples),
+            "buffer_span_s": None if len(samples) < 2 or dt_estimate is None else dt_estimate * max(0, len(samples) - 1),
+            "approx_memory_bytes": history_bytes,
+        },
     }
 
     sweep_state = detect_rf_sweep_active(samples)
@@ -534,6 +550,7 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]], extra_candidate
     summary["rf_sweep_metrics"] = sweep_metrics
     summary["bump_monitor"] = {
         "feedback_active": bool(bump.get("active")),
+        "quality_score": _bump_quality_score(summary),
         "p1_avg_vs_bump_strength": _linear_fit(
             [x for x, y in bump_strength_series if y is not None],
             [y for _x, y in bump_strength_series if y is not None],
@@ -554,6 +571,21 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]], extra_candidate
     summary["trend_data"] = extract_trend_data(samples)
     summary["oscillation_study"] = analyze_p1_oscillation(samples, extra_candidate_keys=extra_candidate_keys)
     return summary
+
+
+def _bump_quality_score(summary: Dict[str, object]) -> Dict[str, object]:
+    current = summary.get("current", {}) or {}
+    orbit_error = abs(_valid_float(current.get("bump_orbit_error_mm")) or 0.0)
+    l2_offset = abs(_valid_float(current.get("bump_bpm_l2_mm")) or 0.0)
+    qpd01_center = abs(_valid_float(current.get("qpd_l2_center_x_avg_um")) or 0.0)
+    sigma_delta = abs(_valid_float(current.get("qpd_l4_sigma_delta_first_order")) or 0.0)
+    penalties = 25.0 * min(1.0, orbit_error / 0.5)
+    penalties += 35.0 * min(1.0, l2_offset / 1.0)
+    penalties += 20.0 * min(1.0, qpd01_center / 1200.0)
+    penalties += 20.0 * min(1.0, sigma_delta / 5.0e-4)
+    score = max(0.0, 100.0 - penalties)
+    status = "good" if score >= 75.0 else "watch" if score >= 45.0 else "poor"
+    return {"score": score, "status": status}
 
 
 def assess_alpha_monitor(summary: Dict[str, object]) -> Dict[str, object]:
@@ -691,6 +723,9 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 ("L4 bump", "%s" % bump.get("state_label", "unknown")),
                 ("Bump max |I|", "%s A" % _fmt(bump.get("max_abs_corrector_a"))),
                 ("Nonlinear BPMs", ", ".join(current.get("nonlinear_bpms") or []) or "none"),
+                ("Monitor samples", _fmt((summary.get("monitor_health") or {}).get("sample_count"))),
+                ("Monitor span", _fmt_duration((summary.get("monitor_health") or {}).get("buffer_span_s"))),
+                ("Monitor mem", "%s MB" % _fmt(((summary.get("monitor_health") or {}).get("approx_memory_bytes") or 0) / (1024.0 * 1024.0))),
             ],
             "equations": [],
             "note": "This section is available even when no RF sweep is running. RF sweep and bump state are the two top-level live condition flags for the experiment.",
@@ -714,6 +749,7 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 ("BPMZ1K3RP", "%s mm" % _fmt(current.get("bump_bpm_k3_mm"))),
                 ("BPMZ1L4RP", "%s mm" % _fmt(current.get("bump_bpm_l4_mm"))),
                 ("P1avg vs bump |I| slope", _fmt((bump_monitor.get("p1_avg_vs_bump_strength") or {}).get("slope"))),
+                ("Bump quality", "%s / %.1f" % (((bump_monitor.get("quality_score") or {}).get("status") or "n/a"), ((bump_monitor.get("quality_score") or {}).get("score") or 0.0))),
             ],
             "equations": [
                 "x̄ = (x_K1 + x_L2 + x_K3 + x_L4) / 4",
