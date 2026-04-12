@@ -189,6 +189,8 @@ def _derived_metrics(sample: Dict[str, object], derived_context: Optional[Dict[s
     tune_s_khz = _tune_s_khz(tune_s_raw)
     gamma = _gamma_from_energy_mev(beam_energy_mev)
     inv_gamma2 = None if gamma in (None, 0.0) else 1.0 / (gamma * gamma)
+    beam_current_cum1_ma = _safe_float(channels.get("beam_current", {}).get("value"), None)
+    beam_current_scope_ua = _safe_float(channels.get("beam_current_scope", {}).get("value"), None)
     rf_reference_khz = _safe_float(derived_context.get("rf_reference_khz"), None)
     rf_offset_khz = None if rf_reference_khz is None or rf_readback is None else rf_readback - rf_reference_khz
     rf_offset_hz = None if rf_offset_khz is None else rf_offset_khz * 1e3
@@ -249,6 +251,11 @@ def _derived_metrics(sample: Dict[str, object], derived_context: Optional[Dict[s
         "tune_s_unitless": _unitless_tune_from_khz(tune_s_khz),
         "gamma": gamma,
         "inv_gamma2": inv_gamma2,
+        "beam_current_cum1_ma": beam_current_cum1_ma,
+        "beam_current_scope_ua": beam_current_scope_ua,
+        "beam_current_preferred": beam_current_scope_ua if beam_current_scope_ua is not None else beam_current_cum1_ma,
+        "beam_current_preferred_unit": "uA" if beam_current_scope_ua is not None else ("mA" if beam_current_cum1_ma is not None else None),
+        "beam_current_preferred_source": "beam_current_scope" if beam_current_scope_ua is not None else ("beam_current" if beam_current_cum1_ma is not None else None),
         "legacy_alpha0_corrected": legacy_alpha_corrected,
         "delta_l4_bpm_first_order": delta_bpm_l4,
         "delta_l4_bpms_used": used_bpms,

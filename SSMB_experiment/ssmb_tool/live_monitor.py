@@ -48,6 +48,7 @@ TREND_DEFINITIONS: Dict[str, Dict[str, object]] = {
     "climate_sr_temp_c": {"label": "SR temp [C]", "color": "#00695c"},
     "climate_sr_temp1_c": {"label": "SR temp1 [C]", "color": "#2e7d32"},
     "beam_current": {"label": "Beam current [mA]", "color": "#2e7d32"},
+    "beam_current_scope_ua": {"label": "MLS current monitor [uA]", "color": "#00796b"},
     "bump_strength_a": {"label": "max |I_bump| [A]", "color": "#ad1457"},
     "bump_bpm_avg_mm": {"label": "⟨x_bump BPM⟩ [mm]", "color": "#00838f"},
     "bump_orbit_error_mm": {"label": "x_ref - ⟨x⟩ [mm]", "color": "#c2185b"},
@@ -520,6 +521,9 @@ def summarize_live_monitor(
             "tune_s_khz": _valid_float(derived.get("tune_s_khz")),
             "beam_current": _valid_float(channels.get("beam_current", {}).get("value")),
             "beam_current_scope": _valid_float(channels.get("beam_current_scope", {}).get("value")),
+            "beam_current_preferred": _valid_float(derived.get("beam_current_preferred")),
+            "beam_current_preferred_unit": derived.get("beam_current_preferred_unit"),
+            "beam_current_preferred_source": derived.get("beam_current_preferred_source"),
             "qpd_l4_sigma_x_mm": _valid_float(derived.get("qpd_l4_sigma_x_mm")),
             "qpd_l4_sigma_y_mm": _valid_float(derived.get("qpd_l4_sigma_y_mm")),
             "p1_h1_ampl": _valid_float(channels.get("p1_h1_ampl", {}).get("value")),
@@ -641,7 +645,7 @@ def summarize_live_monitor(
             sigma_x = _valid_float(sample.get("derived", {}).get("qpd_l4_sigma_x_mm"))
             qpd00_center = _valid_float(sample.get("channels", {}).get("qpd_l4_center_x_avg_um", {}).get("value"))
             qpd01_center = _valid_float(sample.get("channels", {}).get("qpd_l2_center_x_avg_um", {}).get("value"))
-            beam_current = _valid_float(sample.get("channels", {}).get("beam_current", {}).get("value"))
+            beam_current = _valid_float(sample.get("derived", {}).get("beam_current_preferred"))
             if sigma_x is not None:
                 sigma_x_delta.append((d, sigma_x))
             if qpd00_center is not None:
@@ -919,6 +923,7 @@ def extract_trend_data(samples: Sequence[Dict[str, object]]) -> Dict[str, List[O
         "tune_y": [_valid_float(sample.get("derived", {}).get("tune_y_unitless")) for sample in history],
         "tune_s": [_valid_float(sample.get("derived", {}).get("tune_s_unitless")) for sample in history],
         "beam_current": [_valid_float(sample.get("channels", {}).get("beam_current", {}).get("value")) for sample in history],
+        "beam_current_scope_ua": [_valid_float(sample.get("channels", {}).get("beam_current_scope", {}).get("value")) for sample in history],
         "bump_strength_a": [
             _valid_float(
                 _summarize_bump_state(sample.get("channels", {})).get("max_abs_corrector_a")
@@ -1025,8 +1030,17 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
             "title": "Machine State",
             "color": "red" if temp_state.get("unstable") else ("green" if not current.get("nonlinear_bpms") else "yellow"),
             "rows": [
-                ("Beam current", "%s mA" % _fmt(current.get("beam_current"))),
-                ("Beam current (scope)", "%s µA" % _fmt(current.get("beam_current_scope"))),
+                (
+                    "Beam current (preferred)",
+                    "%s %s via %s"
+                    % (
+                        _fmt(current.get("beam_current_preferred")),
+                        current.get("beam_current_preferred_unit") or "",
+                        current.get("beam_current_preferred_source") or "n/a",
+                    ),
+                ),
+                ("Beam current (CUM1ZK3RP)", "%s mA" % _fmt(current.get("beam_current"))),
+                ("Beam current (MLS scope)", "%s µA" % _fmt(current.get("beam_current_scope"))),
                 ("RF readback", "%s kHz" % _fmt(current.get("rf_readback_khz"))),
                 ("RF rdFrq499", "%s kHz" % _fmt(current.get("rf_readback_499mhz_khz"))),
                 ("RF offset", "%s Hz" % _fmt(current.get("rf_offset_hz"))),
@@ -1045,8 +1059,8 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
             ],
             "equations": [],
             "note": "This section is available even when no RF sweep is running. RF sweep and bump state are the two top-level live condition flags for the experiment.",
-            "default_trend": "beam_current",
-            "trend_options": ["beam_current", "rf_offset_hz", "bump_strength_a"],
+            "default_trend": "beam_current_scope_ua",
+            "trend_options": ["beam_current_scope_ua", "beam_current", "rf_offset_hz", "bump_strength_a"],
         },
         {
             "key": "bump_feedback",

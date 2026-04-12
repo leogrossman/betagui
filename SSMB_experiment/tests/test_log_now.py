@@ -46,11 +46,26 @@ class SSMBExperimentLogNowTest(unittest.TestCase):
         self.assertAlmostEqual(derived["beam_energy_from_bpm_mev"], 250.025, places=6)
         self.assertIsNotNone(derived["legacy_alpha0_corrected"])
         self.assertIsNotNone(derived["qpd_l4_sigma_delta_first_order"])
+        self.assertIsNone(derived["beam_current_preferred"])
         self.assertEqual(
             derived["delta_l4_bpms_used"],
             ["bpmz3l4rp_x", "bpmz4l4rp_x", "bpmz5l4rp_x", "bpmz6l4rp_x"],
         )
         self.assertEqual(derived["bpm_x_nonlinear_labels"], [])
+
+    def test_derived_metrics_prefer_scope_current_monitor(self):
+        sample = {
+            "channels": {
+                "beam_current": {"value": 0.02},
+                "beam_current_scope": {"value": 512.293},
+            }
+        }
+        derived = _derived_metrics(sample)
+        self.assertEqual(derived["beam_current_cum1_ma"], 0.02)
+        self.assertEqual(derived["beam_current_scope_ua"], 512.293)
+        self.assertEqual(derived["beam_current_preferred"], 512.293)
+        self.assertEqual(derived["beam_current_preferred_unit"], "uA")
+        self.assertEqual(derived["beam_current_preferred_source"], "beam_current_scope")
 
     def test_derived_metrics_flag_nonlinear_bpms(self):
         sample = {
