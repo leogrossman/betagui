@@ -101,6 +101,7 @@ class SSMBGui:
         self.sample_spacing_var = tk.StringVar(value="0.0")
         self.monitor_interval_var = tk.StringVar(value="0.5")
         self.rolling_window_var = tk.StringVar(value="600")
+        self.monitor_log_scale_var = tk.BooleanVar(value=False)
         self.bump_lab_poll_var = tk.StringVar(value="0.5")
         self.bump_lab_bpm_vars = {
             "BPMZ1K1RP:rdX": tk.BooleanVar(value=True),
@@ -158,11 +159,15 @@ class SSMBGui:
         self.safe_mode_hint.pack(anchor="w", pady=(4, 0))
 
         notebook = ttk.Notebook(control)
+        self.control_notebook = notebook
         notebook.pack(fill="both", expand=False)
 
         monitor_frame = ttk.Frame(notebook, padding=8)
         logger_frame = ttk.Frame(notebook, padding=8)
         sweep_frame = ttk.Frame(notebook, padding=8)
+        self.monitor_tab = monitor_frame
+        self.logger_tab = logger_frame
+        self.sweep_tab = sweep_frame
         notebook.add(monitor_frame, text="Live Monitor")
         notebook.add(logger_frame, text="Measurement Logger")
         notebook.add(sweep_frame, text="RF Sweep")
@@ -273,9 +278,10 @@ class SSMBGui:
         ttk.Entry(frame, textvariable=self.monitor_interval_var, width=12).grid(row=row, column=1, sticky="w", pady=2)
         ttk.Label(frame, text="Rolling window [samples]").grid(row=row, column=2, sticky="w")
         ttk.Entry(frame, textvariable=self.rolling_window_var, width=12).grid(row=row, column=3, sticky="w", pady=2)
+        ttk.Checkbutton(frame, text="Log y-axis where possible", variable=self.monitor_log_scale_var).grid(row=row, column=4, sticky="w", padx=(10, 0))
         row += 1
         button_row = ttk.Frame(frame)
-        button_row.grid(row=row, column=0, columnspan=4, sticky="ew", pady=(8, 8))
+        button_row.grid(row=row, column=0, columnspan=5, sticky="ew", pady=(8, 8))
         self.start_monitor_button = ttk.Button(button_row, text="Start Live Monitor", command=self._start_monitor)
         self.start_monitor_button.pack(side="left")
         self.stop_monitor_button = ttk.Button(button_row, text="Stop Live Monitor", command=self._stop_monitor)
@@ -285,6 +291,8 @@ class SSMBGui:
         ttk.Button(button_row, text="Open Monitor Window", command=self._open_monitor_window).pack(side="left", padx=6)
         ttk.Button(button_row, text="Open Oscillation Study", command=self._open_oscillation_window).pack(side="left", padx=6)
         ttk.Button(button_row, text="Open Theory Window", command=self._open_theory_window).pack(side="left", padx=6)
+        self.monitor_jump_sweep_button = ttk.Button(button_row, text="Go To RF Sweep", command=self._focus_rf_sweep_tab)
+        self.monitor_jump_sweep_button.pack(side="left", padx=6)
         ttk.Button(button_row, text="Open Lattice View", command=self._open_lattice_window).pack(side="left")
         ttk.Button(button_row, text="Open Experimental Bump Lab", command=self._open_bump_lab_window).pack(side="left", padx=6)
         row += 1
@@ -574,6 +582,7 @@ class SSMBGui:
         self._set_text_widget(self.monitor_summary_text, summary_lines)
         self._set_text_widget(self.monitor_channels_text, channel_lines)
         try:
+            self._update_rf_sweep_jump_label(payload.get("summary"))
             if self.monitor_window is not None and self.monitor_window.winfo_exists():
                 summary_widget = getattr(self, "monitor_window_summary_text", None)
                 channel_widget = getattr(self, "monitor_window_channels_text", None)
@@ -587,6 +596,17 @@ class SSMBGui:
             self._refresh_lattice_view()
         except Exception as exc:
             self._append_log("Live monitor render failed: %s" % exc)
+
+    def _update_rf_sweep_jump_label(self, summary) -> None:
+        active = bool((summary or {}).get("rf_sweep_detection", {}).get("active"))
+        text = "Go To RF Sweep (active)" if active else "Go To RF Sweep"
+        for attr in ("monitor_jump_sweep_button", "monitor_window_jump_sweep_button"):
+            button = getattr(self, attr, None)
+            if button is not None:
+                try:
+                    button.configure(text=text)
+                except Exception:
+                    pass
 
     def _run_in_worker(self, target, *args) -> None:
         if self.worker is not None and self.worker.is_alive():
@@ -683,10 +703,10 @@ class SSMBGui:
             return
         window = tk.Toplevel(self.root)
         window.title("SSMB Live Monitor")
-        window.geometry("1380x900")
+        window.geometry("1560x920")
         outer = ttk.Frame(window, padding=10)
         outer.pack(fill="both", expand=True)
-        outer.columnconfigure(0, weight=3)
+        outer.columnconfigure(0, weight=5)
         outer.columnconfigure(1, weight=2)
         outer.rowconfigure(0, weight=1)
         left = ttk.Frame(outer)
@@ -704,17 +724,25 @@ class SSMBGui:
         self.monitor_window_theory_text = None
         left.columnconfigure(0, weight=1)
         left.columnconfigure(1, weight=1)
-        right.rowconfigure(3, weight=1)
+        left.columnconfigure(2, weight=1)
+        right.rowconfigure(2, weight=1)
         right.columnconfigure(0, weight=1)
-        summary_frame = ttk.Labelframe(right, text="Theory And Value Pipeline", padding=8)
-        summary_frame.grid(row=0, column=0, sticky="nsew")
-        self.monitor_window_theory_text = tk.Text(summary_frame, wrap="word", height=18)
-        self.monitor_window_theory_text.pack(fill="both", expand=True)
-        self.monitor_window_theory_text.configure(state="disabled")
-        ttk.Button(right, text="Open Oscillation Study", command=self._open_oscillation_window).grid(row=1, column=0, sticky="e", pady=(8, 0))
-        ttk.Button(right, text="Open Theory Window", command=self._open_theory_window).grid(row=1, column=0, sticky="w", pady=(8, 0))
-        ttk.Label(right, text="Current channel snapshot").grid(row=2, column=0, sticky="w", pady=(8, 0))
-        self.monitor_window_channels_text = tk.Text(right, wrap="none", height=18)
+        button_row = ttk.Frame(right)
+        button_row.grid(row=0, column=0, sticky="ew")
+        ttk.Button(button_row, text="Open Theory Window", command=self._open_theory_window).pack(side="left")
+        ttk.Button(button_row, text="Open Oscillation Study", command=self._open_oscillation_window).pack(side="left", padx=6)
+        self.monitor_window_jump_sweep_button = ttk.Button(button_row, text="Go To RF Sweep", command=self._focus_rf_sweep_tab)
+        self.monitor_window_jump_sweep_button.pack(side="left", padx=6)
+        ttk.Checkbutton(button_row, text="Log y-axis", variable=self.monitor_log_scale_var, command=lambda: self._update_monitor_dashboard(self.latest_monitor_summary)).pack(side="right")
+        helper = ttk.Label(
+            right,
+            text="Theory and derivations live in the separate Theory window so the monitor plots stay large enough to interpret.",
+            wraplength=360,
+            justify="left",
+        )
+        helper.grid(row=1, column=0, sticky="w", pady=(8, 8))
+        ttk.Label(right, text="Current channel snapshot").grid(row=2, column=0, sticky="w", pady=(0, 0))
+        self.monitor_window_channels_text = tk.Text(right, wrap="none", height=24)
         self.monitor_window_channels_text.grid(row=3, column=0, sticky="nsew")
         self.monitor_window_channels_text.configure(state="disabled")
         self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
@@ -733,33 +761,112 @@ class SSMBGui:
         self.monitor_plot_controls = {}
         self.monitor_plot_canvases = {}
 
+    def _focus_rf_sweep_tab(self) -> None:
+        notebook = getattr(self, "control_notebook", None)
+        target = getattr(self, "sweep_tab", None)
+        if notebook is not None and target is not None:
+            notebook.select(target)
+        try:
+            self.root.lift()
+            self.root.focus_force()
+        except Exception:
+            pass
+
     def _open_oscillation_window(self) -> None:
         if self.oscillation_window is not None and self.oscillation_window.winfo_exists():
             self.oscillation_window.lift()
             return
         window = tk.Toplevel(self.root)
         window.title("SSMB P1 Oscillation Study")
-        window.geometry("820x760")
+        window.geometry("1180x860")
         frame = ttk.Frame(window, padding=10)
         frame.pack(fill="both", expand=True)
-        text = tk.Text(frame, wrap="word")
-        text.pack(fill="both", expand=True)
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(1, weight=1)
+        text = tk.Text(frame, wrap="word", height=16)
+        text.grid(row=0, column=0, columnspan=2, sticky="nsew")
         text.configure(state="disabled")
+        plots = ttk.Frame(frame)
+        plots.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(10, 0))
+        plots.columnconfigure(0, weight=1)
+        plots.columnconfigure(1, weight=1)
+        plots.rowconfigure(0, weight=1)
+        plots.rowconfigure(1, weight=1)
+        canvases = []
+        for idx in range(4):
+            canvas = tk.Canvas(plots, bg="white", height=180, highlightthickness=1, highlightbackground="#cfd8dc")
+            canvas.grid(row=idx // 2, column=idx % 2, sticky="nsew", padx=4, pady=4)
+            canvases.append(canvas)
         self.oscillation_window = window
         self.oscillation_window_text = text
+        self.oscillation_plot_canvases = canvases
         self._update_oscillation_window(self.latest_monitor_summary or summarize_live_monitor([]))
         window.protocol("WM_DELETE_WINDOW", self._close_oscillation_window)
 
     def _update_oscillation_window(self, summary) -> None:
         if self.oscillation_window is None or not self.oscillation_window.winfo_exists():
             return
-        self._set_text_widget(self.oscillation_window_text, format_oscillation_study(summary or summarize_live_monitor([])))
+        safe_summary = summary or summarize_live_monitor([])
+        self._set_text_widget(self.oscillation_window_text, format_oscillation_study(safe_summary))
+        self._draw_oscillation_candidate_plots(safe_summary)
 
     def _close_oscillation_window(self) -> None:
         if self.oscillation_window is not None and self.oscillation_window.winfo_exists():
             self.oscillation_window.destroy()
         self.oscillation_window = None
         self.oscillation_window_text = None
+        self.oscillation_plot_canvases = []
+
+    def _draw_oscillation_candidate_plots(self, summary) -> None:
+        canvases = getattr(self, "oscillation_plot_canvases", [])
+        if not canvases:
+            return
+        trend_data = (summary or {}).get("trend_data", {})
+        osc = (summary or {}).get("oscillation_study", {}) or {}
+        candidates = list(osc.get("candidates", []))[:3]
+        while len(candidates) < 3:
+            candidates.append(None)
+        plot_defs = [
+            ("P1 avg only", [("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa")]),
+        ]
+        for candidate in candidates:
+            if candidate is None:
+                plot_defs.append(("Candidate pending", []))
+                continue
+            key = candidate.get("key")
+            label = candidate.get("label", key or "candidate")
+            meta = trend_definitions().get(key, {"color": "#455a64"})
+            plot_defs.append(
+                (
+                    "P1 vs %s" % label,
+                    [
+                        ("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa"),
+                        (label, list(trend_data.get(key, [])), meta["color"]),
+                    ],
+                )
+            )
+        for canvas, (title, payload) in zip(canvases, plot_defs):
+            canvas.delete("all")
+            width = int(canvas.winfo_width() or 420)
+            height = int(canvas.winfo_height() or 180)
+            if not payload:
+                canvas.create_rectangle(10, 10, width - 10, height - 10, outline="#cfd8dc")
+                canvas.create_text(width / 2, height / 2, text=title, fill="#90a4ae")
+                continue
+            normalized_payload = []
+            for series_label, values, color in payload:
+                valid = [float(value) for value in values if isinstance(value, (int, float))]
+                if len(valid) >= 2:
+                    mean = sum(valid) / len(valid)
+                    variance = sum((value - mean) ** 2 for value in valid) / max(len(valid) - 1, 1)
+                    std = math.sqrt(variance) if variance > 0.0 else 1.0
+                    norm_values = [None if not isinstance(value, (int, float)) else (float(value) - mean) / std for value in values]
+                else:
+                    norm_values = list(values)
+                normalized_payload.append((series_label, norm_values, color))
+            self._draw_multi_series(canvas, normalized_payload, 10, 10, width - 10, height - 10, max(10, len(normalized_payload[0][1])))
+            canvas.create_text(16, 14, anchor="nw", text=title, fill="#37474f", font=("Helvetica", 9, "bold"))
 
     def _update_monitor_dashboard(self, summary) -> None:
         if self.monitor_window is None or not self.monitor_window.winfo_exists():
@@ -783,16 +890,6 @@ class SSMBGui:
             self._set_text_widget(text_widget, lines)
             self._color_text_widget(text_widget, section.get("color", "green"))
             self._draw_section_plot(section)
-        theory_lines = []
-        for theory_section in build_theory_sections(summary):
-            theory_lines.append(theory_section["title"])
-            for eq in theory_section.get("equations", []):
-                theory_lines.append("  " + eq)
-            for line in theory_section.get("lines", []):
-                theory_lines.append("  " + line)
-            theory_lines.append("")
-        if self.monitor_window_theory_text is not None:
-            self._set_text_widget(self.monitor_window_theory_text, theory_lines)
         if self.theory_window is not None and self.theory_window.winfo_exists():
             self._update_theory_window(summary)
 
@@ -821,7 +918,11 @@ class SSMBGui:
             text.configure(state="disabled")
             selector_frame = ttk.Frame(top)
             selector_frame.grid(row=0, column=1, sticky="ns")
-            ttk.Label(selector_frame, text="Plot").pack(anchor="w")
+            selector_header = ttk.Frame(selector_frame)
+            selector_header.pack(anchor="w", fill="x")
+            ttk.Label(selector_header, text="Plot").pack(side="left")
+            help_button = ttk.Button(selector_header, text="?", width=2)
+            help_button.pack(side="right")
             selector = tk.Listbox(selector_frame, selectmode="multiple", exportselection=False, height=5, width=18)
             selector.pack(fill="y", expand=False)
             canvas = tk.Canvas(card, bg="white", width=280, height=120, highlightthickness=1, highlightbackground="#cfd8dc")
@@ -833,6 +934,7 @@ class SSMBGui:
                     {
                         "card": card,
                         "text": text,
+                        "help_button": help_button,
                         "selector": selector,
                         "canvas": canvas,
                     },
@@ -857,6 +959,7 @@ class SSMBGui:
                 if key in current_keys:
                     selector.selection_set(i)
             selector.bind("<<ListboxSelect>>", lambda _event, key=section["key"], opts=options, listbox=selector: self._on_monitor_plot_selected(key, opts, listbox))
+            widgets["help_button"].configure(command=lambda sec=section: self._show_monitor_section_help(sec))
             updated.append((section, widgets))
         self.monitor_section_widgets = updated
 
@@ -868,6 +971,19 @@ class SSMBGui:
             listbox.selection_set(0)
         self.monitor_plot_controls[section_key] = selected
         self._update_monitor_dashboard(self.latest_monitor_summary)
+
+    def _show_monitor_section_help(self, section: dict) -> None:
+        lines = [section.get("title", "Section"), ""]
+        if section.get("equations"):
+            lines.append("How values are derived:")
+            lines.extend(section["equations"])
+            lines.append("")
+        if section.get("note"):
+            lines.append(section["note"])
+        else:
+            lines.append("Live values and trends for this section.")
+        if messagebox is not None:
+            messagebox.showinfo(section.get("title", "Section help"), "\n".join(lines))
 
     def _draw_section_plot(self, section: dict) -> None:
         widgets = None
@@ -911,9 +1027,17 @@ class SSMBGui:
 
     def _draw_multi_series(self, canvas, series_payload, x0, y0, x1, y1, window_samples: int):
         canvas.create_rectangle(x0, y0, x1, y1, outline="#cfd8dc")
+        use_log = bool(self.monitor_log_scale_var.get())
         clean_all = []
         for _label, values, _color in series_payload:
-            clean_all.extend(float(v) for v in values if isinstance(v, (int, float)))
+            for value in values:
+                if isinstance(value, (int, float)):
+                    numeric = float(value)
+                    if use_log:
+                        if numeric <= 0.0:
+                            continue
+                        numeric = math.log10(numeric)
+                    clean_all.append(numeric)
         if not clean_all:
             canvas.create_text((x0 + x1) / 2, (y0 + y1) / 2, text="waiting for data", fill="#90a4ae")
             return
@@ -921,6 +1045,14 @@ class SSMBGui:
         vmax = max(clean_all)
         if vmax == vmin:
             vmax = vmin + 1.0
+        exponent = 0
+        scale = 1.0
+        if not use_log:
+            max_abs = max(abs(vmin), abs(vmax))
+            if max_abs > 0.0:
+                exponent = int(math.floor(math.log10(max_abs)))
+                if abs(exponent) >= 2:
+                    scale = 10.0 ** exponent
         try:
             interval_s = max(0.01, float(self.monitor_interval_var.get()))
         except Exception:
@@ -930,12 +1062,14 @@ class SSMBGui:
         plot_y0 = y0 + 34
         plot_x1 = x1 - 8
         plot_y1 = y1 - 22
+        axis_text = "log10 scale" if use_log else ("y / 1e%d" % exponent if scale != 1.0 else "linear scale")
         canvas.create_text(x0 + 4, y0 + 4, anchor="nw", text="last %d samples" % window_samples, fill="#607d8b", font=("Helvetica", 8))
-        canvas.create_text(x1 - 4, y0 + 4, anchor="ne", text="%.1f s window" % time_span_s, fill="#607d8b", font=("Helvetica", 8))
+        canvas.create_text(x1 - 4, y0 + 4, anchor="ne", text="%.1f s window | %s" % (time_span_s, axis_text), fill="#607d8b", font=("Helvetica", 8))
         for frac, value in ((0.0, vmax), (0.5, 0.5 * (vmin + vmax)), (1.0, vmin)):
             y = plot_y0 + frac * (plot_y1 - plot_y0)
             canvas.create_line(plot_x0, y, plot_x1, y, fill="#eceff1", dash=(2, 2))
-            canvas.create_text(plot_x0 - 4, y, anchor="e", text="%.3g" % value, fill="#607d8b", font=("Helvetica", 8))
+            display_value = value if use_log else value / scale
+            canvas.create_text(plot_x0 - 4, y, anchor="e", text="%.3g" % display_value, fill="#607d8b", font=("Helvetica", 8))
         for frac, label in ((0.0, "-%.0fs" % time_span_s), (0.5, "-%.0fs" % (0.5 * time_span_s)), (1.0, "now")):
             x = plot_x0 + frac * (plot_x1 - plot_x0)
             canvas.create_line(x, plot_y1, x, plot_y1 + 4, fill="#90a4ae")
@@ -944,7 +1078,17 @@ class SSMBGui:
         for idx, (label, values, color) in enumerate(series_payload):
             canvas.create_rectangle(x0 + 6, legend_y + idx * 12, x0 + 14, legend_y + 8 + idx * 12, fill=color, outline=color)
             canvas.create_text(x0 + 18, legend_y + 4 + idx * 12, anchor="w", text=label, fill="#37474f", font=("Helvetica", 8))
-            pts = self._series_to_points(values, plot_x0, plot_y0, plot_x1, plot_y1, reference=clean_all)
+            transformed = []
+            for value in values:
+                if not isinstance(value, (int, float)):
+                    transformed.append(None)
+                    continue
+                numeric = float(value)
+                if use_log:
+                    transformed.append(math.log10(numeric) if numeric > 0.0 else None)
+                else:
+                    transformed.append(numeric)
+            pts = self._series_to_points(transformed, plot_x0, plot_y0, plot_x1, plot_y1, reference=clean_all)
             if len(pts) >= 4:
                 canvas.create_line(*pts, fill=color, width=2, smooth=True)
 

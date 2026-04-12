@@ -614,6 +614,7 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 ("RF readback", "%s kHz" % _fmt(current.get("rf_readback_khz"))),
                 ("RF rdFrq499", "%s kHz" % _fmt(current.get("rf_readback_499mhz_khz"))),
                 ("RF offset", "%s Hz" % _fmt(current.get("rf_offset_hz"))),
+                ("RF sweep detected", "ON" if summary.get("rf_sweep_detection", {}).get("active") else "OFF/idle"),
                 ("L4 bump", "%s" % bump.get("state_label", "unknown")),
                 ("Bump max |I|", "%s A" % _fmt(bump.get("max_abs_corrector_a"))),
                 ("Nonlinear BPMs", ", ".join(current.get("nonlinear_bpms") or []) or "none"),
