@@ -360,6 +360,30 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         app._set_text_widget.assert_called_once()
         app._draw_lattice_item_history.assert_called_once()
 
+    def test_refresh_lattice_view_preserves_selected_optics_sample(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        class _Exists:
+            def winfo_exists(self):
+                return True
+
+        app = object.__new__(gui.SSMBGui)
+        app.lattice_window = _Exists()
+        app.latest_monitor_sample = {"channels": {}}
+        app.lattice_device_items = [{"name": "Optics functions"}]
+        app.selected_lattice_item_name = "Optics functions"
+        app.selected_lattice_optics_sample_index = 1
+        app.lattice_context = mock.Mock(optics_samples={"s_m": [0.0, 1.0, 2.0]})
+        app._show_lattice_optics_sample_info = mock.Mock()
+        app._show_lattice_item_info = mock.Mock()
+        app._set_text_widget = mock.Mock()
+        app.lattice_info_text = mock.Mock()
+
+        gui.SSMBGui._refresh_lattice_view(app)
+
+        app._show_lattice_optics_sample_info.assert_called_once_with({"index": 1, "s_m": 1.0})
+        app._show_lattice_item_info.assert_not_called()
+
     def test_monitor_window_render_smoke(self):
         import SSMB_experiment.ssmb_tool.gui as gui
         from SSMB_experiment.ssmb_tool.live_monitor import format_channel_snapshot, format_monitor_summary, summarize_live_monitor

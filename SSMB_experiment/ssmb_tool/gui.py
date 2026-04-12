@@ -2901,6 +2901,13 @@ class SSMBGui:
             return
         if not self.lattice_device_items:
             return
+        if self.selected_lattice_item_name == "Optics functions" and self.selected_lattice_optics_sample_index is not None:
+            optics = (self.lattice_context.optics_samples if self.lattice_context is not None else {}) or {}
+            s_values = list(optics.get("s_m", []))
+            idx = int(self.selected_lattice_optics_sample_index)
+            if 0 <= idx < len(s_values):
+                self._show_lattice_optics_sample_info({"index": idx, "s_m": float(s_values[idx])})
+                return
         if self.selected_lattice_item_name:
             for item in self.lattice_device_items:
                 if item.get("name") == self.selected_lattice_item_name:
@@ -3008,6 +3015,7 @@ class SSMBGui:
 
     def _show_lattice_item_info(self, item: dict) -> None:
         self.selected_lattice_item_name = item.get("name")
+        self.selected_lattice_optics_sample_index = None
         sample = self.latest_monitor_sample or {}
         channels = sample.get("channels", {})
         payload = channels.get(item.get("pv_label"), {}) if item.get("pv_label") else {}
