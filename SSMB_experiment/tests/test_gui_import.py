@@ -77,7 +77,7 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
 
         self.assertTrue(hasattr(gui.SSMBGui, "_open_monitor_window"))
 
-    def test_update_live_monitor_coalesces_monitor_window_render(self):
+    def test_update_live_monitor_does_not_live_render_monitor_window(self):
         import SSMB_experiment.ssmb_tool.gui as gui
 
         class _Exists:
@@ -93,7 +93,6 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         app.oscillation_window = None
         app._set_text_widget = mock.Mock()
         app._update_rf_sweep_jump_label = mock.Mock()
-        app._queue_monitor_window_render = mock.Mock()
         app._refresh_lattice_view = mock.Mock()
         app._append_log = mock.Mock()
         payload = {
@@ -105,10 +104,9 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         gui.SSMBGui._update_live_monitor(app, payload)
         self.assertEqual(app.latest_monitor_sample, payload["sample"])
         self.assertEqual(app.latest_monitor_summary, payload["summary"])
-        app._queue_monitor_window_render.assert_called_once()
         app._refresh_lattice_view.assert_called_once()
 
-    def test_flush_monitor_window_render_updates_widgets_and_dashboard(self):
+    def test_refresh_monitor_window_snapshot_updates_widgets_and_dashboard(self):
         import SSMB_experiment.ssmb_tool.gui as gui
 
         class _Exists:
@@ -119,19 +117,14 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         app.monitor_window = _Exists()
         app.monitor_window_summary_text = mock.Mock()
         app.monitor_window_channels_text = mock.Mock()
-        app._pending_monitor_window_payload = {
-            "summary_lines": ["sum"],
-            "channel_lines": ["chan"],
-            "summary": {"current": {}},
-        }
-        app._monitor_window_render_scheduled = True
-        app._last_monitor_window_render_monotonic = 0.0
+        app.latest_monitor_summary = {"current": {}}
+        app.latest_monitor_sample = {"channels": {}, "derived": {}}
+        app.live_spec_lookup = {}
+        app.monitor_history = []
         app._set_text_widget = mock.Mock()
         app._update_monitor_dashboard = mock.Mock()
         app._debug = mock.Mock()
-        gui.SSMBGui._flush_monitor_window_render(app)
-        self.assertFalse(app._monitor_window_render_scheduled)
-        self.assertIsNone(app._pending_monitor_window_payload)
+        gui.SSMBGui._refresh_monitor_window_snapshot(app)
         self.assertEqual(app._set_text_widget.call_count, 2)
         app._update_monitor_dashboard.assert_called_once()
 

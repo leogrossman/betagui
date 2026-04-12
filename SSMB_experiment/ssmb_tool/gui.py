@@ -103,9 +103,6 @@ class SSMBGui:
         self._pending_dashboard_summary = None
         self._dashboard_render_scheduled = False
         self._last_dashboard_render_monotonic = 0.0
-        self._pending_monitor_window_payload = None
-        self._monitor_window_render_scheduled = False
-        self._last_monitor_window_render_monotonic = 0.0
         self.monitor_window: Optional["tk.Toplevel"] = None
         self.theory_window: Optional["tk.Toplevel"] = None
         self.oscillation_window: Optional["tk.Toplevel"] = None
@@ -1078,49 +1075,11 @@ class SSMBGui:
         self._set_text_widget(self.monitor_channels_text, channel_lines)
         try:
             self._update_rf_sweep_jump_label(payload.get("summary"))
-            if self.monitor_window is not None and self.monitor_window.winfo_exists():
-                self._queue_monitor_window_render(
-                    {
-                        "summary_lines": summary_lines,
-                        "channel_lines": channel_lines,
-                        "summary": payload.get("summary"),
-                    }
-                )
             if self.oscillation_window is not None and self.oscillation_window.winfo_exists():
                 self._update_oscillation_window(self._ensure_extended_monitor_summary() or payload.get("summary"))
             self._refresh_lattice_view()
         except Exception as exc:
             self._append_log("Live monitor render failed: %s" % exc)
-
-    def _queue_monitor_window_render(self, payload: dict) -> None:
-        self._pending_monitor_window_payload = payload
-        if self._monitor_window_render_scheduled:
-            return
-        now = time.monotonic()
-        delay_ms = max(0, int((MONITOR_WINDOW_RENDER_MIN_S - (now - self._last_monitor_window_render_monotonic)) * 1000.0))
-        self._monitor_window_render_scheduled = True
-        self.root.after(delay_ms, self._flush_monitor_window_render)
-
-    def _flush_monitor_window_render(self) -> None:
-        self._monitor_window_render_scheduled = False
-        payload = self._pending_monitor_window_payload
-        self._pending_monitor_window_payload = None
-        if self.monitor_window is None or not self.monitor_window.winfo_exists() or payload is None:
-            return
-        started = time.monotonic()
-        summary_widget = getattr(self, "monitor_window_summary_text", None)
-        channel_widget = getattr(self, "monitor_window_channels_text", None)
-        if summary_widget is not None:
-            self._set_text_widget(summary_widget, payload.get("summary_lines", []))
-        if channel_widget is not None:
-            self._set_text_widget(channel_widget, payload.get("channel_lines", []))
-        self._update_monitor_dashboard(payload.get("summary"))
-        self._last_monitor_window_render_monotonic = time.monotonic()
-        elapsed = self._last_monitor_window_render_monotonic - started
-        if elapsed > 0.25:
-            self._debug("monitor window render took %.3f s" % elapsed)
-        if self._pending_monitor_window_payload is not None:
-            self._queue_monitor_window_render(self._pending_monitor_window_payload)
 
     def _queue_monitor_dashboard_render(self, summary) -> None:
         self._pending_dashboard_summary = summary
@@ -1355,7 +1314,9 @@ class SSMBGui:
         ttk.Button(button_row, text="Live Monitor Settings…", command=self._open_monitor_settings_window).pack(side="left", padx=6)
         self.monitor_window_jump_sweep_button = ttk.Button(button_row, text="Go To RF Sweep", command=self._focus_rf_sweep_tab)
         self.monitor_window_jump_sweep_button.pack(side="left", padx=6)
-        ttk.Checkbutton(button_row, text="Log y-axis", variable=self.monitor_log_scale_var, command=lambda: self._queue_monitor_window_render({"summary_lines": self.monitor_summary_text.get("1.0", "end").splitlines(), "channel_lines": self.monitor_channels_text.get("1.0", "end").splitlines(), "summary": self.latest_monitor_summary})).pack(side="right")
+        ttk.Checkbutton(button_row, text="Log y-axis", variable=self.monitor_log_scale_var, command=self._refresh_monitor_window_snapshot).pack(side="right")
+        ttk.Button(button_row, text="Refresh From Buffer", command=self._refresh_monitor_window_snapshot).pack(side="left", padx=6)
+        ttk.Button(button_row, text="Reload From Cache", command=self._reload_monitor_window_from_cache).pack(side="left", padx=6)
         state_row = ttk.Frame(top_left)
         state_row.grid(row=1, column=0, sticky="nw", pady=(8, 6))
         ttk.Label(state_row, text="Machine state").pack(side="left")
@@ -1369,7 +1330,7 @@ class SSMBGui:
         self.monitor_window_logger_state.pack(side="left", padx=6)
         helper = ttk.Label(
             top_left,
-            text="Theory and derivations live in the separate Theory window so the monitor plots stay large enough to interpret.",
+            text="This popout is a snapshot/history viewer for stability. Live monitor sampling keeps running in the main tool; use Refresh From Buffer or Reload From Cache to update this window.",
             wraplength=620,
             justify="left",
         )
@@ -1410,13 +1371,7 @@ class SSMBGui:
             self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
             self._set_text_widget(self.monitor_window_summary_text, self.monitor_summary_text.get("1.0", "end").splitlines())
         if self.latest_monitor_summary is not None:
-            self._queue_monitor_window_render(
-                {
-                    "summary_lines": self.monitor_summary_text.get("1.0", "end").splitlines(),
-                    "channel_lines": self.monitor_channels_text.get("1.0", "end").splitlines(),
-                    "summary": self.latest_monitor_summary,
-                }
-            )
+            self._refresh_monitor_window_snapshot()
         try:
             window.update_idletasks()
             window.deiconify()
@@ -1442,12 +1397,51 @@ class SSMBGui:
         self.monitor_plot_settings = {}
         self._pending_dashboard_summary = None
         self._dashboard_render_scheduled = False
-        self._pending_monitor_window_payload = None
-        self._monitor_window_render_scheduled = False
         self.monitor_window_rf_state = None
         self.monitor_window_bump_state = None
         self.monitor_window_temp_state = None
         self.monitor_window_logger_state = None
+
+    def _refresh_monitor_window_snapshot(self) -> None:
+        if self.monitor_window is None or not self.monitor_window.winfo_exists():
+            return
+        summary = self.latest_monitor_summary
+        sample = self.latest_monitor_sample
+        if summary is None and self.monitor_history:
+            summary = summarize_live_monitor(
+                list(self.monitor_history),
+                extra_candidate_keys=self._extra_oscillation_candidates(),
+                include_oscillation=False,
+                include_extended=False,
+            )
+        if sample is None and self.monitor_history:
+            sample = self.monitor_history[-1]
+        summary_lines = format_monitor_summary(summary) if summary is not None else [
+            "SSMB Live Monitor",
+            "",
+            "No live summary yet.",
+            "Start Live Monitor or reload a recent history cache.",
+        ]
+        channel_lines = format_channel_snapshot(sample, self.live_spec_lookup) if sample is not None else [
+            "No live sample yet.",
+            "",
+            "Start Live Monitor or reload a recent history cache.",
+        ]
+        if self.monitor_window_summary_text is not None:
+            self._set_text_widget(self.monitor_window_summary_text, summary_lines)
+        if self.monitor_window_channels_text is not None:
+            self._set_text_widget(self.monitor_window_channels_text, channel_lines)
+        started = time.monotonic()
+        self._update_monitor_dashboard(summary)
+        elapsed = time.monotonic() - started
+        if elapsed > 0.25:
+            self._debug("monitor window snapshot render took %.3f s" % elapsed)
+
+    def _reload_monitor_window_from_cache(self) -> None:
+        if self.monitor_window is None or not self.monitor_window.winfo_exists():
+            return
+        self._load_monitor_history_cache()
+        self._refresh_monitor_window_snapshot()
 
     def _focus_rf_sweep_tab(self) -> None:
         notebook = getattr(self, "control_notebook", None)
