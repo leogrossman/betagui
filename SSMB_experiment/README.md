@@ -12,6 +12,10 @@ Use it when you want:
 
 The fallback remains the original `SSMB/` folder.
 
+Open feature requests and still-pending polish items are tracked in:
+
+- [`TODO.md`](./TODO.md)
+
 Recovered from the bump-correction notebook, the present L4 bump uses four
 horizontal corrector dipoles rather than the main ring dipoles:
 

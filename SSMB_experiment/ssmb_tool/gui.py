@@ -278,29 +278,21 @@ class SSMBGui:
     def _build_monitor_tab(self, frame: "ttk.Frame") -> None:
         row = 0
         info = "Read-only live SSMB monitor. Use this before the experiment or during another operator's RF sweep to preview the same observables without saving data."
-        ttk.Label(frame, text=info, wraplength=380, justify="left").grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 8))
-        row += 1
-        ttk.Label(frame, text="Monitor interval [s]").grid(row=row, column=0, sticky="w")
-        ttk.Entry(frame, textvariable=self.monitor_interval_var, width=12).grid(row=row, column=1, sticky="w", pady=2)
-        ttk.Label(frame, text="Rolling window [samples]").grid(row=row, column=2, sticky="w")
-        ttk.Entry(frame, textvariable=self.rolling_window_var, width=12).grid(row=row, column=3, sticky="w", pady=2)
-        ttk.Checkbutton(frame, text="Log y-axis where possible", variable=self.monitor_log_scale_var).grid(row=row, column=4, sticky="w", padx=(10, 0))
-        row += 1
-        ttk.Label(frame, text="Extra oscillation candidates").grid(row=row, column=0, sticky="w")
-        ttk.Entry(frame, textvariable=self.monitor_candidate_keys_var, width=42).grid(row=row, column=1, columnspan=3, sticky="ew", pady=2)
-        chooser = ttk.Frame(frame)
-        chooser.grid(row=row, column=4, sticky="w")
-        ttk.Label(chooser, text="trend keys, comma-separated", foreground="#607d8b").pack(side="left")
-        ttk.Button(chooser, text="Choose...", command=self._open_candidate_picker).pack(side="left", padx=(6, 0))
+        ttk.Label(frame, text=info, wraplength=520, justify="left").grid(row=row, column=0, columnspan=4, sticky="w", pady=(0, 8))
         row += 1
         extra_row = ttk.Frame(frame)
-        extra_row.grid(row=row, column=0, columnspan=5, sticky="ew", pady=(0, 8))
-        ttk.Label(extra_row, text="Live monitor channels").pack(side="left")
-        ttk.Button(extra_row, text="Configure…", command=self._open_monitor_settings_window).pack(side="left", padx=6)
-        ttk.Label(extra_row, text="Choose extra channels for live context, oscillation checks, and lattice-history inspection.", foreground="#607d8b").pack(side="left")
+        extra_row.grid(row=row, column=0, columnspan=4, sticky="ew", pady=(0, 8))
+        ttk.Button(extra_row, text="Live Monitor Settings…", command=self._open_monitor_settings_window).pack(side="left")
+        ttk.Label(
+            extra_row,
+            text="Sampling rate, rolling window, extra live channels, and extra oscillation candidates now live in the settings window so the main monitor tab stays uncluttered.",
+            foreground="#607d8b",
+            wraplength=680,
+            justify="left",
+        ).pack(side="left", padx=(8, 0))
         row += 1
         button_row = ttk.Frame(frame)
-        button_row.grid(row=row, column=0, columnspan=5, sticky="ew", pady=(8, 8))
+        button_row.grid(row=row, column=0, columnspan=4, sticky="ew", pady=(8, 8))
         self.start_monitor_button = ttk.Button(button_row, text="Start Live Monitor", command=self._start_monitor)
         self.start_monitor_button.pack(side="left")
         self.stop_monitor_button = ttk.Button(button_row, text="Stop Live Monitor", command=self._stop_monitor)
@@ -386,7 +378,7 @@ class SSMBGui:
     def _open_monitor_settings_window(self) -> None:
         window = tk.Toplevel(self.root)
         window.title("Live Monitor Settings")
-        window.geometry("720x700")
+        window.geometry("1100x760")
         frame = ttk.Frame(window, padding=10)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(0, weight=1)
@@ -415,20 +407,65 @@ class SSMBGui:
         labels = [spec.label for spec in specs if spec.pv]
         selected_now = set(self._extra_monitor_labels())
 
-        ttk.Label(frame, text="Extra live channels").grid(row=2, column=0, sticky="w", pady=(10, 4))
+        ttk.Label(frame, text="Live monitor channel table").grid(row=2, column=0, sticky="w", pady=(10, 4))
         picker = ttk.Frame(frame)
         picker.grid(row=3, column=0, sticky="nsew")
         picker.columnconfigure(0, weight=1)
         picker.rowconfigure(0, weight=1)
-        listbox = tk.Listbox(picker, selectmode="multiple", exportselection=False)
-        listbox.grid(row=0, column=0, sticky="nsew")
-        scroll = ttk.Scrollbar(picker, orient="vertical", command=listbox.yview)
+        current_selected = set(selected_now)
+        table = ttk.Treeview(
+            picker,
+            columns=("use", "label", "pv", "tags", "notes"),
+            show="headings",
+            height=18,
+            selectmode="extended",
+        )
+        for col, title, width in (
+            ("use", "Use", 55),
+            ("label", "Label", 180),
+            ("pv", "PV", 280),
+            ("tags", "Tags", 160),
+            ("notes", "Notes / used for", 360),
+        ):
+            table.heading(col, text=title)
+            table.column(col, width=width, anchor="w")
+        table.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(picker, orient="vertical", command=table.yview)
         scroll.grid(row=0, column=1, sticky="ns")
-        listbox.configure(yscrollcommand=scroll.set)
-        for idx, label in enumerate(labels):
-            listbox.insert("end", label)
-            if label in selected_now:
-                listbox.selection_set(idx)
+        table.configure(yscrollcommand=scroll.set)
+        spec_map = {spec.label: spec for spec in specs if spec.pv}
+        for label in labels:
+            spec = spec_map[label]
+            use = "[x]" if label in current_selected else "[ ]"
+            table.insert(
+                "",
+                "end",
+                iid=label,
+                values=(use, label, spec.pv or "", ", ".join(spec.tags or ()), spec.notes or ""),
+            )
+            if label in current_selected:
+                table.selection_add(label)
+
+        def sync_selection(_event=None):
+            chosen = set(table.selection())
+            for label in labels:
+                current_use = "[x]" if label in chosen else "[ ]"
+                table.set(label, "use", current_use)
+
+        table.bind("<<TreeviewSelect>>", sync_selection)
+        def toggle_row(event):
+            row_id = table.identify_row(event.y)
+            if not row_id:
+                return
+            current = set(table.selection())
+            if row_id in current:
+                current.remove(row_id)
+            else:
+                current.add(row_id)
+            table.selection_set(tuple(current))
+            sync_selection()
+            return "break"
+        table.bind("<Double-1>", toggle_row)
 
         summary_text = tk.Text(frame, wrap="word", height=8)
         summary_text.grid(row=4, column=0, sticky="ew", pady=(8, 0))
@@ -451,9 +488,8 @@ class SSMBGui:
         def apply_settings():
             self.monitor_interval_var.set(monitor_interval_var.get().strip() or self.monitor_interval_var.get())
             self.rolling_window_var.set(rolling_window_var.get().strip() or self.rolling_window_var.get())
-            selected = [labels[index] for index in listbox.curselection()]
+            selected = list(table.selection())
             self.monitor_extra_labels_var.set(", ".join(selected))
-            self.monitor_candidate_keys_var.set(", ".join(sorted(set(self._extra_oscillation_candidates() + selected))))
             window.destroy()
             self._update_monitor_dashboard(self.latest_monitor_summary)
             self._update_oscillation_window(self.latest_monitor_summary)
@@ -1237,6 +1273,18 @@ class SSMBGui:
             logger_running = self.stage0_stop_event is not None or (self.worker is not None and self.worker.is_alive())
             logger_widget.configure(text="Logger active" if logger_running else "Logger idle", bg="#ef6c00" if logger_running else "#546e7a")
 
+    def _format_plot_value(self, value) -> str:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return "n/a"
+        if numeric == 0.0:
+            return "0"
+        magnitude = abs(numeric)
+        if magnitude >= 1.0e3 or magnitude < 1.0e-2:
+            return "%.2e" % numeric
+        return "%.4g" % numeric
+
     def _ensure_monitor_cards(self, sections) -> None:
         container = getattr(self, "monitor_cards_container", None)
         if container is None:
@@ -1249,27 +1297,35 @@ class SSMBGui:
             card = ttk.Labelframe(container, text="Section", padding=8)
             card.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
             card.columnconfigure(0, weight=1)
-            card.columnconfigure(1, weight=0)
-            top = ttk.Frame(card)
-            top.grid(row=0, column=0, columnspan=2, sticky="nsew")
-            top.columnconfigure(0, weight=1)
-            text = tk.Text(top, wrap="word", height=6, width=56)
-            text.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-            text.configure(state="disabled")
-            selector_frame = ttk.Frame(top)
-            selector_frame.grid(row=0, column=1, sticky="ns")
-            selector_header = ttk.Frame(selector_frame)
-            selector_header.pack(anchor="w", fill="x")
+            card.rowconfigure(0, weight=1)
+            body = ttk.Frame(card)
+            body.grid(row=0, column=0, sticky="nsew")
+            body.columnconfigure(0, weight=1)
+            body.columnconfigure(1, weight=0)
+            body.rowconfigure(0, weight=1)
+            canvas = tk.Canvas(body, bg="white", width=760, height=280, highlightthickness=1, highlightbackground="#cfd8dc")
+            canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+            side = ttk.Frame(body)
+            side.grid(row=0, column=1, sticky="ns")
+            side.rowconfigure(1, weight=1)
+            selector_header = ttk.Frame(side)
+            selector_header.grid(row=0, column=0, sticky="ew")
             ttk.Label(selector_header, text="Plot").pack(side="left")
             help_button = ttk.Button(selector_header, text="?", width=2)
             help_button.pack(side="right")
             settings_button = ttk.Button(selector_header, text="⚙", width=2)
             settings_button.pack(side="right", padx=(0, 4))
-            selector = tk.Listbox(selector_frame, selectmode="multiple", exportselection=False, height=6, width=34)
-            selector.pack(fill="y", expand=False)
-            canvas = tk.Canvas(card, bg="white", width=560, height=260, highlightthickness=1, highlightbackground="#cfd8dc")
-            canvas.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(6, 0))
-            card.rowconfigure(1, weight=1)
+            selector = ttk.Treeview(side, columns=("enabled", "metric", "value"), show="headings", height=8, selectmode="extended")
+            selector.heading("enabled", text="Use")
+            selector.heading("metric", text="Metric")
+            selector.heading("value", text="Latest")
+            selector.column("enabled", width=44, anchor="center")
+            selector.column("metric", width=180, anchor="w")
+            selector.column("value", width=88, anchor="e")
+            selector.grid(row=1, column=0, sticky="ns")
+            text = tk.Text(card, wrap="word", height=3, width=80)
+            text.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+            text.configure(state="disabled")
             self.monitor_section_widgets.append(
                 (
                     sections[idx],
@@ -1288,9 +1344,8 @@ class SSMBGui:
             widgets = self.monitor_section_widgets[idx][1]
             selector = widgets["selector"]
             options = section.get("trend_options", [])
-            selector.delete(0, "end")
-            for name in options:
-                selector.insert("end", trend_definitions()[name]["label"])
+            for item in selector.get_children():
+                selector.delete(item)
             current_keys = self.monitor_plot_controls.get(section["key"])
             if not current_keys:
                 current_keys = [section.get("default_trend")] if section.get("default_trend") else []
@@ -1298,22 +1353,33 @@ class SSMBGui:
             if not current_keys and options:
                 current_keys = [options[0]]
             self.monitor_plot_controls[section["key"]] = current_keys
-            for i, key in enumerate(options):
+            trend_data = (self.latest_monitor_summary or {}).get("trend_data", {})
+            for key in options:
+                values = [value for value in trend_data.get(key, []) if isinstance(value, (int, float))]
+                latest = values[-1] if values else None
+                selector.insert(
+                    "",
+                    "end",
+                    iid=key,
+                    values=("[x]" if key in current_keys else "[ ]", trend_definitions()[key]["label"], self._format_plot_value(latest)),
+                )
                 if key in current_keys:
-                    selector.selection_set(i)
-            selector.bind("<<ListboxSelect>>", lambda _event, key=section["key"], opts=options, listbox=selector: self._on_monitor_plot_selected(key, opts, listbox))
+                    selector.selection_add(key)
+            selector.bind("<<TreeviewSelect>>", lambda _event, key=section["key"], opts=options, tree=selector: self._on_monitor_plot_selected(key, opts, tree))
             widgets["help_button"].configure(command=lambda sec=section: self._show_monitor_section_help(sec))
             widgets["settings_button"].configure(command=lambda sec=section: self._open_monitor_plot_settings(sec))
             updated.append((section, widgets))
         self.monitor_section_widgets = updated
 
-    def _on_monitor_plot_selected(self, section_key: str, options: Sequence[str], listbox) -> None:
-        indices = listbox.curselection()
-        selected = [options[index] for index in indices if 0 <= index < len(options)]
+    def _on_monitor_plot_selected(self, section_key: str, options: Sequence[str], tree) -> None:
+        selected = [item for item in tree.selection() if item in options]
         if not selected and options:
             selected = [options[0]]
-            listbox.selection_set(0)
+            tree.selection_set(options[0])
         self.monitor_plot_controls[section_key] = selected
+        for key in options:
+            if tree.exists(key):
+                tree.set(key, "enabled", "[x]" if key in selected else "[ ]")
         self._update_monitor_dashboard(self.latest_monitor_summary)
 
     def _show_monitor_section_help(self, section: dict) -> None:
@@ -1483,6 +1549,21 @@ class SSMBGui:
             if len(pts) >= 4:
                 canvas.create_line(*pts, fill=color, width=2, smooth=True)
 
+    def _draw_beam_proxy(self, canvas, center_x, sigma_x, sigma_y, x0, y0, x1, y1, title):
+        canvas.create_rectangle(x0, y0, x1, y1, outline="#d7ccc8")
+        canvas.create_text((x0 + x1) / 2, y0 + 8, text=title, anchor="n", fill="#6d4c41", font=("Helvetica", 8, "bold"))
+        width = max(10.0, x1 - x0 - 18.0)
+        height = max(10.0, y1 - y0 - 26.0)
+        cx = x0 + 9.0 + width / 2.0
+        if isinstance(center_x, (int, float)):
+            cx += max(-0.35, min(0.35, float(center_x) / 1000.0)) * width
+        cy = y0 + 18.0 + height / 2.0
+        sx = max(6.0, min(width * 0.4, 20.0 + 140.0 * abs(float(sigma_x or 0.0))))
+        sy = max(6.0, min(height * 0.4, 20.0 + 140.0 * abs(float(sigma_y or 0.0))))
+        canvas.create_line(x0 + 9, cy, x1 - 9, cy, fill="#eceff1")
+        canvas.create_line(cx, y0 + 18, cx, y1 - 8, fill="#eceff1")
+        canvas.create_oval(cx - sx, cy - sy, cx + sx, cy + sy, fill="#f3e5f5", outline="#8e24aa", width=2)
+
     def _draw_overlay_series(self, canvas, series_a, series_b, x0, y0, x1, y1, color_a, color_b, label):
         canvas.create_rectangle(x0, y0, x1, y1, outline="#cfd8dc")
         canvas.create_text(x0 + 4, y0 + 4, anchor="nw", text=label, fill="#37474f")
@@ -1642,7 +1723,7 @@ class SSMBGui:
                     "x": x,
                     "y": row_y,
                     "row": row_y,
-                    "click_radius": 16 if element.element_type == "Monitor" else 18,
+                    "click_radius": 20 if element.element_type == "Monitor" else (26 if element.element_type == "RFCavity" else 24),
                 }
             )
             if element.element_type in ("RFCavity",):
@@ -1809,8 +1890,15 @@ class SSMBGui:
     def _on_lattice_click(self, event) -> None:
         if not self.lattice_device_items:
             return
+        candidates = [
+            item
+            for item in self.lattice_device_items
+            if abs(item["x"] - event.x) <= item.get("click_radius", 18)
+            and abs(item.get("row", item["y"]) - event.y) <= max(18, item.get("click_radius", 18))
+        ]
+        pool = candidates or self.lattice_device_items
         nearest = min(
-            self.lattice_device_items,
+            pool,
             key=lambda item: (item["x"] - event.x) ** 2 + ((item.get("row", item["y"]) - event.y) * 1.35) ** 2,
         )
         self._show_lattice_item_info(nearest)
@@ -1936,6 +2024,35 @@ class SSMBGui:
             return
         self._draw_multi_series(canvas, series_payload, 10, 10, width - 10, height - 10, max(20, max(len(values) for _label, values, _color in series_payload)))
         canvas.create_text(width / 2, 12, anchor="n", text="%s live history" % item.get("name", "device"), fill="#37474f", font=("Helvetica", 10, "bold"))
+        first_values = [float(value) for value in series_payload[0][1] if isinstance(value, (int, float))]
+        if first_values:
+            mean = sum(first_values) / len(first_values)
+            canvas.create_text(width - 12, height - 10, anchor="se", text="mean %.3g" % mean, fill="#546e7a", font=("Helvetica", 8))
+        channels = ((self.latest_monitor_sample or {}).get("channels", {}) or {})
+        if item.get("name") == "QPD00ZL4RP":
+            self._draw_beam_proxy(
+                canvas,
+                (self.latest_monitor_summary or {}).get("current", {}).get("qpd_l4_center_x_avg_um"),
+                (self.latest_monitor_summary or {}).get("current", {}).get("qpd_l4_sigma_x_mm"),
+                (self.latest_monitor_summary or {}).get("current", {}).get("qpd_l4_sigma_y_mm"),
+                width - 150,
+                24,
+                width - 16,
+                118,
+                "QPD00 beam proxy",
+            )
+        elif item.get("name") == "QPD01ZL2RP":
+            self._draw_beam_proxy(
+                canvas,
+                (self.latest_monitor_summary or {}).get("current", {}).get("qpd_l2_center_x_avg_um"),
+                (channels.get("qpd_l2_sigma_x", {}) or {}).get("value"),
+                (channels.get("qpd_l2_sigma_y", {}) or {}).get("value"),
+                width - 150,
+                24,
+                width - 16,
+                118,
+                "QPD01 beam proxy",
+            )
 
     def _history_series_for_label(self, label):
         if not label:
@@ -2066,19 +2183,18 @@ class SSMBGui:
             return
         window = tk.Toplevel(self.root)
         window.title("Experimental Bump Lab")
-        window.geometry("1480x920")
+        window.geometry("1700x980")
         outer = ttk.Frame(window, padding=10)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=0)
         outer.columnconfigure(1, weight=1)
-        outer.rowconfigure(0, weight=1)
+        outer.rowconfigure(0, weight=0)
+        outer.rowconfigure(1, weight=1)
+        outer.rowconfigure(2, weight=1)
         left = ttk.Frame(outer)
         left.grid(row=0, column=0, sticky="nsw", padx=(0, 10))
         right = ttk.Frame(outer)
         right.grid(row=0, column=1, sticky="nsew")
-        right.rowconfigure(1, weight=2)
-        right.rowconfigure(3, weight=1)
-        right.rowconfigure(5, weight=1)
         right.columnconfigure(0, weight=1)
         right.columnconfigure(1, weight=1)
 
@@ -2108,24 +2224,24 @@ class SSMBGui:
         ttk.Button(button_row, text="Open Theory Window", command=self._open_theory_window).pack(side="left", padx=4)
         row += 1
 
-        ttk.Label(right, text="Live bump and undulator-side trends").grid(row=0, column=0, columnspan=2, sticky="w")
-        plot_frame = ttk.Frame(right)
-        plot_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        ttk.Label(right, text="Experimental bump-lab live summary").grid(row=0, column=0, columnspan=2, sticky="w")
+        self.bump_lab_summary_text = tk.Text(right, wrap="word", height=12)
+        self.bump_lab_summary_text.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        self.bump_lab_summary_text.configure(state="disabled")
+        ttk.Label(outer, text="Live bump and undulator-side trends").grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        plot_frame = ttk.Frame(outer)
+        plot_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
         plot_frame.columnconfigure(0, weight=1)
         plot_frame.columnconfigure(1, weight=1)
         plot_frame.rowconfigure(0, weight=1)
-        bump_canvas = tk.Canvas(plot_frame, bg="white", height=320, highlightthickness=1, highlightbackground="#cfd8dc")
+        bump_canvas = tk.Canvas(plot_frame, bg="white", height=360, highlightthickness=1, highlightbackground="#cfd8dc")
         bump_canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
-        und_canvas = tk.Canvas(plot_frame, bg="white", height=320, highlightthickness=1, highlightbackground="#cfd8dc")
+        und_canvas = tk.Canvas(plot_frame, bg="white", height=360, highlightthickness=1, highlightbackground="#cfd8dc")
         und_canvas.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
         self.bump_lab_plot_canvases = {"bump": bump_canvas, "undulator": und_canvas}
-        ttk.Label(right, text="Experimental bump-lab live summary").grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        self.bump_lab_summary_text = tk.Text(right, wrap="word", height=12)
-        self.bump_lab_summary_text.grid(row=3, column=0, columnspan=2, sticky="nsew")
-        self.bump_lab_summary_text.configure(state="disabled")
-        ttk.Label(right, text="Notebook-export source reference").grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(right, text="Notebook-export source reference").grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self.bump_lab_source_text = tk.Text(right, wrap="none", height=18)
-        self.bump_lab_source_text.grid(row=5, column=0, columnspan=2, sticky="nsew")
+        self.bump_lab_source_text.grid(row=3, column=0, columnspan=2, sticky="nsew")
         self.bump_lab_source_text.configure(state="disabled")
         source_path = SSMB_ROOT / "references" / "OrbitControlL4Bump_test_20250307.py"
         try:
@@ -2317,6 +2433,8 @@ class SSMBGui:
             self.queue.put({"kind": "bump_lab_done"})
 
     def _match_spec_label(self, specs, element: LatticeElement):
+        if element.element_type == "RFCavity":
+            return "cavity_voltage_kv"
         family = element.family_name.lower()
         candidates = [family, family + "_x", family + "_y"]
         for spec in specs:
