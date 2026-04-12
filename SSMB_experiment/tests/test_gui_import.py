@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 
 class SSMBExperimentGuiImportTest(unittest.TestCase):
@@ -60,6 +61,15 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         self.assertLessEqual(len(sampled), 101)
         self.assertEqual(sampled[-1], values[-1])
         self.assertEqual(sampled[0], values[0])
+
+    def test_monitor_history_path_uses_tempdir_by_default(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        app = object.__new__(gui.SSMBGui)
+        with mock.patch.dict(gui.os.environ, {}, clear=False):
+            path = gui.SSMBGui._monitor_history_path(app)
+        self.assertIn("ssmb_experiment_live_monitor", str(path))
+        self.assertNotIn("/tmp/betagui/SSMB_experiment/.ssmb_local", str(path))
 
 
 if __name__ == "__main__":

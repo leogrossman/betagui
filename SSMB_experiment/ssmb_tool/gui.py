@@ -10,6 +10,7 @@ import signal
 import shutil
 import threading
 import time
+import tempfile
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -464,7 +465,12 @@ class SSMBGui:
         return labels
 
     def _monitor_history_path(self) -> Path:
-        return SSMB_ROOT / ".ssmb_local" / "live_monitor" / "history.jsonl"
+        override = os.environ.get("SSMB_MONITOR_CACHE_DIR", "").strip()
+        if override:
+            root = Path(override).expanduser()
+        else:
+            root = Path(tempfile.gettempdir()) / "ssmb_experiment_live_monitor" / os.environ.get("USER", "unknown")
+        return root / "history.jsonl"
 
     def _debug(self, message: str) -> None:
         print("[ssmb_gui] %s" % message, flush=True)
@@ -525,6 +531,8 @@ class SSMBGui:
             self.monitor_history.popleft()
 
     def _append_monitor_history_cache(self, sample: dict) -> None:
+        if os.environ.get("SSMB_DISABLE_MONITOR_CACHE", "").strip() in ("1", "true", "TRUE", "yes", "YES"):
+            return
         path = self._monitor_history_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as stream:
@@ -547,6 +555,9 @@ class SSMBGui:
 
     def _load_monitor_history_cache(self) -> None:
         path = self._monitor_history_path()
+        if os.environ.get("SSMB_DISABLE_MONITOR_CACHE", "").strip() in ("1", "true", "TRUE", "yes", "YES"):
+            self._debug("live monitor cache disabled by environment")
+            return
         if not path.exists():
             return
         now = time.time()
@@ -1106,6 +1117,7 @@ class SSMBGui:
         if interval <= 0.0:
             raise ValueError("Monitor interval must be positive.")
         self._debug("start monitor requested: interval=%s history_span=%s" % (interval, self.monitor_history_span_var.get()))
+        self._debug("monitor cache path: %s" % self._monitor_history_path())
         self.monitor_history.clear()
         self.monitor_stop_event = threading.Event()
         self.start_monitor_button.state(["disabled"])
@@ -1148,14 +1160,18 @@ class SSMBGui:
                             for label in ("bpmz3l4rp_x", "bpmz4l4rp_x", "bpmz5l4rp_x", "bpmz6l4rp_x")
                         },
                     }
+                self._debug("monitor sample %d capture complete" % sample_index)
                 self.monitor_history.append(sample)
                 self._trim_monitor_history()
+                self._debug("monitor sample %d history append complete (len=%d)" % (sample_index, len(self.monitor_history)))
                 self._append_monitor_history_cache(sample)
+                self._debug("monitor sample %d cache append complete" % sample_index)
                 summary = summarize_live_monitor(
                     list(self.monitor_history),
                     extra_candidate_keys=self._extra_oscillation_candidates(),
                     include_oscillation=self._should_compute_extended_analysis(),
                 )
+                self._debug("monitor sample %d summary complete" % sample_index)
                 self._enqueue_monitor_update(
                     {
                         "kind": "monitor_update",
@@ -1165,6 +1181,7 @@ class SSMBGui:
                         "summary": summary,
                     }
                 )
+                self._debug("monitor sample %d queued for GUI update" % sample_index)
                 elapsed = time.monotonic() - sample_started
                 self._debug("monitor sample %d done in %.3f s" % (sample_index, elapsed))
                 effective_interval = interval * (4.0 if self._logger_priority_active() else 1.0)
