@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest import mock
 
@@ -75,6 +76,122 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         import SSMB_experiment.ssmb_tool.gui as gui
 
         self.assertTrue(hasattr(gui.SSMBGui, "_open_monitor_window"))
+
+    def test_update_live_monitor_coalesces_monitor_window_render(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        class _Exists:
+            def winfo_exists(self):
+                return True
+
+        app = object.__new__(gui.SSMBGui)
+        app.latest_monitor_sample = None
+        app.latest_monitor_summary = None
+        app.monitor_summary_text = mock.Mock()
+        app.monitor_channels_text = mock.Mock()
+        app.monitor_window = _Exists()
+        app.oscillation_window = None
+        app._set_text_widget = mock.Mock()
+        app._update_rf_sweep_jump_label = mock.Mock()
+        app._queue_monitor_window_render = mock.Mock()
+        app._refresh_lattice_view = mock.Mock()
+        app._append_log = mock.Mock()
+        payload = {
+            "summary_lines": ["a"],
+            "channel_lines": ["b"],
+            "sample": {"sample_index": 1},
+            "summary": {"current": {}},
+        }
+        gui.SSMBGui._update_live_monitor(app, payload)
+        self.assertEqual(app.latest_monitor_sample, payload["sample"])
+        self.assertEqual(app.latest_monitor_summary, payload["summary"])
+        app._queue_monitor_window_render.assert_called_once()
+        app._refresh_lattice_view.assert_called_once()
+
+    def test_flush_monitor_window_render_updates_widgets_and_dashboard(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        class _Exists:
+            def winfo_exists(self):
+                return True
+
+        app = object.__new__(gui.SSMBGui)
+        app.monitor_window = _Exists()
+        app.monitor_window_summary_text = mock.Mock()
+        app.monitor_window_channels_text = mock.Mock()
+        app._pending_monitor_window_payload = {
+            "summary_lines": ["sum"],
+            "channel_lines": ["chan"],
+            "summary": {"current": {}},
+        }
+        app._monitor_window_render_scheduled = True
+        app._last_monitor_window_render_monotonic = 0.0
+        app._set_text_widget = mock.Mock()
+        app._update_monitor_dashboard = mock.Mock()
+        app._debug = mock.Mock()
+        gui.SSMBGui._flush_monitor_window_render(app)
+        self.assertFalse(app._monitor_window_render_scheduled)
+        self.assertIsNone(app._pending_monitor_window_payload)
+        self.assertEqual(app._set_text_widget.call_count, 2)
+        app._update_monitor_dashboard.assert_called_once()
+
+    def test_monitor_window_render_smoke(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+        from SSMB_experiment.ssmb_tool.live_monitor import format_channel_snapshot, format_monitor_summary, summarize_live_monitor
+
+        if os.environ.get("SSMB_RUN_TK_SMOKE") != "1":
+            self.skipTest("Tk smoke test is opt-in via SSMB_RUN_TK_SMOKE=1")
+        if gui.tk is None:
+            self.skipTest("tkinter unavailable")
+        try:
+            root = gui.tk.Tk()
+        except Exception as exc:
+            self.skipTest("Tk unavailable: %s" % exc)
+        try:
+            root.withdraw()
+            app = gui.SSMBGui(root, allow_writes=True, start_safe_mode=True)
+            samples = []
+            for index in range(40):
+                samples.append(
+                    {
+                        "timestamp_epoch_s": 4_000_000.0 + 0.5 * index,
+                        "sample_index": index,
+                        "channels": {
+                            "beam_current": {"value": 4.0 + 0.01 * index, "pv": "CUM1ZK3RP:measCur"},
+                            "p1_h1_ampl_avg": {"value": 0.05 + 0.002 * (index % 5), "pv": "SCOPE1ZULP:h1p1:rdAmplAv"},
+                            "rf_readback_499mhz": {"value": 685.685, "pv": "MCLKHGP:rdFrq499"},
+                        },
+                        "derived": {
+                            "rf_readback": 499688.387 + 1.0e-4 * index,
+                            "rf_offset_hz": 0.1 * index,
+                            "delta_l4_bpm_first_order": 1.0e-4 * index,
+                            "beam_energy_from_bpm_mev": 250.0 + 0.01 * index,
+                            "tune_s_unitless": 0.013,
+                            "bpm_x_nonlinear_labels": [],
+                        },
+                    }
+                )
+            summary = summarize_live_monitor(samples, include_oscillation=False, include_extended=False)
+            app.latest_monitor_sample = samples[-1]
+            app.latest_monitor_summary = summary
+            app._open_monitor_window()
+            app._update_live_monitor(
+                {
+                    "summary_lines": format_monitor_summary(summary),
+                    "channel_lines": format_channel_snapshot(samples[-1], {}),
+                    "sample": samples[-1],
+                    "summary": summary,
+                }
+            )
+            root.update_idletasks()
+            root.update()
+            self.assertIsNotNone(app.monitor_window)
+            self.assertTrue(app.monitor_window.winfo_exists())
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

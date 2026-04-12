@@ -48,6 +48,8 @@ DETAIL_PLOT_WINDOW_S = 60.0
 LONG_STUDY_PLOT_WINDOW_S = 600.0
 DEFAULT_PLOT_MAX_POINTS = 320
 LONG_STUDY_PLOT_MAX_POINTS = 480
+MONITOR_DASHBOARD_RENDER_MIN_S = 1.0
+MONITOR_WINDOW_RENDER_MIN_S = 1.0
 
 
 def _parse_text_mapping(text: str) -> dict[str, str]:
@@ -98,6 +100,12 @@ class SSMBGui:
         self._monitor_message_lock = threading.Lock()
         self._pending_monitor_payload = None
         self._monitor_update_queued = False
+        self._pending_dashboard_summary = None
+        self._dashboard_render_scheduled = False
+        self._last_dashboard_render_monotonic = 0.0
+        self._pending_monitor_window_payload = None
+        self._monitor_window_render_scheduled = False
+        self._last_monitor_window_render_monotonic = 0.0
         self.monitor_window: Optional["tk.Toplevel"] = None
         self.theory_window: Optional["tk.Toplevel"] = None
         self.oscillation_window: Optional["tk.Toplevel"] = None
@@ -1071,18 +1079,72 @@ class SSMBGui:
         try:
             self._update_rf_sweep_jump_label(payload.get("summary"))
             if self.monitor_window is not None and self.monitor_window.winfo_exists():
-                summary_widget = getattr(self, "monitor_window_summary_text", None)
-                channel_widget = getattr(self, "monitor_window_channels_text", None)
-                if summary_widget is not None:
-                    self._set_text_widget(summary_widget, summary_lines)
-                if channel_widget is not None:
-                    self._set_text_widget(channel_widget, channel_lines)
-                self._update_monitor_dashboard(payload.get("summary"))
+                self._queue_monitor_window_render(
+                    {
+                        "summary_lines": summary_lines,
+                        "channel_lines": channel_lines,
+                        "summary": payload.get("summary"),
+                    }
+                )
             if self.oscillation_window is not None and self.oscillation_window.winfo_exists():
                 self._update_oscillation_window(self._ensure_extended_monitor_summary() or payload.get("summary"))
             self._refresh_lattice_view()
         except Exception as exc:
             self._append_log("Live monitor render failed: %s" % exc)
+
+    def _queue_monitor_window_render(self, payload: dict) -> None:
+        self._pending_monitor_window_payload = payload
+        if self._monitor_window_render_scheduled:
+            return
+        now = time.monotonic()
+        delay_ms = max(0, int((MONITOR_WINDOW_RENDER_MIN_S - (now - self._last_monitor_window_render_monotonic)) * 1000.0))
+        self._monitor_window_render_scheduled = True
+        self.root.after(delay_ms, self._flush_monitor_window_render)
+
+    def _flush_monitor_window_render(self) -> None:
+        self._monitor_window_render_scheduled = False
+        payload = self._pending_monitor_window_payload
+        self._pending_monitor_window_payload = None
+        if self.monitor_window is None or not self.monitor_window.winfo_exists() or payload is None:
+            return
+        started = time.monotonic()
+        summary_widget = getattr(self, "monitor_window_summary_text", None)
+        channel_widget = getattr(self, "monitor_window_channels_text", None)
+        if summary_widget is not None:
+            self._set_text_widget(summary_widget, payload.get("summary_lines", []))
+        if channel_widget is not None:
+            self._set_text_widget(channel_widget, payload.get("channel_lines", []))
+        self._update_monitor_dashboard(payload.get("summary"))
+        self._last_monitor_window_render_monotonic = time.monotonic()
+        elapsed = self._last_monitor_window_render_monotonic - started
+        if elapsed > 0.25:
+            self._debug("monitor window render took %.3f s" % elapsed)
+        if self._pending_monitor_window_payload is not None:
+            self._queue_monitor_window_render(self._pending_monitor_window_payload)
+
+    def _queue_monitor_dashboard_render(self, summary) -> None:
+        self._pending_dashboard_summary = summary
+        if self._dashboard_render_scheduled:
+            return
+        now = time.monotonic()
+        delay_ms = max(0, int((MONITOR_DASHBOARD_RENDER_MIN_S - (now - self._last_dashboard_render_monotonic)) * 1000.0))
+        self._dashboard_render_scheduled = True
+        self.root.after(delay_ms, self._flush_monitor_dashboard_render)
+
+    def _flush_monitor_dashboard_render(self) -> None:
+        self._dashboard_render_scheduled = False
+        summary = self._pending_dashboard_summary
+        self._pending_dashboard_summary = None
+        if self.monitor_window is None or not self.monitor_window.winfo_exists():
+            return
+        started = time.monotonic()
+        self._update_monitor_dashboard(summary)
+        self._last_dashboard_render_monotonic = time.monotonic()
+        elapsed = self._last_dashboard_render_monotonic - started
+        if elapsed > 0.25:
+            self._debug("monitor dashboard render took %.3f s" % elapsed)
+        if self._pending_dashboard_summary is not None:
+            self._queue_monitor_dashboard_render(self._pending_dashboard_summary)
 
     def _update_rf_sweep_jump_label(self, summary) -> None:
         active = bool((summary or {}).get("rf_sweep_detection", {}).get("active"))
@@ -1293,7 +1355,7 @@ class SSMBGui:
         ttk.Button(button_row, text="Live Monitor Settings…", command=self._open_monitor_settings_window).pack(side="left", padx=6)
         self.monitor_window_jump_sweep_button = ttk.Button(button_row, text="Go To RF Sweep", command=self._focus_rf_sweep_tab)
         self.monitor_window_jump_sweep_button.pack(side="left", padx=6)
-        ttk.Checkbutton(button_row, text="Log y-axis", variable=self.monitor_log_scale_var, command=lambda: self._update_monitor_dashboard(self.latest_monitor_summary)).pack(side="right")
+        ttk.Checkbutton(button_row, text="Log y-axis", variable=self.monitor_log_scale_var, command=lambda: self._queue_monitor_window_render({"summary_lines": self.monitor_summary_text.get("1.0", "end").splitlines(), "channel_lines": self.monitor_channels_text.get("1.0", "end").splitlines(), "summary": self.latest_monitor_summary})).pack(side="right")
         state_row = ttk.Frame(top_left)
         state_row.grid(row=1, column=0, sticky="nw", pady=(8, 6))
         ttk.Label(state_row, text="Machine state").pack(side="left")
@@ -1315,10 +1377,15 @@ class SSMBGui:
         snap_frame = ttk.Frame(top_right)
         snap_frame.grid(row=0, column=0, sticky="nsew")
         snap_frame.columnconfigure(0, weight=1)
-        snap_frame.rowconfigure(1, weight=1)
-        ttk.Label(snap_frame, text="Current channel snapshot").grid(row=0, column=0, sticky="w")
+        snap_frame.rowconfigure(1, weight=0)
+        snap_frame.rowconfigure(3, weight=1)
+        ttk.Label(snap_frame, text="Current monitor summary").grid(row=0, column=0, sticky="w")
+        self.monitor_window_summary_text = tk.Text(snap_frame, wrap="word", height=4, width=48)
+        self.monitor_window_summary_text.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        self.monitor_window_summary_text.configure(state="disabled")
+        ttk.Label(snap_frame, text="Current channel snapshot").grid(row=2, column=0, sticky="w")
         self.monitor_window_channels_text = tk.Text(snap_frame, wrap="none", height=6, width=48)
-        self.monitor_window_channels_text.grid(row=1, column=0, sticky="nsew")
+        self.monitor_window_channels_text.grid(row=3, column=0, sticky="nsew")
         self.monitor_window_channels_text.configure(state="disabled")
         if self.latest_monitor_sample is None:
             self._set_text_widget(
@@ -1331,7 +1398,7 @@ class SSMBGui:
                 ],
             )
             self._set_text_widget(
-                self.monitor_summary_text,
+                self.monitor_window_summary_text,
                 [
                     "SSMB Live Monitor",
                     "",
@@ -1341,8 +1408,15 @@ class SSMBGui:
             )
         else:
             self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
+            self._set_text_widget(self.monitor_window_summary_text, self.monitor_summary_text.get("1.0", "end").splitlines())
         if self.latest_monitor_summary is not None:
-            self._update_monitor_dashboard(self.latest_monitor_summary)
+            self._queue_monitor_window_render(
+                {
+                    "summary_lines": self.monitor_summary_text.get("1.0", "end").splitlines(),
+                    "channel_lines": self.monitor_channels_text.get("1.0", "end").splitlines(),
+                    "summary": self.latest_monitor_summary,
+                }
+            )
         try:
             window.update_idletasks()
             window.deiconify()
@@ -1366,6 +1440,10 @@ class SSMBGui:
         self.monitor_plot_controls = {}
         self.monitor_plot_canvases = {}
         self.monitor_plot_settings = {}
+        self._pending_dashboard_summary = None
+        self._dashboard_render_scheduled = False
+        self._pending_monitor_window_payload = None
+        self._monitor_window_render_scheduled = False
         self.monitor_window_rf_state = None
         self.monitor_window_bump_state = None
         self.monitor_window_temp_state = None
@@ -1754,8 +1832,6 @@ class SSMBGui:
             widgets = self.monitor_section_widgets[idx][1]
             selector = widgets["selector"]
             options = section.get("trend_options", [])
-            for item in selector.get_children():
-                selector.delete(item)
             current_keys = self.monitor_plot_controls.get(section["key"])
             if not current_keys:
                 current_keys = [section.get("default_trend")] if section.get("default_trend") else []
@@ -1764,18 +1840,30 @@ class SSMBGui:
                 current_keys = [options[0]]
             self.monitor_plot_controls[section["key"]] = current_keys
             trend_data = (self.latest_monitor_summary or {}).get("trend_data", {})
-            for key in options:
-                values = [value for value in trend_data.get(key, []) if isinstance(value, (int, float))]
-                latest = values[-1] if values else None
-                selector.insert(
-                    "",
-                    "end",
-                    iid=key,
-                    values=("[x]" if key in current_keys else "[ ]", trend_definitions()[key]["label"], self._format_plot_value(latest)),
-                )
-                if key in current_keys:
-                    selector.selection_add(key)
-            selector.bind("<<TreeviewSelect>>", lambda _event, key=section["key"], opts=options, tree=selector: self._on_monitor_plot_selected(key, opts, tree))
+            previous_options = widgets.get("selector_options", [])
+            if list(previous_options) != list(options):
+                for item in selector.get_children():
+                    selector.delete(item)
+                for key in options:
+                    values = [value for value in trend_data.get(key, []) if isinstance(value, (int, float))]
+                    latest = values[-1] if values else None
+                    selector.insert(
+                        "",
+                        "end",
+                        iid=key,
+                        values=("[x]" if key in current_keys else "[ ]", trend_definitions()[key]["label"], self._format_plot_value(latest)),
+                    )
+                selector.bind("<<TreeviewSelect>>", lambda _event, key=section["key"], opts=options, tree=selector: self._on_monitor_plot_selected(key, opts, tree))
+                widgets["selector_options"] = list(options)
+            else:
+                for key in options:
+                    if not selector.exists(key):
+                        continue
+                    values = [value for value in trend_data.get(key, []) if isinstance(value, (int, float))]
+                    latest = values[-1] if values else None
+                    selector.set(key, "enabled", "[x]" if key in current_keys else "[ ]")
+                    selector.set(key, "value", self._format_plot_value(latest))
+            selector.selection_set(tuple(current_keys))
             widgets["help_button"].configure(command=lambda sec=section: self._show_monitor_section_help(sec))
             widgets["settings_button"].configure(command=lambda sec=section: self._open_monitor_plot_settings(sec))
             updated.append((section, widgets))
@@ -1910,6 +1998,10 @@ class SSMBGui:
         vmax = max(clean_all)
         if vmax == vmin:
             vmax = vmin + 1.0
+        else:
+            pad = 0.05 * (vmax - vmin)
+            vmin -= pad
+            vmax += pad
         exponent = 0
         scale = 1.0
         if not use_log:
