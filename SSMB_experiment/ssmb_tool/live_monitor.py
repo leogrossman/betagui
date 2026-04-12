@@ -42,6 +42,10 @@ TREND_DEFINITIONS: Dict[str, Dict[str, object]] = {
     "bump_strength_a": {"label": "max |I_bump| [A]", "color": "#ad1457"},
     "bump_bpm_avg_mm": {"label": "⟨x_bump BPM⟩ [mm]", "color": "#00838f"},
     "bump_orbit_error_mm": {"label": "x_ref - ⟨x⟩ [mm]", "color": "#c2185b"},
+    "bump_bpm_k1_mm": {"label": "BPMZ1K1 [mm]", "color": "#1565c0"},
+    "bump_bpm_l2_mm": {"label": "BPMZ1L2 [mm]", "color": "#0d47a1"},
+    "bump_bpm_k3_mm": {"label": "BPMZ1K3 [mm]", "color": "#1976d2"},
+    "bump_bpm_l4_mm": {"label": "BPMZ1L4 [mm]", "color": "#42a5f5"},
 }
 
 OSCILLATION_CANDIDATE_KEYS = (

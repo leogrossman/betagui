@@ -741,6 +741,7 @@ class SSMBGui:
         self.monitor_section_widgets = []
         self.monitor_plot_controls = {}
         self.monitor_plot_canvases = {}
+        self.monitor_plot_settings = {}
         self.monitor_cards_container = left
         self.monitor_window_theory_text = None
         self.monitor_window_rf_state = None
@@ -791,6 +792,7 @@ class SSMBGui:
         self.monitor_window_theory_text = None
         self.monitor_plot_controls = {}
         self.monitor_plot_canvases = {}
+        self.monitor_plot_settings = {}
         self.monitor_window_rf_state = None
         self.monitor_window_bump_state = None
 
@@ -845,6 +847,7 @@ class SSMBGui:
             candidate_table.heading(col, text=title)
             candidate_table.column(col, width=width, anchor="center")
         candidate_table.grid(row=0, column=0, sticky="nsew")
+        candidate_table.bind("<<TreeviewSelect>>", self._on_oscillation_candidate_selected)
         scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=candidate_table.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         candidate_table.configure(yscrollcommand=scrollbar.set)
@@ -893,6 +896,7 @@ class SSMBGui:
             table.insert(
                 "",
                 "end",
+                iid=candidate.get("key", ""),
                 values=(
                     candidate.get("label", candidate.get("key", "candidate")),
                     "%.3f" % float(candidate.get("score") or 0.0),
@@ -903,6 +907,35 @@ class SSMBGui:
                     "%d" % int(candidate.get("pair_count") or 0),
                 ),
             )
+
+    def _on_oscillation_candidate_selected(self, _event=None) -> None:
+        table = getattr(self, "oscillation_window_table", None)
+        if table is None:
+            return
+        selection = table.selection()
+        if not selection:
+            return
+        key = selection[0]
+        mapping = {
+            "qpd_l4_center_x_avg_um": "QPD00ZL4RP",
+            "qpd_l2_center_x_avg_um": "QPD01ZL2RP",
+            "bump_strength_a": "HS3P1L4RP:setCur",
+            "bump_orbit_error_mm": "BPMZ1L2RP",
+            "bump_bpm_l2_mm": "BPMZ1L2RP",
+            "bump_bpm_k3_mm": "BPMZ1K3RP",
+            "bump_bpm_l4_mm": "BPMZ1L4RP",
+            "delta_s": "BPMZ4L4RP",
+        }
+        device_name = mapping.get(key)
+        if not device_name:
+            return
+        self._open_lattice_window()
+        if not self.lattice_device_items:
+            return
+        for item in self.lattice_device_items:
+            if item.get("name") == device_name:
+                self._show_lattice_item_info(item)
+                break
 
     def _format_short_duration(self, value) -> str:
         try:
@@ -1033,6 +1066,8 @@ class SSMBGui:
             ttk.Label(selector_header, text="Plot").pack(side="left")
             help_button = ttk.Button(selector_header, text="?", width=2)
             help_button.pack(side="right")
+            settings_button = ttk.Button(selector_header, text="⚙", width=2)
+            settings_button.pack(side="right", padx=(0, 4))
             selector = tk.Listbox(selector_frame, selectmode="multiple", exportselection=False, height=6, width=28)
             selector.pack(fill="y", expand=False)
             canvas = tk.Canvas(card, bg="white", width=360, height=170, highlightthickness=1, highlightbackground="#cfd8dc")
@@ -1045,6 +1080,7 @@ class SSMBGui:
                         "card": card,
                         "text": text,
                         "help_button": help_button,
+                        "settings_button": settings_button,
                         "selector": selector,
                         "canvas": canvas,
                     },
@@ -1070,6 +1106,7 @@ class SSMBGui:
                     selector.selection_set(i)
             selector.bind("<<ListboxSelect>>", lambda _event, key=section["key"], opts=options, listbox=selector: self._on_monitor_plot_selected(key, opts, listbox))
             widgets["help_button"].configure(command=lambda sec=section: self._show_monitor_section_help(sec))
+            widgets["settings_button"].configure(command=lambda sec=section: self._open_monitor_plot_settings(sec))
             updated.append((section, widgets))
         self.monitor_section_widgets = updated
 
@@ -1095,6 +1132,48 @@ class SSMBGui:
         if messagebox is not None:
             messagebox.showinfo(section.get("title", "Section help"), "\n".join(lines))
 
+    def _open_monitor_plot_settings(self, section: dict) -> None:
+        key = section["key"]
+        current = self.monitor_plot_settings.get(key, {})
+        window = tk.Toplevel(self.root)
+        window.title("%s Plot Settings" % section.get("title", "Pane"))
+        window.geometry("360x220")
+        frame = ttk.Frame(window, padding=10)
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(1, weight=1)
+        local_window_var = tk.StringVar(value=str(current.get("window_samples", self.rolling_window_var.get())))
+        local_log_var = tk.BooleanVar(value=bool(current.get("log_y", False)))
+        local_fixed_var = tk.BooleanVar(value=bool(current.get("fixed_window", True)))
+        ttk.Label(frame, text="Window [samples]").grid(row=0, column=0, sticky="w")
+        ttk.Entry(frame, textvariable=local_window_var, width=12).grid(row=0, column=1, sticky="w")
+        ttk.Checkbutton(frame, text="Log y-axis for this pane", variable=local_log_var).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Checkbutton(frame, text="Fixed rolling window", variable=local_fixed_var).grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Label(
+            frame,
+            text="Fixed rolling window keeps the last N samples. If disabled, the pane follows the full available monitor history up to the central buffer limit.",
+            wraplength=320,
+            justify="left",
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        button_row = ttk.Frame(frame)
+        button_row.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+
+        def apply_settings():
+            try:
+                window_samples = max(10, int(float(local_window_var.get())))
+            except Exception:
+                window_samples = max(10, int(float(self.rolling_window_var.get())))
+            self.monitor_plot_settings[key] = {
+                "window_samples": window_samples,
+                "log_y": bool(local_log_var.get()),
+                "fixed_window": bool(local_fixed_var.get()),
+            }
+            window.destroy()
+            self._update_monitor_dashboard(self.latest_monitor_summary)
+
+        ttk.Button(button_row, text="Apply", command=apply_settings).pack(side="left")
+        ttk.Button(button_row, text="Reset", command=lambda: (self.monitor_plot_settings.pop(key, None), window.destroy(), self._update_monitor_dashboard(self.latest_monitor_summary))).pack(side="left", padx=6)
+        ttk.Button(button_row, text="Close", command=window.destroy).pack(side="right")
+
     def _draw_section_plot(self, section: dict) -> None:
         widgets = None
         for existing_section, candidate in self.monitor_section_widgets:
@@ -1113,16 +1192,21 @@ class SSMBGui:
         canvas.delete("all")
         width = int(canvas.winfo_width() or 280)
         height = int(canvas.winfo_height() or 120)
+        settings = self.monitor_plot_settings.get(section["key"], {})
         try:
-            window_samples = max(10, int(float(self.rolling_window_var.get())))
+            default_samples = max(10, int(float(self.rolling_window_var.get())))
         except Exception:
-            window_samples = 120
+            default_samples = 120
+        window_samples = max(10, int(settings.get("window_samples", default_samples)))
+        fixed_window = bool(settings.get("fixed_window", True))
         series_payload = []
         for metric in selected_metrics:
-            values = list(trend_data.get(metric, []))[-window_samples:]
+            values = list(trend_data.get(metric, []))
+            if fixed_window:
+                values = values[-window_samples:]
             meta = trend_definitions().get(metric, {"label": metric, "color": "#455a64"})
             series_payload.append((meta["label"], values, meta["color"]))
-        self._draw_multi_series(canvas, series_payload, 10, 10, width - 10, height - 10, window_samples)
+        self._draw_multi_series(canvas, series_payload, 10, 10, width - 10, height - 10, window_samples, use_log_override=settings.get("log_y"))
 
     def _draw_series(self, canvas, values, x0, y0, x1, y1, color, label):
         canvas.create_rectangle(x0, y0, x1, y1, outline="#cfd8dc")
@@ -1135,9 +1219,9 @@ class SSMBGui:
         if len(pts) >= 4:
             canvas.create_line(*pts, fill=color, width=2, smooth=True)
 
-    def _draw_multi_series(self, canvas, series_payload, x0, y0, x1, y1, window_samples: int):
+    def _draw_multi_series(self, canvas, series_payload, x0, y0, x1, y1, window_samples: int, use_log_override=None):
         canvas.create_rectangle(x0, y0, x1, y1, outline="#cfd8dc")
-        use_log = bool(self.monitor_log_scale_var.get())
+        use_log = bool(self.monitor_log_scale_var.get()) if use_log_override is None else bool(use_log_override)
         clean_all = []
         for _label, values, _color in series_payload:
             for value in values:
@@ -1239,7 +1323,7 @@ class SSMBGui:
         lattice, specs = build_specs(config)
         window = tk.Toplevel(self.root)
         window.title("SSMB Live Lattice View")
-        window.geometry("1200x720")
+        window.geometry("1360x860")
         outer = ttk.Frame(window, padding=10)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
@@ -1247,12 +1331,20 @@ class SSMBGui:
         outer.rowconfigure(0, weight=1)
         canvas = tk.Canvas(outer, bg="white", height=520)
         canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-        info = tk.Text(outer, wrap="word", width=42)
-        info.grid(row=0, column=1, sticky="nsew")
+        side = ttk.Frame(outer)
+        side.grid(row=0, column=1, sticky="nsew")
+        side.columnconfigure(0, weight=1)
+        side.rowconfigure(0, weight=1)
+        side.rowconfigure(1, weight=0)
+        info = tk.Text(side, wrap="word", width=42, height=22)
+        info.grid(row=0, column=0, sticky="nsew")
         info.configure(state="disabled")
+        detail_canvas = tk.Canvas(side, bg="white", width=360, height=190, highlightthickness=1, highlightbackground="#cfd8dc")
+        detail_canvas.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         self.lattice_window = window
         self.lattice_canvas = canvas
         self.lattice_info_text = info
+        self.lattice_detail_canvas = detail_canvas
         self.lattice_context = lattice
         self.lattice_specs = specs
         canvas.bind("<Button-1>", self._on_lattice_click)
@@ -1558,6 +1650,47 @@ class SSMBGui:
                 ]
             )
         self._set_text_widget(self.lattice_info_text, lines)
+        self._draw_lattice_item_history(item)
+
+    def _draw_lattice_item_history(self, item: dict) -> None:
+        canvas = getattr(self, "lattice_detail_canvas", None)
+        if canvas is None:
+            return
+        canvas.delete("all")
+        width = int(canvas.winfo_width() or 360)
+        height = int(canvas.winfo_height() or 190)
+        trend_data = ((self.latest_monitor_summary or {}).get("trend_data", {}) or {})
+        series_payload = []
+        mapping = {
+            "BPMZ1K1RP": "bump_bpm_k1_mm",
+            "BPMZ1L2RP": "bump_bpm_l2_mm",
+            "BPMZ1K3RP": "bump_bpm_k3_mm",
+            "BPMZ1L4RP": "bump_bpm_l4_mm",
+        }
+        key = mapping.get(item.get("name"))
+        if key and key in trend_data:
+            meta = trend_definitions().get(key, {"label": key, "color": "#1565c0"})
+            series_payload.append((meta["label"], list(trend_data.get(key, [])), meta["color"]))
+            series_payload.append(("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa"))
+        elif item.get("name") == "QPD00ZL4RP":
+            series_payload.append(("QPD00 center [um]", list(trend_data.get("qpd_l4_center_x_avg_um", [])), "#6a1b9a"))
+            series_payload.append(("σδ", list(trend_data.get("sigma_delta", [])), "#6d4c41"))
+        elif item.get("name") == "QPD01ZL2RP":
+            series_payload.append(("QPD01 center [um]", list(trend_data.get("qpd_l2_center_x_avg_um", [])), "#8e24aa"))
+            series_payload.append(("BPMZ1L2 [mm]", list(trend_data.get("bump_bpm_l2_mm", [])), "#0d47a1"))
+        elif (item.get("pv_label") or "").startswith("l4_bump_hcorr"):
+            series_payload.append(("Orbit error [mm]", list(trend_data.get("bump_orbit_error_mm", [])), "#c2185b"))
+            series_payload.append(("BPM avg [mm]", list(trend_data.get("bump_bpm_avg_mm", [])), "#00838f"))
+            series_payload.append(("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa"))
+        elif item.get("pv_label") in trend_data:
+            meta = trend_definitions().get(item.get("pv_label"), {"label": item.get("pv_label"), "color": "#1565c0"})
+            series_payload.append((meta["label"], list(trend_data.get(item.get("pv_label"), [])), meta["color"]))
+        if not series_payload:
+            canvas.create_rectangle(10, 10, width - 10, height - 10, outline="#cfd8dc")
+            canvas.create_text(width / 2, height / 2, text="No live history yet for this device", fill="#90a4ae")
+            return
+        self._draw_multi_series(canvas, series_payload, 10, 10, width - 10, height - 10, max(20, max(len(values) for _label, values, _color in series_payload)))
+        canvas.create_text(width / 2, 12, anchor="n", text="%s live history" % item.get("name", "device"), fill="#37474f", font=("Helvetica", 10, "bold"))
 
     def _close_lattice_window(self) -> None:
         if self.lattice_window is not None and self.lattice_window.winfo_exists():
@@ -1565,6 +1698,7 @@ class SSMBGui:
         self.lattice_window = None
         self.lattice_canvas = None
         self.lattice_info_text = None
+        self.lattice_detail_canvas = None
         self.lattice_context = None
         self.lattice_specs = None
         self.lattice_device_items = []
