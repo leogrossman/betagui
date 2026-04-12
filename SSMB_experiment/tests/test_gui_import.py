@@ -3,6 +3,17 @@ import unittest
 from unittest import mock
 
 
+class _FakeVar:
+    def __init__(self, value=""):
+        self.value = value
+
+    def get(self):
+        return self.value
+
+    def set(self, value):
+        self.value = value
+
+
 class SSMBExperimentGuiImportTest(unittest.TestCase):
     def test_gui_module_imports(self):
         import SSMB_experiment.ssmb_tool.gui as gui
@@ -72,6 +83,40 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
             path = gui.SSMBGui._monitor_history_path(app)
         self.assertIn("ssmb_experiment_live_monitor", str(path))
         self.assertNotIn("/tmp/betagui/SSMB_experiment/.ssmb_local", str(path))
+
+    def test_p1_drift_preset_sets_safe_long_run_defaults(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        app = object.__new__(gui.SSMBGui)
+        app.label_var = _FakeVar("")
+        app.log_profile_var = _FakeVar("ssmb_standard")
+        app.duration_var = _FakeVar("60")
+        app.sample_hz_var = _FakeVar("1")
+        app.laser_shots_var = _FakeVar("0")
+        app.note_var = _FakeVar("")
+        app.heavy_mode_var = _FakeVar(False)
+        app.include_bpm_buffer_var = _FakeVar(True)
+        app.include_candidate_bpm_var = _FakeVar(False)
+        app.include_ring_bpm_var = _FakeVar(False)
+        app.include_quadrupole_var = _FakeVar(True)
+        app.include_sextupole_var = _FakeVar(True)
+        app.include_octupole_var = _FakeVar(True)
+        app._refresh_inventory = mock.Mock()
+
+        gui.SSMBGui._preset_p1_drift(app)
+
+        self.assertEqual(app.label_var.get(), "p1_drift_15min")
+        self.assertEqual(app.log_profile_var.get(), "p1_drift")
+        self.assertEqual(app.duration_var.get(), "900")
+        self.assertEqual(app.sample_hz_var.get(), "2")
+        self.assertFalse(app.heavy_mode_var.get())
+        self.assertFalse(app.include_bpm_buffer_var.get())
+        self.assertTrue(app.include_candidate_bpm_var.get())
+        self.assertTrue(app.include_ring_bpm_var.get())
+        self.assertFalse(app.include_quadrupole_var.get())
+        self.assertFalse(app.include_sextupole_var.get())
+        self.assertFalse(app.include_octupole_var.get())
+        self.assertIn("15 minutes", app.note_var.get())
 
     def test_lattice_inspection_config_uses_replace_for_frozen_logger_config(self):
         import SSMB_experiment.ssmb_tool.gui as gui

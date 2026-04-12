@@ -148,6 +148,43 @@ class SSMBExperimentLogNowTest(unittest.TestCase):
             log_text = (session_dir / "session.log").read_text(encoding="utf-8")
             self.assertIn("Stop requested by operator", log_text)
 
+    def test_logger_warns_once_for_missing_pv_and_keeps_running(self):
+        class MissingAdapter:
+            def __init__(self):
+                self.calls = 0
+
+            def get(self, pv, default=None):
+                self.calls += 1
+                if pv == "BAD:PV":
+                    raise RuntimeError("simulated read failure")
+                if pv == "MCLKHGP:setFrq":
+                    return 499688.38770589296
+                if pv == "ERMPCGP:rdRmp":
+                    return 250.0
+                return default
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = LoggerConfig(
+                duration_seconds=1.1,
+                sample_hz=2.0,
+                output_root=Path(tmpdir),
+                include_bpm_buffer=False,
+                include_candidate_bpm_scalars=True,
+                include_ring_bpm_scalars=False,
+                include_quadrupoles=False,
+                include_sextupoles=False,
+                include_octupoles=False,
+                extra_pvs={"bad_channel": "BAD:PV"},
+            )
+            session_dir = run_stage0_logger(config, adapter=MissingAdapter())
+            metadata = json.loads((session_dir / "metadata.json").read_text(encoding="utf-8"))
+            self.assertGreaterEqual(metadata["sample_count"], 2)
+            self.assertIn("bad_channel", metadata["missing_pvs"])
+            log_text = (session_dir / "session.log").read_text(encoding="utf-8")
+            self.assertIn("missing PV data:", log_text)
+            self.assertIn("bad_channel", log_text)
+            self.assertEqual(log_text.count("bad_channel"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -381,10 +381,11 @@ class SSMBGui:
         ttk.Button(preset_row, text="Preset: low-alpha full log", command=self._preset_low_alpha).pack(side="left")
         ttk.Button(preset_row, text="Preset: bump OFF", command=lambda: self._preset_bump("bump_off")).pack(side="left", padx=4)
         ttk.Button(preset_row, text="Preset: bump ON", command=lambda: self._preset_bump("bump_on")).pack(side="left")
+        ttk.Button(preset_row, text="Preset: P1 drift 15 min", command=self._preset_p1_drift).pack(side="left", padx=4)
         row += 1
 
         ttk.Label(frame, text="Logging profile").grid(row=row, column=0, sticky="w")
-        profile_combo = ttk.Combobox(frame, textvariable=self.log_profile_var, values=("minimal", "ssmb_standard", "heavy"), width=18, state="readonly")
+        profile_combo = ttk.Combobox(frame, textvariable=self.log_profile_var, values=("minimal", "ssmb_standard", "p1_drift", "heavy"), width=18, state="readonly")
         profile_combo.grid(row=row, column=1, sticky="w", pady=2)
         profile_combo.bind("<<ComboboxSelected>>", lambda _event: self._apply_profile())
         row += 1
@@ -1002,6 +1003,16 @@ class SSMBGui:
             self.include_octupole_var.set(True)
             if float(self.sample_hz_var.get()) > 2.0:
                 self.sample_hz_var.set("1")
+        elif profile == "p1_drift":
+            self.heavy_mode_var.set(False)
+            self.include_bpm_buffer_var.set(False)
+            self.include_candidate_bpm_var.set(True)
+            self.include_ring_bpm_var.set(True)
+            self.include_quadrupole_var.set(False)
+            self.include_sextupole_var.set(False)
+            self.include_octupole_var.set(False)
+            if float(self.sample_hz_var.get()) > 2.0:
+                self.sample_hz_var.set("2")
         else:
             self.heavy_mode_var.set(False)
             self.include_bpm_buffer_var.set(False)
@@ -1087,6 +1098,17 @@ class SSMBGui:
         self.laser_shots_var.set("0")
         self.note_var.set("Set bump state externally before starting this passive log")
         self._toggle_heavy_mode()
+
+    def _preset_p1_drift(self) -> None:
+        self.label_var.set("p1_drift_15min")
+        self.log_profile_var.set("p1_drift")
+        self.duration_var.set("900")
+        self.sample_hz_var.set("2")
+        self.laser_shots_var.set("0")
+        self.note_var.set(
+            "Long passive P1 drift study with RF off if possible; captures BPM x/y, QPD, P1/P3, RF, tunes, temperatures, and derived delta_s/alpha0 over 15 minutes."
+        )
+        self._apply_profile()
 
     def _preset_sweep(self, label: str) -> None:
         self.label_var.set(label)
@@ -4466,17 +4488,44 @@ class SSMBGui:
         lines = inventory_overview_lines(specs)
         try:
             estimate_bytes = estimate_passive_session_bytes(specs, config.duration_seconds, config.sample_hz)
+            estimate_15min_bytes = estimate_passive_session_bytes(specs, 900.0, config.sample_hz)
             heavy_channels = estimate_sample_breakdown(specs)[:8]
+            sample_count = max(1, int(math.ceil(float(config.duration_seconds) * float(config.sample_hz))))
+            sample_period_s = 1.0 / float(config.sample_hz)
+            unconfigured_required = [spec.label for spec in specs if spec.required and not spec.pv]
+            unconfigured_optional = [spec.label for spec in specs if (not spec.required) and not spec.pv]
             disk = shutil.disk_usage(config.output_root if config.output_root.exists() else config.output_root.parent)
             lines.extend(
                 [
                     "",
+                    "Logger preflight:",
+                    "- Profile: %s" % (self.log_profile_var.get() or "ssmb_standard"),
+                    "- Samples planned: %d (%.3f s period)" % (sample_count, sample_period_s),
                     "Estimated passive-session size: %.2f MB" % (estimate_bytes / (1024.0 * 1024.0)),
+                    "Reference estimate for 15 min at current settings: %.2f MB" % (estimate_15min_bytes / (1024.0 * 1024.0)),
                     "Free space at output root: %.2f GB" % (disk.free / (1024.0 * 1024.0 * 1024.0)),
+                    "Samples are written incrementally to samples.jsonl during capture.",
+                    "Missing PV reads are logged as warnings and the run continues.",
                     "",
                     "Heaviest logged channels per sample:",
                 ]
             )
+            if unconfigured_required:
+                lines.extend(
+                    [
+                        "",
+                        "WARNING: required PVs without configured names:",
+                    ]
+                    + ["- %s" % label for label in unconfigured_required[:12]]
+                )
+            if unconfigured_optional:
+                lines.extend(
+                    [
+                        "",
+                        "Optional labels without PV names:",
+                    ]
+                    + ["- %s" % label for label in unconfigured_optional[:12]]
+                )
             for item in heavy_channels:
                 lines.append("- %s | %s | %.1f kB/sample" % (item["label"], item["kind"], float(item["bytes_per_sample"]) / 1024.0))
         except Exception:

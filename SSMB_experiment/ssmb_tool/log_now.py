@@ -503,6 +503,7 @@ def run_stage0_logger(config: LoggerConfig, adapter=None, progress_callback=None
     sample_index = 0
     start = time.monotonic()
     samples: List[Dict[str, object]] = []
+    warned_missing_labels: set[str] = set()
 
     try:
         while True:
@@ -513,7 +514,7 @@ def run_stage0_logger(config: LoggerConfig, adapter=None, progress_callback=None
             if now > deadline:
                 break
             try:
-                sample = capture_sample(adapter, specs, sample_index=sample_index, t_rel_s=now - start)
+                sample = capture_sample_tolerant(adapter, specs, sample_index=sample_index, t_rel_s=now - start)
             except Exception as exc:
                 emit("Sample %d capture failed: %s" % (sample_index, exc))
                 sample = {
@@ -529,6 +530,15 @@ def run_stage0_logger(config: LoggerConfig, adapter=None, progress_callback=None
             logger.append_jsonl("samples.jsonl", sample)
             if sample_callback is not None:
                 sample_callback(sample)
+            sample_missing = sorted(
+                label
+                for label, payload in sample.get("channels", {}).items()
+                if payload.get("missing")
+            )
+            new_missing = [label for label in sample_missing if label not in warned_missing_labels]
+            if new_missing:
+                warned_missing_labels.update(new_missing)
+                emit("Sample %d missing PV data: %s" % (sample_index, ", ".join(new_missing[:12])))
             nonlinear = sample.get("derived", {}).get("bpm_x_nonlinear_labels") or []
             if nonlinear:
                 emit("Sample %d nonlinear BPM warning: %s" % (sample_index, ", ".join(nonlinear)))
