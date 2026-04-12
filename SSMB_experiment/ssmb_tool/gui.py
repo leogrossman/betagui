@@ -56,6 +56,8 @@ class SSMBGui:
         self.monitor_window: Optional["tk.Toplevel"] = None
         self.theory_window: Optional["tk.Toplevel"] = None
         self.lattice_window: Optional["tk.Toplevel"] = None
+        self.lattice_context = None
+        self.lattice_specs = None
         self.latest_monitor_sample = None
         self.latest_monitor_summary = None
         self.lattice_device_items = []
@@ -814,10 +816,19 @@ class SSMBGui:
         self.lattice_window = window
         self.lattice_canvas = canvas
         self.lattice_info_text = info
-        self._draw_lattice_view(lattice, specs)
+        self.lattice_context = lattice
+        self.lattice_specs = specs
         canvas.bind("<Button-1>", self._on_lattice_click)
+        canvas.bind("<Configure>", self._on_lattice_canvas_configure)
         window.protocol("WM_DELETE_WINDOW", self._close_lattice_window)
+        window.update_idletasks()
+        self._draw_lattice_view(lattice, specs)
         self._refresh_lattice_view()
+
+    def _on_lattice_canvas_configure(self, _event=None) -> None:
+        if self.lattice_context is None or self.lattice_specs is None:
+            return
+        self._draw_lattice_view(self.lattice_context, self.lattice_specs)
 
     def _draw_lattice_view(self, lattice, specs) -> None:
         canvas = self.lattice_canvas
@@ -855,13 +866,17 @@ class SSMBGui:
                 continue
             x = self._s_to_x(element.s_center_m, lattice, left, right)
             color, label, row_y = self._element_style(element, row_positions)
-            item_id = canvas.create_rectangle(x - 5, row_y - 12, x + 5, row_y + 12, fill=color, outline="")
+            pv_label = self._match_spec_label(specs, element)
+            live_payload = ((self.latest_monitor_sample or {}).get("channels", {}) or {}).get(pv_label or "", {})
+            live_value = live_payload.get("value")
+            marker_color, marker_outline = self._live_marker_style(element, live_value, color)
+            item_id = canvas.create_rectangle(x - 5, row_y - 12, x + 5, row_y + 12, fill=marker_color, outline=marker_outline, width=2 if marker_outline else 1)
             self.lattice_device_items.append(
                 {
                     "item_id": item_id,
                     "name": element.family_name,
                     "element_type": element.element_type,
-                    "pv_label": self._match_spec_label(specs, element),
+                    "pv_label": pv_label,
                     "pv": self._match_spec_pv(specs, element),
                     "notes": "%s in %s" % (element.element_type, element.section or "ring"),
                     "x": x,
@@ -870,6 +885,11 @@ class SSMBGui:
             )
             if element.element_type in ("RFCavity",):
                 canvas.create_text(x, row_y - 18, text=label or element.family_name, anchor="s", font=("Helvetica", 8, "bold"))
+            elif element.element_type == "Monitor" and element.family_name in ("BPMZ1L2RP", "BPMZ1K3RP", "BPMZ1L4RP", "BPMZ3L4RP", "BPMZ4L4RP", "BPMZ5L4RP", "BPMZ6L4RP"):
+                display = element.family_name.replace("RP", "")
+                canvas.create_text(x, row_y - 16, text=display, anchor="s", font=("Helvetica", 7))
+                if isinstance(live_value, (int, float)):
+                    canvas.create_text(x, row_y + 16, text="%.2f" % float(live_value), anchor="n", font=("Helvetica", 7), fill="#37474f")
         extras = [
             ("QPD00ZL4RP", "qpd_l4_sigma_x", "QPD00 SR camera/profile monitor in L4", 36.0, "#d81b60", row_positions["qpd"]),
             ("QPD01ZL2RP", "qpd_l2_sigma_x", "QPD01 SR camera/profile monitor in L2", 12.0, "#8e24aa", row_positions["qpd"]),
@@ -880,8 +900,27 @@ class SSMBGui:
         ]
         for name, label, notes, s_pos, color, row_y in extras:
             x = self._s_to_x(s_pos, lattice, left, right)
-            item_id = canvas.create_oval(x - 7, row_y - 7, x + 7, row_y + 7, fill=color, outline="")
+            live_payload = ((self.latest_monitor_sample or {}).get("channels", {}) or {}).get(label, {})
+            live_value = live_payload.get("value")
+            fill = color
+            outline = ""
+            width_px = 1
+            if label.startswith("l4_bump_hcorr"):
+                try:
+                    current = abs(float(live_value))
+                except (TypeError, ValueError):
+                    current = None
+                if current is not None and current >= 0.002:
+                    fill = "#d84315"
+                    outline = "#bf360c"
+                    width_px = 2
+                else:
+                    fill = "#ffcc80"
+                    outline = "#ef6c00"
+            item_id = canvas.create_oval(x - 7, row_y - 7, x + 7, row_y + 7, fill=fill, outline=outline, width=width_px)
             canvas.create_text(x, row_y - 14, text=name.split(":")[0], anchor="s", font=("Helvetica", 8))
+            if isinstance(live_value, (int, float)):
+                canvas.create_text(x, row_y + 12, text="%.3f" % float(live_value), anchor="n", font=("Helvetica", 7), fill="#5d4037")
             self.lattice_device_items.append(
                 {
                     "item_id": item_id,
@@ -894,6 +933,10 @@ class SSMBGui:
                     "y": row_y,
                 }
             )
+        bump_state = (self.latest_monitor_summary or {}).get("bump_state", {})
+        bump_label = "BUMP ON" if bump_state.get("active") else "BUMP OFF/idle"
+        bump_color = "#b71c1c" if bump_state.get("active") else "#1b5e20"
+        canvas.create_text(right, 24, anchor="e", text=bump_label, fill=bump_color, font=("Helvetica", 12, "bold"))
         canvas.create_text(left, height - 18, anchor="w", text="Click a marker for live PV mapping. Rows separate BPMs, QPDs, RF, main lattice, and bump correctors.", fill="#455a64")
 
     def _refresh_lattice_view(self) -> None:
@@ -913,6 +956,10 @@ class SSMBGui:
                 "",
                 "Recovered bump-feedback BPM chain: BPMZ1K1RP, BPMZ1L2RP, BPMZ1K3RP, BPMZ1L4RP.",
                 "BPMZ1L2RP is the undulator-side/ L2 anchor of the orbit-lock loop; the others are spread through K3 and L4, so the loop constrains a global closed orbit rather than only one local point.",
+                "",
+                "Live lattice hints:",
+                "- BPM markers are colored by live X offset severity.",
+                "- Bump correctors highlight when their live current is active.",
             ],
         )
 
@@ -971,6 +1018,8 @@ class SSMBGui:
         self.lattice_window = None
         self.lattice_canvas = None
         self.lattice_info_text = None
+        self.lattice_context = None
+        self.lattice_specs = None
         self.lattice_device_items = []
 
     def _section_bounds(self, lattice) -> dict:
@@ -1001,6 +1050,19 @@ class SSMBGui:
             "RFCavity": ("#c62828", "CAV", row_positions["rf"]),
         }
         return styles.get(element.element_type, ("#90a4ae", "", row_positions["magnet"]))
+
+    def _live_marker_style(self, element: LatticeElement, live_value, default_color: str):
+        if element.element_type != "Monitor":
+            return default_color, ""
+        try:
+            value = abs(float(live_value))
+        except (TypeError, ValueError):
+            return "#90caf9", "#1e88e5"
+        if value >= BPM_NONLINEAR_MM:
+            return "#ef9a9a", "#b71c1c"
+        if value >= BPM_WARNING_MM:
+            return "#ffe082", "#f57f17"
+        return "#a5d6a7", "#2e7d32"
 
     def _open_theory_window(self) -> None:
         if self.theory_window is not None and self.theory_window.winfo_exists():
