@@ -4,6 +4,7 @@ import argparse
 import collections
 import json
 import math
+import os
 import queue
 import signal
 import shutil
@@ -36,6 +37,9 @@ except ImportError:  # pragma: no cover - depends on host GUI packages
     filedialog = None
     messagebox = None
     ttk = None
+
+
+HISTORY_TAIL_READ_BYTES = 2 * 1024 * 1024
 
 
 def _parse_text_mapping(text: str) -> dict[str, str]:
@@ -81,9 +85,15 @@ class SSMBGui:
         self._build_ui()
         self._apply_profile()
         self._refresh_inventory()
-        self._load_monitor_history_cache()
-        self._open_monitor_window()
+        self.root.after(50, self._finish_startup)
         self.root.after(100, self._drain_queue)
+
+    def _finish_startup(self) -> None:
+        self._debug("startup: loading cached monitor history")
+        self._load_monitor_history_cache()
+        self._debug("startup: opening live monitor window")
+        self._open_monitor_window()
+        self._debug("startup: gui ready")
 
     def _build_vars(self) -> None:
         self.duration_var = tk.StringVar(value="60")
@@ -361,6 +371,9 @@ class SSMBGui:
     def _monitor_history_path(self) -> Path:
         return SSMB_ROOT / ".ssmb_local" / "live_monitor" / "history.jsonl"
 
+    def _debug(self, message: str) -> None:
+        print("[ssmb_gui] %s" % message, flush=True)
+
     def _monitor_history_span_seconds(self) -> float:
         try:
             return max(30.0, float(self.monitor_history_span_var.get()))
@@ -402,20 +415,38 @@ class SSMBGui:
         now = time.time()
         cutoff = now - self._monitor_history_span_seconds()
         try:
-            with path.open("r", encoding="utf-8") as stream:
-                for raw_line in stream:
-                    line = raw_line.strip()
-                    if not line:
-                        continue
+            size = path.stat().st_size
+            read_size = min(size, HISTORY_TAIL_READ_BYTES)
+            with path.open("rb") as stream:
+                if size > read_size:
+                    stream.seek(-read_size, os.SEEK_END)
+                blob = stream.read()
+            if not blob:
+                return
+            text = blob.decode("utf-8", errors="ignore")
+            lines = text.splitlines()
+            if size > read_size and lines:
+                lines = lines[1:]
+            kept = 0
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
                     payload = json.loads(line)
-                    try:
-                        ts = float(payload.get("timestamp_epoch_s"))
-                    except Exception:
-                        ts = None
-                    if ts is not None and ts < cutoff:
-                        continue
-                    self.monitor_history.append(payload)
-        except Exception:
+                except Exception:
+                    continue
+                try:
+                    ts = float(payload.get("timestamp_epoch_s"))
+                except Exception:
+                    ts = None
+                if ts is not None and ts < cutoff:
+                    continue
+                self.monitor_history.append(payload)
+                kept += 1
+            self._debug("loaded %d cached live-monitor samples from %s" % (kept, path))
+        except Exception as exc:
+            self._debug("monitor history cache load failed: %s" % exc)
             return
 
     def _build_live_specs(self) -> None:
@@ -1037,12 +1068,14 @@ class SSMBGui:
         self.monitor_window_rf_state.pack(side="left", padx=6)
         self.monitor_window_bump_state = tk.Label(state_row, text="Bump OFF", bg="#2e7d32", fg="white", padx=10, pady=4)
         self.monitor_window_bump_state.pack(side="left", padx=6)
+        self.monitor_window_temp_state = tk.Label(state_row, text="Temp stable", bg="#2e7d32", fg="white", padx=10, pady=4)
+        self.monitor_window_temp_state.pack(side="left", padx=6)
         self.monitor_window_logger_state = tk.Label(state_row, text="Logger idle", bg="#546e7a", fg="white", padx=10, pady=4)
         self.monitor_window_logger_state.pack(side="left", padx=6)
         helper = ttk.Label(
             top_left,
             text="Theory and derivations live in the separate Theory window so the monitor plots stay large enough to interpret.",
-            wraplength=760,
+            wraplength=620,
             justify="left",
         )
         helper.grid(row=2, column=0, sticky="nw", pady=(0, 8))
@@ -1051,7 +1084,7 @@ class SSMBGui:
         snap_frame.columnconfigure(0, weight=1)
         snap_frame.rowconfigure(1, weight=1)
         ttk.Label(snap_frame, text="Current channel snapshot").grid(row=0, column=0, sticky="w")
-        self.monitor_window_channels_text = tk.Text(snap_frame, wrap="none", height=10, width=54)
+        self.monitor_window_channels_text = tk.Text(snap_frame, wrap="none", height=6, width=48)
         self.monitor_window_channels_text.grid(row=1, column=0, sticky="nsew")
         self.monitor_window_channels_text.configure(state="disabled")
         self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
@@ -1072,6 +1105,7 @@ class SSMBGui:
         self.monitor_plot_settings = {}
         self.monitor_window_rf_state = None
         self.monitor_window_bump_state = None
+        self.monitor_window_temp_state = None
         self.monitor_window_logger_state = None
 
     def _focus_rf_sweep_tab(self) -> None:
@@ -1353,6 +1387,7 @@ class SSMBGui:
     def _update_monitor_state_badges(self, summary) -> None:
         rf_widget = getattr(self, "monitor_window_rf_state", None)
         bump_widget = getattr(self, "monitor_window_bump_state", None)
+        temp_widget = getattr(self, "monitor_window_temp_state", None)
         logger_widget = getattr(self, "monitor_window_logger_state", None)
         if rf_widget is not None:
             rf_active = bool((summary or {}).get("rf_sweep_detection", {}).get("active"))
@@ -1360,6 +1395,14 @@ class SSMBGui:
         if bump_widget is not None:
             bump_active = bool((summary or {}).get("bump_state", {}).get("active"))
             bump_widget.configure(text="Bump ON" if bump_active else "Bump OFF", bg="#c62828" if bump_active else "#2e7d32")
+        if temp_widget is not None:
+            temp_state = (summary or {}).get("temperature_state", {}) or {}
+            temp_active = bool(temp_state.get("unstable"))
+            delta = temp_state.get("max_deviation_c")
+            label = "Temp unstable" if temp_active else "Temp stable"
+            if isinstance(delta, (int, float)):
+                label += " (Δ=%.2f C)" % float(delta)
+            temp_widget.configure(text=label, bg="#c62828" if temp_active else "#2e7d32")
         if logger_widget is not None:
             logger_running = self.stage0_stop_event is not None or (self.worker is not None and self.worker.is_alive())
             logger_widget.configure(text="Logger active" if logger_running else "Logger idle", bg="#ef6c00" if logger_running else "#546e7a")
@@ -1394,11 +1437,10 @@ class SSMBGui:
             body.columnconfigure(0, weight=1)
             body.columnconfigure(1, weight=0)
             body.rowconfigure(0, weight=1)
-            canvas = tk.Canvas(body, bg="white", width=760, height=280, highlightthickness=1, highlightbackground="#cfd8dc")
+            canvas = tk.Canvas(body, bg="white", width=860, height=320, highlightthickness=1, highlightbackground="#cfd8dc")
             canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
             side = ttk.Frame(body)
             side.grid(row=0, column=1, sticky="ns")
-            side.rowconfigure(1, weight=1)
             selector_header = ttk.Frame(side)
             selector_header.grid(row=0, column=0, sticky="ew")
             ttk.Label(selector_header, text="Plot").pack(side="left")
@@ -1406,15 +1448,15 @@ class SSMBGui:
             help_button.pack(side="right")
             settings_button = ttk.Button(selector_header, text="⚙", width=2)
             settings_button.pack(side="right", padx=(0, 4))
-            selector = ttk.Treeview(side, columns=("enabled", "metric", "value"), show="headings", height=8, selectmode="extended")
+            selector = ttk.Treeview(side, columns=("enabled", "metric", "value"), show="headings", height=5, selectmode="extended")
             selector.heading("enabled", text="Use")
             selector.heading("metric", text="Metric")
             selector.heading("value", text="Latest")
             selector.column("enabled", width=44, anchor="center")
-            selector.column("metric", width=180, anchor="w")
+            selector.column("metric", width=160, anchor="w")
             selector.column("value", width=88, anchor="e")
             selector.grid(row=1, column=0, sticky="ns")
-            text = tk.Text(card, wrap="word", height=3, width=80)
+            text = tk.Text(card, wrap="word", height=2, width=80)
             text.grid(row=1, column=0, sticky="ew", pady=(6, 0))
             text.configure(state="disabled")
             self.monitor_section_widgets.append(
@@ -2855,13 +2897,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     if tk is None:
         raise SystemExit("tkinter is unavailable; cannot start the SSMB GUI.")
+    print("[ssmb_gui] main(): parsing arguments", flush=True)
     parser = build_arg_parser()
     args = parser.parse_args(argv)
+    print("[ssmb_gui] main(): creating Tk root", flush=True)
     root = tk.Tk()
+    print("[ssmb_gui] main(): building SSMBGui", flush=True)
     app = SSMBGui(root, allow_writes=True, start_safe_mode=not bool(args.unsafe_start))
 
     def handle_sigint(_signum=None, _frame=None):
-        app.shutdown()
+        print("[ssmb_gui] SIGINT received, shutting down", flush=True)
+        try:
+            root.after(0, app.shutdown)
+        except Exception:
+            app.shutdown()
 
     try:
         signal.signal(signal.SIGINT, handle_sigint)
@@ -2872,15 +2921,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except Exception:
         pass
     root.deiconify()
+    print("[ssmb_gui] main(): entering Tk mainloop", flush=True)
     try:
-        while True:
-            root.update()
-            root.update_idletasks()
-            time.sleep(0.02)
+        root.mainloop()
     except tk.TclError:
+        print("[ssmb_gui] main(): Tk closed", flush=True)
         return 0
     except KeyboardInterrupt:
+        print("[ssmb_gui] main(): KeyboardInterrupt", flush=True)
         app.shutdown()
+    print("[ssmb_gui] main(): exit", flush=True)
     return 0
 
 

@@ -17,6 +17,7 @@ OSCILLATION_MIN_POINTS = 32
 OSCILLATION_MIN_CYCLES_FOR_MEDIUM = 1.5
 OSCILLATION_MIN_CYCLES_FOR_HIGH = 2.5
 OSCILLATION_MAX_LAG_FRACTION = 0.25
+TEMPERATURE_UNSTABLE_THRESHOLD_C = 0.5
 
 TREND_DEFINITIONS: Dict[str, Dict[str, object]] = {
     "rf_offset_hz": {"label": "Δf_RF [Hz]", "color": "#1e88e5"},
@@ -581,6 +582,7 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]], extra_candidate
         "p1_avg_vs_qpd00_center": _fit_channel_against_p1avg(samples, "qpd_l4_center_x_avg_um"),
         "p1_avg_vs_qpd01_center": _fit_channel_against_p1avg(samples, "qpd_l2_center_x_avg_um"),
     }
+    summary["temperature_state"] = _summarize_temperature_state(summary)
     summary["alpha_assessment"] = assess_alpha_monitor(summary)
     summary["trend_data"] = extract_trend_data(samples)
     summary["oscillation_study"] = analyze_p1_oscillation(samples, extra_candidate_keys=extra_candidate_keys)
@@ -598,6 +600,40 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]], extra_candidate
         ),
     }
     return summary
+
+
+def _summarize_temperature_state(summary: Dict[str, object]) -> Dict[str, object]:
+    trend_data = (summary.get("trend_data") or {})
+    current = (summary.get("current") or {})
+    candidates = (
+        ("climate_kw13_return_temp_c", "KW13 return"),
+        ("climate_sr_temp_c", "SR temp"),
+        ("climate_sr_temp1_c", "SR temp1"),
+    )
+    best_key = None
+    best_label = None
+    best_delta = 0.0
+    best_mean = None
+    for key, label in candidates:
+        values = [float(v) for v in trend_data.get(key, []) if isinstance(v, (int, float))]
+        current_value = _valid_float(current.get(key))
+        if len(values) < 5 or current_value is None:
+            continue
+        mean = float(np.mean(np.asarray(values, dtype=float)))
+        delta = abs(current_value - mean)
+        if delta >= best_delta:
+            best_delta = delta
+            best_key = key
+            best_label = label
+            best_mean = mean
+    return {
+        "unstable": bool(best_delta >= TEMPERATURE_UNSTABLE_THRESHOLD_C),
+        "threshold_c": TEMPERATURE_UNSTABLE_THRESHOLD_C,
+        "max_deviation_c": best_delta,
+        "primary_key": best_key,
+        "primary_label": best_label,
+        "baseline_mean_c": best_mean,
+    }
 
 
 def _bump_quality_score(summary: Dict[str, object]) -> Dict[str, object]:
@@ -741,11 +777,12 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
     environment = summary.get("environment_monitor", {})
     alpha = summary.get("alpha_assessment", {})
     oscillation = summary.get("oscillation_study", {})
+    temp_state = summary.get("temperature_state", {})
     sections = [
         {
             "key": "machine_state",
             "title": "Machine State",
-            "color": "green" if not current.get("nonlinear_bpms") else "yellow",
+            "color": "red" if temp_state.get("unstable") else ("green" if not current.get("nonlinear_bpms") else "yellow"),
             "rows": [
                 ("Beam current", "%s mA" % _fmt(current.get("beam_current"))),
                 ("Beam current (scope)", "%s µA" % _fmt(current.get("beam_current_scope"))),
@@ -754,6 +791,8 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 ("RF offset", "%s Hz" % _fmt(current.get("rf_offset_hz"))),
                 ("RF sweep detected", "ON" if summary.get("rf_sweep_detection", {}).get("active") else "OFF/idle"),
                 ("L4 bump", "%s" % bump.get("state_label", "unknown")),
+                ("Temperature state", "UNSTABLE" if temp_state.get("unstable") else "stable"),
+                ("Temp deviation", "%s C" % _fmt(temp_state.get("max_deviation_c"))),
                 ("Bump max |I|", "%s A" % _fmt(bump.get("max_abs_corrector_a"))),
                 ("Nonlinear BPMs", ", ".join(current.get("nonlinear_bpms") or []) or "none"),
                 ("Monitor samples", _fmt((summary.get("monitor_health") or {}).get("sample_count"))),
@@ -817,13 +856,15 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
         {
             "key": "camera_environment",
             "title": "Camera Centers And Temperature",
-            "color": "yellow",
+            "color": "red" if temp_state.get("unstable") else "yellow",
             "rows": [
                 ("QPD00 center X avg", "%s um" % _fmt(current.get("qpd_l4_center_x_avg_um"))),
                 ("QPD01 center X avg", "%s um" % _fmt(current.get("qpd_l2_center_x_avg_um"))),
                 ("KW13 return temp", "%s C" % _fmt(current.get("climate_kw13_return_temp_c"))),
                 ("SR temp", "%s C" % _fmt(current.get("climate_sr_temp_c"))),
                 ("SR temp1", "%s C" % _fmt(current.get("climate_sr_temp1_c"))),
+                ("Temp unstable", "yes" if temp_state.get("unstable") else "no"),
+                ("Worst channel", "%s" % (temp_state.get("primary_label") or "n/a")),
                 ("P1avg vs QPD00 center", _fmt((environment.get("p1_avg_vs_qpd00_center") or {}).get("slope"))),
                 ("P1avg vs KW13 temp", _fmt((environment.get("p1_avg_vs_kw13_temp") or {}).get("slope"))),
                 ("P1avg vs SR temp", _fmt((environment.get("p1_avg_vs_sr_temp") or {}).get("slope"))),
@@ -857,7 +898,7 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
                 "Use rolling FFT and autocorrelation on P1avg to estimate dominant period without assuming a pure sine wave",
                 "Rank candidate channels by Pearson correlation, lagged cross-correlation, and harmonic-period match",
             ],
-            "note": "Designed for quasi-periodic, non-sinusoidal P1 motion. Confidence rises once the monitor history spans at least ~2 cycles; before that, treat rankings as provisional.",
+            "note": "Designed for quasi-periodic, non-sinusoidal P1 motion. Confidence rises once the monitor history spans at least ~2 cycles; before that, treat rankings as provisional. This is still a live heuristic study, not a full statistical proof of SSMB resonance.",
             "default_trend": "p1_h1_ampl_avg",
             "trend_options": ["p1_h1_ampl_avg", "bump_orbit_error_mm", "bump_strength_a", "bump_bpm_l2_mm", "qpd_l4_center_x_avg_um", "climate_kw13_return_temp_c", "climate_sr_temp_c", "rf_offset_hz", "delta_s", "p3_h1_ampl_avg"],
         },
@@ -1064,6 +1105,7 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
     sweep_metrics = summary.get("rf_sweep_metrics", {})
     bump_monitor = summary.get("bump_monitor", {})
     oscillation = summary.get("oscillation_study", {})
+    temp_state = summary.get("temperature_state", {})
     lines = [
         "SSMB Live Monitor",
         "",
@@ -1098,6 +1140,11 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
                 _fmt(current.get("climate_kw13_return_temp_c")),
                 _fmt(current.get("climate_sr_temp_c")),
                 _fmt(current.get("climate_sr_temp1_c")),
+            ),
+            "Temperature stability: %s (Δ=%s C, channel=%s)" % (
+                "UNSTABLE" if temp_state.get("unstable") else "stable",
+                _fmt(temp_state.get("max_deviation_c")),
+                temp_state.get("primary_label") or "n/a",
             ),
             "P1 oscillation period / certainty: %s / %s" % (_fmt_duration(oscillation.get("dominant_period_s")), oscillation.get("certainty", "waiting")),
             "P1 autocorr period: %s" % _fmt_duration(oscillation.get("autocorr_period_s")),
@@ -1244,6 +1291,8 @@ def format_oscillation_study(summary: Dict[str, object]) -> List[str]:
             "- High score with small lag and similar/harmonic period is the strongest live clue.",
             "- A temperature or QPD-center candidate suggests diagnostics/environment drift.",
             "- A bump-error or bump-current candidate suggests the orbit-lock loop may be driving the oscillation.",
+            "- This is still a live heuristic study, not a full statistical proof of SSMB resonance.",
+            "- The current certainty is based on rolling FFT/autocorrelation/correlation logic, not a full offline uncertainty model yet.",
         ]
     )
     return lines

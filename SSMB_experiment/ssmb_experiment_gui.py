@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 
@@ -15,8 +16,12 @@ def _ensure_local_mplconfig() -> None:
 
 _ensure_local_mplconfig()
 
+print("[ssmb_experiment] MPLCONFIGDIR=%s" % os.environ.get("MPLCONFIGDIR", ""), flush=True)
+print("[ssmb_experiment] importing ssmb_tool.gui", flush=True)
+
 from ssmb_tool import gui
 
 
 if __name__ == "__main__":
+    print("[ssmb_experiment] entering gui.main()", flush=True)
     raise SystemExit(gui.main())
