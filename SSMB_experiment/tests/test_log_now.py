@@ -3,13 +3,15 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from SSMB_experiment.ssmb_tool.config import DEFAULT_LATTICE_EXPORT
 from SSMB_experiment.ssmb_tool.config import LoggerConfig
 from SSMB_experiment.ssmb_tool.epics_io import FakeEpicsAdapter
 from SSMB_experiment.ssmb_tool.inventory import build_default_inventory
 from SSMB_experiment.ssmb_tool.lattice import LatticeContext
-from SSMB_experiment.ssmb_tool.log_now import _derived_metrics, run_stage0_logger
+from SSMB_experiment.ssmb_tool.log_now import _derived_metrics, _flatten_for_csv, run_stage0_logger
+from SSMB_experiment.ssmb_tool.session import SessionLogger
 
 
 class SSMBExperimentLogNowTest(unittest.TestCase):
@@ -184,6 +186,34 @@ class SSMBExperimentLogNowTest(unittest.TestCase):
             self.assertIn("missing PV data:", log_text)
             self.assertIn("bad_channel", log_text)
             self.assertEqual(log_text.count("bad_channel"), 1)
+
+    def test_flatten_for_csv_includes_scalar_derived_values(self):
+        row = _flatten_for_csv(
+            {
+                "timestamp_epoch_s": 1.0,
+                "sample_index": 2,
+                "channels": {"beam_current_scope": {"value": 123.4}},
+                "derived": {
+                    "beam_current_preferred": 123.4,
+                    "beam_current_preferred_source": "beam_current_scope",
+                    "bpm_x_status": [{"label": "bpmz1l2rp_x"}],
+                },
+            }
+        )
+        self.assertEqual(row["beam_current_scope"], 123.4)
+        self.assertEqual(row["derived_beam_current_preferred"], 123.4)
+        self.assertEqual(row["derived_beam_current_preferred_source"], "beam_current_scope")
+        self.assertEqual(row["derived_bpm_x_status_len"], 1)
+
+    def test_session_logger_rotates_jsonl_parts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logger = SessionLogger.create(Path(tmpdir), "rotate_test")
+            with mock.patch("SSMB_experiment.ssmb_tool.session.JSONL_ROTATE_BYTES", 80):
+                first = logger.append_jsonl("samples.jsonl", {"value": "x" * 120})
+                second = logger.append_jsonl("samples.jsonl", {"value": "y" * 120})
+            self.assertTrue(first.name == "samples.jsonl")
+            self.assertIn("part", second.name)
+            self.assertNotEqual(first, second)
 
 
 if __name__ == "__main__":

@@ -137,6 +137,11 @@ def _flatten_for_csv(sample: Dict[str, object]) -> Dict[str, object]:
             row[label + "_std"] = float(np.std(array)) if array.size else None
             continue
         row[label] = value
+    for key, value in (sample.get("derived") or {}).items():
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            row["derived_" + key] = value
+        elif isinstance(value, (list, tuple)):
+            row["derived_" + key + "_len"] = len(value)
     return row
 
 
@@ -493,6 +498,7 @@ def run_stage0_logger(config: LoggerConfig, adapter=None, progress_callback=None
             "disk_usage_at_start": disk,
             "estimated_session_size_bytes": estimated_bytes,
             "write_strategy": "incremental_jsonl_with_final_csv",
+            "jsonl_rotate_bytes": 16 * 1024 * 1024,
             "session_status": "running",
         },
     )

@@ -15,6 +15,7 @@ import numpy as np
 PACKAGE_ROOT = Path(__file__).resolve().parent
 SSMB_ROOT = PACKAGE_ROOT.parent
 DEFAULT_LOG_DIRNAME = str(SSMB_ROOT / ".ssmb_local" / "ssmb_stage0")
+JSONL_ROTATE_BYTES = 16 * 1024 * 1024
 
 
 def json_ready(value: Any):
@@ -37,7 +38,8 @@ def json_ready(value: Any):
 class SessionLogger:
     session_dir: Path
     text_log_path: Path
-    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _lock: threading.RLock = field(default_factory=threading.RLock)
+    _jsonl_state: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def create(cls, root: Optional[Path], prefix: str) -> "SessionLogger":
@@ -72,13 +74,36 @@ class SessionLogger:
         return path
 
     def append_jsonl(self, relative_name: str, payload: Any) -> Path:
-        path = self.session_dir / relative_name
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path = self._jsonl_target(relative_name)
         with self._lock:
             with path.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(json_ready(payload), sort_keys=True) + "\n")
                 stream.flush()
         return path
+
+    def _jsonl_target(self, relative_name: str) -> Path:
+        with self._lock:
+            state = self._jsonl_state.get(relative_name)
+            if state is None:
+                path = self.session_dir / relative_name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                state = {"index": 1, "path": path}
+                self._jsonl_state[relative_name] = state
+            path = state["path"]
+            try:
+                size = path.stat().st_size if path.exists() else 0
+            except Exception:
+                size = 0
+            if size >= JSONL_ROTATE_BYTES:
+                rel_path = Path(relative_name)
+                stem = rel_path.stem
+                suffix = rel_path.suffix or ".jsonl"
+                state["index"] = int(state.get("index", 1)) + 1
+                rotated = rel_path.with_name("%s_part%03d%s" % (stem, state["index"], suffix))
+                path = self.session_dir / rotated
+                path.parent.mkdir(parents=True, exist_ok=True)
+                state["path"] = path
+            return path
 
 
 def disk_usage_summary(path: Path) -> Dict[str, int]:

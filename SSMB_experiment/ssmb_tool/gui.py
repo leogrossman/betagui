@@ -151,6 +151,9 @@ class SSMBGui:
         self.ssmb_study_quantity_help_window: Optional["tk.Toplevel"] = None
         self.oscillation_selected_candidate_key = None
         self.stage0_stop_event: Optional[threading.Event] = None
+        self.stage0_started_monotonic: Optional[float] = None
+        self.stage0_elapsed_job = None
+        self.stage0_last_session_dir = None
         self._monitor_cache_append_count = 0
         self._shutdown_started = False
         self.window_log_states = {}
@@ -246,6 +249,7 @@ class SSMBGui:
         self.heavy_mode_var = tk.BooleanVar(value=False)
         self.safe_mode_var = tk.BooleanVar(value=self.start_safe_mode)
         self.log_profile_var = tk.StringVar(value="ssmb_standard")
+        self.logger_status_var = tk.StringVar(value="Logger idle.")
 
         self.center_rf_var = tk.StringVar(value="")
         self.delta_min_hz_var = tk.StringVar(value="-100")
@@ -418,6 +422,11 @@ class SSMBGui:
         row += 1
         self.optional_pvs_text = tk.Text(frame, width=48, height=6)
         self.optional_pvs_text.grid(row=row, column=0, columnspan=2, sticky="ew")
+        row += 1
+
+        ttk.Label(frame, textvariable=self.logger_status_var, foreground="#455a64", wraplength=460, justify="left").grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(8, 0)
+        )
         row += 1
 
         button_row = ttk.Frame(frame)
@@ -1134,6 +1143,37 @@ class SSMBGui:
         if at_bottom:
             self.log_text.see("end")
 
+    def _set_logger_status(self, message: str) -> None:
+        try:
+            self.logger_status_var.set(message)
+        except Exception:
+            pass
+
+    def _format_elapsed(self, elapsed_s: float) -> str:
+        elapsed = max(0.0, float(elapsed_s))
+        minutes, seconds = divmod(int(elapsed), 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours:
+            return "%dh %02dm %02ds" % (hours, minutes, seconds)
+        return "%dm %02ds" % (minutes, seconds)
+
+    def _schedule_stage0_elapsed_update(self) -> None:
+        if self.stage0_elapsed_job is not None:
+            try:
+                self.root.after_cancel(self.stage0_elapsed_job)
+            except Exception:
+                pass
+            self.stage0_elapsed_job = None
+        self.stage0_elapsed_job = self.root.after(1000, self._update_stage0_elapsed_status)
+
+    def _update_stage0_elapsed_status(self) -> None:
+        self.stage0_elapsed_job = None
+        if self.stage0_stop_event is None or self.stage0_started_monotonic is None:
+            return
+        elapsed = time.monotonic() - self.stage0_started_monotonic
+        self._set_logger_status("Manual logger running. Elapsed: %s" % self._format_elapsed(elapsed))
+        self._schedule_stage0_elapsed_update()
+
     def _set_inventory_text(self, lines: list[str]) -> None:
         self.inventory_text.configure(state="normal")
         self.inventory_text.delete("1.0", "end")
@@ -1305,10 +1345,25 @@ class SSMBGui:
                 if isinstance(message, dict):
                     if message.get("kind") == "bpm_status":
                         self._update_bpm_status(message)
+                    elif message.get("kind") == "stage0_saved":
+                        session_dir = message.get("session_dir")
+                        mode = "Manual" if message.get("manual") else "Finite"
+                        if session_dir:
+                            self.stage0_last_session_dir = session_dir
+                            self._set_logger_status("%s logger saved: %s" % (mode, session_dir))
                     elif message.get("kind") == "manual_stage0_done":
                         self.stage0_stop_event = None
+                        self.stage0_started_monotonic = None
+                        if self.stage0_elapsed_job is not None:
+                            try:
+                                self.root.after_cancel(self.stage0_elapsed_job)
+                            except Exception:
+                                pass
+                            self.stage0_elapsed_job = None
                         self.start_manual_button.state(["!disabled"])
                         self.stop_manual_button.state(["disabled"])
+                        if self.stage0_last_session_dir is None:
+                            self._set_logger_status("Manual logger stopped.")
                         self._append_log("Manual logging task finalized.")
                     elif message.get("kind") == "monitor_update":
                         self._update_live_monitor(message)
@@ -4534,11 +4589,17 @@ class SSMBGui:
 
     def _run_stage0(self) -> None:
         config = self._collect_logger_config(allow_writes=False)
+        self.stage0_last_session_dir = None
+        self._set_logger_status(
+            "Starting finite logger run: %.1f s at %.3f Hz." % (config.duration_seconds, config.sample_hz)
+        )
         self._run_in_worker(self._run_stage0_worker, config)
 
     def _run_stage0_worker(self, config: LoggerConfig) -> None:
         session_dir = run_stage0_logger(config, progress_callback=self._emit, sample_callback=self._emit_bpm_status)
+        self.stage0_last_session_dir = str(session_dir)
         self._emit("Stage 0 log saved to: %s" % session_dir)
+        self._emit({"kind": "stage0_saved", "session_dir": str(session_dir), "manual": False})
 
     def _start_manual_stage0(self) -> None:
         if self.stage0_stop_event is not None:
@@ -4565,9 +4626,13 @@ class SSMBGui:
             extra_optional_pvs=config.extra_optional_pvs,
         )
         self.stage0_stop_event = threading.Event()
+        self.stage0_started_monotonic = time.monotonic()
+        self.stage0_last_session_dir = None
         self.start_manual_button.state(["disabled"])
         self.stop_manual_button.state(["!disabled"])
         self._append_log("Starting manual passive logging. Use Stop Manual Log to finish and flush outputs.")
+        self._set_logger_status("Manual logger starting...")
+        self._schedule_stage0_elapsed_update()
         self._run_in_worker(self._run_stage0_manual_worker, config)
 
     def _stop_manual_stage0(self) -> None:
@@ -4575,6 +4640,7 @@ class SSMBGui:
             self._append_log("No manual logging task is currently running.")
             return
         self._append_log("Manual stop requested. Waiting for the current sample to finish.")
+        self._set_logger_status("Manual logger stopping after current sample...")
         self.stage0_stop_event.set()
 
     def _run_stage0_manual_worker(self, config: LoggerConfig) -> None:
@@ -4587,7 +4653,9 @@ class SSMBGui:
                 session_prefix="ssmb_manual",
                 extra_metadata={"manual_stop_mode": True, "started_from_gui": True},
             )
+            self.stage0_last_session_dir = str(session_dir)
             self._emit("Manual log saved to: %s" % session_dir)
+            self.queue.put({"kind": "stage0_saved", "session_dir": str(session_dir), "manual": True})
         finally:
             self.queue.put({"kind": "manual_stage0_done"})
 
