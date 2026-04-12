@@ -206,6 +206,7 @@ class SSMBGui:
         self.timeout_var = tk.StringVar(value="0.5")
         self.label_var = tk.StringVar(value="")
         self.note_var = tk.StringVar(value="")
+        self.laser_shots_var = tk.StringVar(value="0")
         self.output_dir_var = tk.StringVar(value=str(SSMB_ROOT / ".ssmb_local" / "ssmb_stage0"))
         self.include_bpm_buffer_var = tk.BooleanVar(value=True)
         self.include_candidate_bpm_var = tk.BooleanVar(value=True)
@@ -339,6 +340,7 @@ class SSMBGui:
             ("Timeout [s]", self.timeout_var),
             ("Session label", self.label_var),
             ("Operator note", self.note_var),
+            ("Laser shots / run", self.laser_shots_var),
             ("Output root", self.output_dir_var),
         ):
             ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w")
@@ -824,6 +826,7 @@ class SSMBGui:
             include_octupoles=bool(self.include_octupole_var.get()),
             session_label=self.label_var.get().strip(),
             operator_note=self.note_var.get().strip(),
+            laser_shots_per_run=max(0, int(float(self.laser_shots_var.get() or "0"))),
             extra_pvs=_parse_text_mapping(self.extra_pvs_text.get("1.0", "end")),
             extra_optional_pvs=_parse_text_mapping(self.optional_pvs_text.get("1.0", "end")),
         )
@@ -923,6 +926,7 @@ class SSMBGui:
         self.heavy_mode_var.set(True)
         self.duration_var.set("60")
         self.sample_hz_var.set("1")
+        self.laser_shots_var.set("0")
         self.note_var.set("Low-alpha full passive logging")
         self._toggle_heavy_mode()
 
@@ -931,6 +935,7 @@ class SSMBGui:
         self.heavy_mode_var.set(True)
         self.duration_var.set("60")
         self.sample_hz_var.set("1")
+        self.laser_shots_var.set("0")
         self.note_var.set("Set bump state externally before starting this passive log")
         self._toggle_heavy_mode()
 
@@ -938,6 +943,7 @@ class SSMBGui:
         self.label_var.set(label)
         self.heavy_mode_var.set(True)
         self.sample_hz_var.set("1")
+        self.laser_shots_var.set("0")
         self.note_var.set("Rich SSMB RF sweep with external bump state fixed before run; online delta_s / eta / alpha0 summaries enabled")
         self.delta_min_hz_var.set("-20")
         self.delta_max_hz_var.set("20")

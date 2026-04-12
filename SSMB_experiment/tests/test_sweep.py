@@ -44,6 +44,7 @@ class SSMBExperimentSweepTest(unittest.TestCase):
                 include_ring_bpm_scalars=False,
                 include_octupoles=False,
                 session_label="rf_sweep_bump_off",
+                laser_shots_per_run=4321,
             )
             plan = build_plan_from_hz(
                 center_rf_pv=499688.38770589296,
@@ -84,6 +85,7 @@ class SSMBExperimentSweepTest(unittest.TestCase):
             metadata = json.loads((session_dir / "metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(metadata["online_analysis"]["primary_l4_bpms"], list(PRIMARY_L4_BPM_LABELS))
             self.assertEqual(metadata["session_status"], "completed")
+            self.assertEqual(metadata["config"]["laser_shots_per_run"], 4321)
             self.assertIn("estimated_session_size_bytes", metadata)
             self.assertIn("disk_usage_at_start", metadata)
 

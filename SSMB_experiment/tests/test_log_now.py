@@ -107,6 +107,7 @@ class SSMBExperimentLogNowTest(unittest.TestCase):
                 include_sextupoles=False,
                 include_octupoles=False,
                 session_label="manual_test",
+                laser_shots_per_run=1234,
             )
             adapter = FakeEpicsAdapter(
                 {
@@ -128,6 +129,7 @@ class SSMBExperimentLogNowTest(unittest.TestCase):
             self.assertEqual(metadata["session_status"], "completed")
             self.assertEqual(metadata["partial_sample_count"], 0)
             self.assertTrue(metadata["manual_stop_mode"])
+            self.assertEqual(metadata["config"]["laser_shots_per_run"], 1234)
             log_text = (session_dir / "session.log").read_text(encoding="utf-8")
             self.assertIn("Stop requested by operator", log_text)
 

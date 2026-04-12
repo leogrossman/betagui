@@ -53,6 +53,7 @@ class LoggerConfig:
     include_octupoles: bool = True
     session_label: str = ""
     operator_note: str = ""
+    laser_shots_per_run: int = 0
     extra_pvs: Dict[str, str] = field(default_factory=dict)
     extra_optional_pvs: Dict[str, Optional[str]] = field(default_factory=dict)
 
@@ -63,6 +64,8 @@ class LoggerConfig:
             raise ValueError("sample_hz above 10 Hz is intentionally blocked for passive control-room logging.")
         if self.duration_seconds <= 0.0:
             raise ValueError("duration_seconds must be positive.")
+        if self.laser_shots_per_run < 0:
+            raise ValueError("laser_shots_per_run must be non-negative.")
         if self.include_ring_bpm_scalars and self.sample_hz > 2.0:
             raise ValueError("Full-ring BPM scalar logging is limited to 2 Hz or below to avoid unnecessary PV load.")
 
