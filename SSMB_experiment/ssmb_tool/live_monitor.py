@@ -6,6 +6,7 @@ from .analyze_session import _linear_fit, alpha0_from_eta, fit_slip_factor
 
 RF_SWEEP_ACTIVE_THRESHOLD_KHZ = 0.002
 RF_SWEEP_ACTIVE_MIN_POINTS = 4
+BUMP_CORRECTOR_ACTIVE_THRESHOLD_A = 0.002
 
 
 def _valid_float(value) -> Optional[float]:
@@ -35,6 +36,7 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
     latest = samples[-1] if samples else {}
     derived = latest.get("derived", {})
     channels = latest.get("channels", {})
+    bump = _summarize_bump_state(channels)
     summary: Dict[str, object] = {
         "current": {
             "rf_readback_khz": _valid_float(derived.get("rf_readback")),
@@ -53,10 +55,12 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
             "qpd_l4_sigma_y_mm": _valid_float(derived.get("qpd_l4_sigma_y_mm")),
             "nonlinear_bpms": list(derived.get("bpm_x_nonlinear_labels") or []),
         },
+        "bump_state": bump,
         "what_can_be_measured_now": [
             "Passive readout: tunes, synchrotron monitor, beam current, orbit BPMs, QPD beam-size proxies, bump states, cavity voltage, beam energy readback.",
             "From passive L4 BPM orbit: first-order delta_s and BPM-based beam energy shift relative to the monitor baseline.",
             "From QPD00ZL4RP sigma_x: first-order momentum spread proxy and corresponding sigma_E estimate.",
+            "From the 4-corrector bump PVs: whether the L4 bump is active, and whether bump feedback is enabled.",
         ],
         "what_needs_rf_sweep": [
             "Slip factor eta from fitted RF-vs-delta_s slope.",
@@ -89,15 +93,19 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
     if len(delta_series) >= 3 and sweep_state["active"]:
         slip = fit_slip_factor(delta_series, rf_series)
         beam_energy_mev = _valid_float(channels.get("beam_energy_mev", {}).get("value"))
+        legacy_alpha = _valid_float(derived.get("legacy_alpha0_corrected"))
+        alpha_bpm = alpha0_from_eta(slip["eta"], beam_energy_mev) if beam_energy_mev is not None else None
         sweep_metrics = {
             "available": True,
             "phase_slip_factor_eta": slip["eta"],
-            "alpha0_from_bpm_eta": alpha0_from_eta(slip["eta"], beam_energy_mev) if beam_energy_mev is not None else None,
+            "alpha0_from_bpm_eta": alpha_bpm,
             "rf_reference_khz": slip["rf_reference"],
             "qx_vs_delta": _linear_fit([x for x, y in qx_series if y is not None], [y for _x, y in qx_series if y is not None]),
             "qy_vs_delta": _linear_fit([x for x, y in qy_series if y is not None], [y for _x, y in qy_series if y is not None]),
             "qs_vs_delta": _linear_fit([x for x, y in qs_series if y is not None], [y for _x, y in qs_series if y is not None]),
             "sample_count": len(delta_series),
+            "legacy_alpha0_current": legacy_alpha,
+            "alpha0_difference": None if legacy_alpha is None or alpha_bpm is None else legacy_alpha - alpha_bpm,
         }
     summary["rf_sweep_metrics"] = sweep_metrics
     return summary
@@ -141,6 +149,8 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
             "Tune_s monitor: %s kHz" % _fmt(current.get("tune_s_khz")),
             "Beam current: %s" % _fmt(current.get("beam_current")),
             "QPD00 sigma_x / sigma_y: %s mm / %s mm" % (_fmt(current.get("qpd_l4_sigma_x_mm")), _fmt(current.get("qpd_l4_sigma_y_mm"))),
+            "L4 bump state: %s" % summary.get("bump_state", {}).get("state_label", "unknown"),
+            "L4 bump feedback enable: %s" % summary.get("bump_state", {}).get("feedback_enable", "n/a"),
         ]
     )
     nonlinear = current.get("nonlinear_bpms") or []
@@ -160,6 +170,8 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
                 "Live sweep-derived values:",
                 "phase slip factor eta: %s" % _fmt(sweep_metrics.get("phase_slip_factor_eta")),
                 "alpha0 from BPM eta: %s" % _fmt(sweep_metrics.get("alpha0_from_bpm_eta")),
+                "legacy alpha0 shortcut: %s" % _fmt(sweep_metrics.get("legacy_alpha0_current")),
+                "legacy - BPM alpha0: %s" % _fmt(sweep_metrics.get("alpha0_difference")),
                 "Qx vs delta slope: %s" % _fmt((sweep_metrics.get("qx_vs_delta") or {}).get("slope")),
                 "Qy vs delta slope: %s" % _fmt((sweep_metrics.get("qy_vs_delta") or {}).get("slope")),
                 "Qs vs delta slope: %s" % _fmt((sweep_metrics.get("qs_vs_delta") or {}).get("slope")),
@@ -187,6 +199,31 @@ def format_channel_snapshot(sample: Dict[str, object]) -> List[str]:
         else:
             lines.append("%s = %s    (%s)" % (label, value, payload.get("pv")))
     return lines
+
+
+def _summarize_bump_state(channels: Dict[str, object]) -> Dict[str, object]:
+    labels = (
+        "l4_bump_hcorr_k3_upstream",
+        "l4_bump_hcorr_l4_upstream",
+        "l4_bump_hcorr_l4_downstream",
+        "l4_bump_hcorr_k1_downstream",
+    )
+    values = {}
+    max_abs = 0.0
+    for label in labels:
+        value = _valid_float(channels.get(label, {}).get("value"))
+        values[label] = value
+        if value is not None:
+            max_abs = max(max_abs, abs(value))
+    feedback = _valid_float(channels.get("l4_bump_feedback_enable", {}).get("value"))
+    active = max_abs >= BUMP_CORRECTOR_ACTIVE_THRESHOLD_A or (feedback is not None and feedback != 0.0)
+    return {
+        "active": active,
+        "state_label": "ON" if active else "OFF/idle",
+        "feedback_enable": feedback,
+        "max_abs_corrector_a": max_abs,
+        "corrector_currents_a": values,
+    }
 
 
 def _fmt(value) -> str:

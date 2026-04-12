@@ -160,6 +160,7 @@ It gives you:
 
 - live preview of the same core PVs without writing or saving
 - a full current channel snapshot for the configured logging profile
+- live detection of whether the 4-corrector L4 bump is active
 - live `δ_s` estimate from the L4 BPM set
 - live BPM-based beam-energy estimate
 - live QPD00-based first-order `σ_δ` and `σ_E` proxies
@@ -167,6 +168,8 @@ It gives you:
 - automatic RF-motion detection
 - automatic live `η`, BPM-based `α₀`, and tune-vs-`δ` slope estimates once RF
   motion is detected
+- a pop-out clickable lattice/device window with live values for lattice devices,
+  QPD monitors, and recovered bump hardware
 
 The pop-out monitor window is useful if you want the live readout on a second
 screen while using the logger or sweep tabs.

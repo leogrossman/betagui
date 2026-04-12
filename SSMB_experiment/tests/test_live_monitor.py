@@ -23,6 +23,11 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
                     "channels": {
                         "beam_energy_mev": {"value": 250.0},
                         "beam_current": {"value": 4.2},
+                        "l4_bump_hcorr_k3_upstream": {"value": 0.0},
+                        "l4_bump_hcorr_l4_upstream": {"value": 0.0},
+                        "l4_bump_hcorr_l4_downstream": {"value": 0.0},
+                        "l4_bump_hcorr_k1_downstream": {"value": 0.0},
+                        "l4_bump_feedback_enable": {"value": 0.0},
                     },
                     "derived": {
                         "rf_readback": rf,
@@ -47,6 +52,22 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         self.assertTrue(summary["rf_sweep_metrics"]["available"])
         self.assertIsNotNone(summary["rf_sweep_metrics"]["phase_slip_factor_eta"])
         self.assertIsNotNone(summary["rf_sweep_metrics"]["alpha0_from_bpm_eta"])
+
+    def test_summarize_live_monitor_detects_bump_state(self):
+        sample = {
+            "channels": {
+                "beam_energy_mev": {"value": 250.0},
+                "l4_bump_hcorr_k3_upstream": {"value": 0.01},
+                "l4_bump_hcorr_l4_upstream": {"value": 0.0},
+                "l4_bump_hcorr_l4_downstream": {"value": 0.0},
+                "l4_bump_hcorr_k1_downstream": {"value": 0.0},
+                "l4_bump_feedback_enable": {"value": 1.0},
+            },
+            "derived": {},
+        }
+        summary = summarize_live_monitor([sample])
+        self.assertTrue(summary["bump_state"]["active"])
+        self.assertEqual(summary["bump_state"]["state_label"], "ON")
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ from typing import Optional, Sequence
 
 from .config import LoggerConfig, SSMB_ROOT, parse_labeled_pvs
 from .epics_io import EpicsUnavailableError, ReadOnlyEpicsAdapter
+from .lattice import LatticeElement
 from .live_monitor import format_channel_snapshot, format_monitor_summary, summarize_live_monitor
 from .log_now import BPM_NONLINEAR_MM, BPM_WARNING_MM, build_specs, estimate_passive_session_bytes, inventory_overview_lines, run_stage0_logger
 from .sweep import RF_PV_NAME, SweepRuntimeConfig, build_plan_from_hz, estimate_sweep_session_bytes, preview_lines, run_rf_sweep_session
@@ -46,6 +47,9 @@ class SSMBGui:
         self.monitor_stop_event: Optional[threading.Event] = None
         self.monitor_history = collections.deque(maxlen=120)
         self.monitor_window: Optional["tk.Toplevel"] = None
+        self.lattice_window: Optional["tk.Toplevel"] = None
+        self.latest_monitor_sample = None
+        self.lattice_device_items = []
         self.stage0_stop_event: Optional[threading.Event] = None
         self._build_vars()
         self._build_ui()
@@ -215,6 +219,7 @@ class SSMBGui:
         self.stop_monitor_button.state(["disabled"])
         ttk.Button(button_row, text="Reset Monitor Baseline", command=self._reset_monitor_baseline).pack(side="left")
         ttk.Button(button_row, text="Open Monitor Window", command=self._open_monitor_window).pack(side="left", padx=6)
+        ttk.Button(button_row, text="Open Lattice View", command=self._open_lattice_window).pack(side="left")
         row += 1
         ttk.Label(frame, text="Live SSMB summary").grid(row=row, column=0, columnspan=3, sticky="w")
         row += 1
@@ -457,6 +462,7 @@ class SSMBGui:
     def _update_live_monitor(self, payload: dict) -> None:
         summary_lines = payload.get("summary_lines", [])
         channel_lines = payload.get("channel_lines", [])
+        self.latest_monitor_sample = payload.get("sample")
         self._set_text_widget(self.monitor_summary_text, summary_lines)
         self._set_text_widget(self.monitor_channels_text, channel_lines)
         if self.monitor_window is not None and self.monitor_window.winfo_exists():
@@ -466,6 +472,7 @@ class SSMBGui:
                 self._set_text_widget(summary_widget, summary_lines)
             if channel_widget is not None:
                 self._set_text_widget(channel_widget, channel_lines)
+        self._refresh_lattice_view()
 
     def _run_in_worker(self, target, *args) -> None:
         if self.worker is not None and self.worker.is_alive():
@@ -532,6 +539,7 @@ class SSMBGui:
                         "kind": "monitor_update",
                         "summary_lines": format_monitor_summary(summary),
                         "channel_lines": format_channel_snapshot(sample),
+                        "sample": sample,
                     }
                 )
                 sample_index += 1
@@ -585,6 +593,204 @@ class SSMBGui:
         self.monitor_window = None
         self.monitor_window_summary_text = None
         self.monitor_window_channels_text = None
+
+    def _open_lattice_window(self) -> None:
+        if self.lattice_window is not None and self.lattice_window.winfo_exists():
+            self.lattice_window.lift()
+            return
+        config = self._collect_logger_config(allow_writes=False)
+        lattice, specs = build_specs(config)
+        window = tk.Toplevel(self.root)
+        window.title("SSMB Live Lattice View")
+        window.geometry("1200x720")
+        outer = ttk.Frame(window, padding=10)
+        outer.pack(fill="both", expand=True)
+        outer.columnconfigure(0, weight=1)
+        outer.columnconfigure(1, weight=0)
+        outer.rowconfigure(0, weight=1)
+        canvas = tk.Canvas(outer, bg="white", height=420)
+        canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        info = tk.Text(outer, wrap="word", width=42)
+        info.grid(row=0, column=1, sticky="nsew")
+        info.configure(state="disabled")
+        self.lattice_window = window
+        self.lattice_canvas = canvas
+        self.lattice_info_text = info
+        self._draw_lattice_view(lattice, specs)
+        canvas.bind("<Button-1>", self._on_lattice_click)
+        window.protocol("WM_DELETE_WINDOW", self._close_lattice_window)
+        self._refresh_lattice_view()
+
+    def _draw_lattice_view(self, lattice, specs) -> None:
+        canvas = self.lattice_canvas
+        canvas.delete("all")
+        width = int(canvas.winfo_width() or 1000)
+        height = int(canvas.winfo_height() or 420)
+        left = 60
+        right = width - 40
+        y_mid = 180
+        canvas.create_line(left, y_mid, right, y_mid, fill="#37474f", width=3)
+        self.lattice_device_items = []
+        sections = [("K1", "#fff3e0"), ("L2", "#e8f5e9"), ("K3", "#e3f2fd"), ("L4", "#fce4ec")]
+        section_bounds = self._section_bounds(lattice)
+        for name, color in sections:
+            bounds = section_bounds.get(name)
+            if not bounds:
+                continue
+            x0 = self._s_to_x(bounds[0], lattice, left, right)
+            x1 = self._s_to_x(bounds[1], lattice, left, right)
+            canvas.create_rectangle(x0, y_mid - 28, x1, y_mid + 28, fill=color, outline="")
+            canvas.create_text((x0 + x1) / 2.0, y_mid - 42, text=name, fill="#263238", font=("Helvetica", 11, "bold"))
+        for element in lattice.elements:
+            if element.element_type not in ("Monitor", "Quadrupole", "Sextupole", "Octupole", "Dipole", "RFCavity"):
+                continue
+            x = self._s_to_x(element.s_center_m, lattice, left, right)
+            color, label = self._element_style(element)
+            y0 = y_mid - 18
+            y1 = y_mid + 18
+            item_id = canvas.create_rectangle(x - 4, y0, x + 4, y1, fill=color, outline="")
+            self.lattice_device_items.append(
+                {
+                    "item_id": item_id,
+                    "name": element.family_name,
+                    "element_type": element.element_type,
+                    "pv_label": self._match_spec_label(specs, element),
+                    "pv": self._match_spec_pv(specs, element),
+                    "notes": "%s in %s" % (element.element_type, element.section or "ring"),
+                    "x": x,
+                    "y": y_mid,
+                }
+            )
+            if element.element_type in ("Monitor", "RFCavity"):
+                canvas.create_text(x, y_mid + 36, text=label or element.family_name, angle=45, anchor="w", font=("Helvetica", 8))
+        extras = [
+            ("QPD00ZL4RP", "qpd_l4_sigma_x", "QPD00 SR camera/profile monitor in L4", 36.0, "#d81b60"),
+            ("QPD01ZL2RP", "qpd_l2_sigma_x", "QPD01 SR camera/profile monitor in L2", 12.0, "#8e24aa"),
+            ("HS1P2K3RP:setCur", "l4_bump_hcorr_k3_upstream", "Recovered bump corrector", 24.0, "#ef6c00"),
+            ("HS3P1L4RP:setCur", "l4_bump_hcorr_l4_upstream", "Recovered bump corrector", 31.5, "#ef6c00"),
+            ("HS3P2L4RP:setCur", "l4_bump_hcorr_l4_downstream", "Recovered bump corrector", 40.0, "#ef6c00"),
+            ("HS1P1K1RP:setCur", "l4_bump_hcorr_k1_downstream", "Recovered bump corrector", 47.0, "#ef6c00"),
+        ]
+        for name, label, notes, s_pos, color in extras:
+            x = self._s_to_x(s_pos, lattice, left, right)
+            item_id = canvas.create_oval(x - 6, y_mid - 40, x + 6, y_mid - 28, fill=color, outline="")
+            canvas.create_text(x, y_mid - 48, text=name.split(":")[0], angle=45, anchor="e", font=("Helvetica", 8))
+            self.lattice_device_items.append(
+                {
+                    "item_id": item_id,
+                    "name": name,
+                    "element_type": "Diagnostic",
+                    "pv_label": label,
+                    "pv": name if ":" in name else None,
+                    "notes": notes,
+                    "x": x,
+                    "y": y_mid - 34,
+                }
+            )
+        canvas.create_text(left, height - 18, anchor="w", text="Click any marker for live value and PV mapping.", fill="#455a64")
+
+    def _refresh_lattice_view(self) -> None:
+        if self.lattice_window is None or not self.lattice_window.winfo_exists():
+            return
+        if self.latest_monitor_sample is None:
+            self._set_text_widget(self.lattice_info_text, ["No live sample yet. Start Live Monitor first."])
+            return
+        if not self.lattice_device_items:
+            return
+        self._set_text_widget(self.lattice_info_text, ["Lattice view ready.", "", "Click a lattice marker to inspect its live readout."])
+
+    def _on_lattice_click(self, event) -> None:
+        if not self.lattice_device_items:
+            return
+        nearest = min(self.lattice_device_items, key=lambda item: (item["x"] - event.x) ** 2 + (item["y"] - event.y) ** 2)
+        self._show_lattice_item_info(nearest)
+
+    def _show_lattice_item_info(self, item: dict) -> None:
+        sample = self.latest_monitor_sample or {}
+        channels = sample.get("channels", {})
+        payload = channels.get(item.get("pv_label"), {}) if item.get("pv_label") else {}
+        value = payload.get("value")
+        pv = payload.get("pv") or item.get("pv")
+        lines = [
+            item.get("name", "device"),
+            "",
+            "Type: %s" % item.get("element_type"),
+            "PV label: %s" % (item.get("pv_label") or "n/a"),
+            "PV: %s" % (pv or "n/a"),
+            "Live value: %s" % value,
+            "Notes: %s" % item.get("notes", ""),
+        ]
+        if item.get("pv_label") == "qpd_l4_sigma_x":
+            lines.extend(
+                [
+                    "",
+                    "Use with eta_x in L4 to estimate sigma_delta via:",
+                    "sigma_x^2 ~= beta_x*epsilon_x + (eta_x*sigma_delta)^2",
+                ]
+            )
+        if item.get("pv_label", "").startswith("l4_bump_hcorr"):
+            lines.extend(
+                [
+                    "",
+                    "This corrector participates in the 4-corrector L4 bump.",
+                    "Live bump state is inferred from the set of these currents plus AKC10VP.",
+                ]
+            )
+        self._set_text_widget(self.lattice_info_text, lines)
+
+    def _close_lattice_window(self) -> None:
+        if self.lattice_window is not None and self.lattice_window.winfo_exists():
+            self.lattice_window.destroy()
+        self.lattice_window = None
+        self.lattice_canvas = None
+        self.lattice_info_text = None
+        self.lattice_device_items = []
+
+    def _section_bounds(self, lattice) -> dict:
+        bounds = {}
+        for element in lattice.elements:
+            if not element.section:
+                continue
+            current = bounds.get(element.section)
+            if current is None:
+                bounds[element.section] = [element.s_center_m, element.s_center_m]
+            else:
+                current[0] = min(current[0], element.s_center_m)
+                current[1] = max(current[1], element.s_center_m)
+        return bounds
+
+    def _s_to_x(self, s_pos: float, lattice, left: int, right: int) -> float:
+        if lattice.circumference_m <= 0:
+            return left
+        return left + (right - left) * float(s_pos) / float(lattice.circumference_m)
+
+    def _element_style(self, element: LatticeElement):
+        styles = {
+            "Monitor": ("#1e88e5", element.family_name),
+            "Quadrupole": ("#43a047", ""),
+            "Sextupole": ("#fdd835", ""),
+            "Octupole": ("#8e24aa", ""),
+            "Dipole": ("#6d4c41", ""),
+            "RFCavity": ("#c62828", "CAV"),
+        }
+        return styles.get(element.element_type, ("#90a4ae", ""))
+
+    def _match_spec_label(self, specs, element: LatticeElement):
+        family = element.family_name.lower()
+        candidates = [family, family + "_x", family + "_y"]
+        for spec in specs:
+            if spec.label in candidates:
+                return spec.label
+        return None
+
+    def _match_spec_pv(self, specs, element: LatticeElement):
+        label = self._match_spec_label(specs, element)
+        if label is None:
+            return None
+        for spec in specs:
+            if spec.label == label:
+                return spec.pv
+        return None
 
     def _refresh_inventory(self) -> None:
         try:
