@@ -94,6 +94,9 @@ class SSMBGui:
         self.monitor_thread: Optional[threading.Thread] = None
         self.monitor_stop_event: Optional[threading.Event] = None
         self.monitor_history = collections.deque(maxlen=2400)
+        self._monitor_message_lock = threading.Lock()
+        self._pending_monitor_payload = None
+        self._monitor_update_queued = False
         self.monitor_window: Optional["tk.Toplevel"] = None
         self.theory_window: Optional["tk.Toplevel"] = None
         self.oscillation_window: Optional["tk.Toplevel"] = None
@@ -972,6 +975,10 @@ class SSMBGui:
                         self._append_log("Manual logging task finalized.")
                     elif message.get("kind") == "monitor_update":
                         self._update_live_monitor(message)
+                    elif message.get("kind") == "monitor_update_pending":
+                        payload = self._take_pending_monitor_update()
+                        if payload is not None:
+                            self._update_live_monitor(payload)
                     elif message.get("kind") == "monitor_done":
                         self.monitor_stop_event = None
                         self.start_monitor_button.state(["!disabled"])
@@ -990,6 +997,24 @@ class SSMBGui:
 
     def _emit(self, message: str) -> None:
         self.queue.put(message)
+
+    def _logger_priority_active(self) -> bool:
+        return bool(self.stage0_stop_event is not None or (self.worker is not None and self.worker.is_alive()))
+
+    def _enqueue_monitor_update(self, payload: dict) -> None:
+        with self._monitor_message_lock:
+            self._pending_monitor_payload = payload
+            if self._monitor_update_queued:
+                return
+            self._monitor_update_queued = True
+        self.queue.put({"kind": "monitor_update_pending"})
+
+    def _take_pending_monitor_update(self):
+        with self._monitor_message_lock:
+            payload = self._pending_monitor_payload
+            self._pending_monitor_payload = None
+            self._monitor_update_queued = False
+            return payload
 
     def _emit_bpm_status(self, sample: dict) -> None:
         derived = sample.get("derived", {})
@@ -1086,7 +1111,7 @@ class SSMBGui:
         self.stop_monitor_button.state(["!disabled"])
         self.monitor_thread = threading.Thread(target=self._monitor_loop, args=(interval,), daemon=True)
         self.monitor_thread.start()
-        self._append_log("Started live read-only SSMB monitor.")
+        self._append_log("Started live read-only SSMB monitor. Experiment logging remains the protected path and has priority.")
 
     def _stop_monitor(self) -> None:
         if self.monitor_stop_event is None:
@@ -1102,7 +1127,7 @@ class SSMBGui:
     def _monitor_loop(self, interval: float) -> None:
         try:
             config = self._collect_logger_config(allow_writes=False)
-            adapter = ReadOnlyEpicsAdapter(timeout=min(config.timeout_seconds, 0.25))
+            adapter = ReadOnlyEpicsAdapter(timeout=min(config.timeout_seconds, 0.15))
             _lattice, specs = self._build_monitor_specs()
             self.live_spec_lookup = spec_index(specs)
             self.queue.put("Live monitor using %d PV channels (lean subset + selected extras)." % len(specs))
@@ -1128,7 +1153,7 @@ class SSMBGui:
                     extra_candidate_keys=self._extra_oscillation_candidates(),
                     include_oscillation=self._should_compute_extended_analysis(),
                 )
-                self.queue.put(
+                self._enqueue_monitor_update(
                     {
                         "kind": "monitor_update",
                         "summary_lines": format_monitor_summary(summary),
@@ -1138,10 +1163,13 @@ class SSMBGui:
                     }
                 )
                 elapsed = time.monotonic() - sample_started
-                if elapsed > max(1.0, 1.5 * interval):
+                effective_interval = interval * (4.0 if self._logger_priority_active() else 1.0)
+                if elapsed > max(1.0, 1.5 * effective_interval):
                     self.queue.put("Live monitor sample %d took %.2f s for %d PVs." % (sample_index, elapsed, len(specs)))
                 sample_index += 1
-                if self.monitor_stop_event.wait(interval):
+                if self._logger_priority_active() and sample_index % 10 == 0:
+                    self.queue.put("Logger priority active: slowing live monitor sampling to protect experiment logging.")
+                if self.monitor_stop_event.wait(effective_interval):
                     break
         except Exception as exc:
             self.queue.put("Live monitor failed: %s" % exc)
