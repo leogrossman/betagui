@@ -128,6 +128,33 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         self.assertEqual(app._set_text_widget.call_count, 2)
         app._update_monitor_dashboard.assert_called_once()
 
+    def test_auto_refresh_monitor_window_only_rerenders_when_monitor_running(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        class _Exists:
+            def winfo_exists(self):
+                return True
+
+        app = object.__new__(gui.SSMBGui)
+        app.monitor_window = _Exists()
+        app.monitor_stop_event = object()
+        app._monitor_window_auto_refresh_job = None
+        app._refresh_monitor_window_snapshot = mock.Mock()
+        app._schedule_monitor_window_refresh = mock.Mock()
+        gui.SSMBGui._auto_refresh_monitor_window(app)
+        app._refresh_monitor_window_snapshot.assert_called_once()
+        app._schedule_monitor_window_refresh.assert_called_once()
+
+        app2 = object.__new__(gui.SSMBGui)
+        app2.monitor_window = _Exists()
+        app2.monitor_stop_event = None
+        app2._monitor_window_auto_refresh_job = None
+        app2._refresh_monitor_window_snapshot = mock.Mock()
+        app2._schedule_monitor_window_refresh = mock.Mock()
+        gui.SSMBGui._auto_refresh_monitor_window(app2)
+        app2._refresh_monitor_window_snapshot.assert_not_called()
+        app2._schedule_monitor_window_refresh.assert_called_once()
+
     def test_monitor_window_render_smoke(self):
         import SSMB_experiment.ssmb_tool.gui as gui
         from SSMB_experiment.ssmb_tool.live_monitor import format_channel_snapshot, format_monitor_summary, summarize_live_monitor

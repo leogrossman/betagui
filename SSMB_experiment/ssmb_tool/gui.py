@@ -50,6 +50,7 @@ DEFAULT_PLOT_MAX_POINTS = 320
 LONG_STUDY_PLOT_MAX_POINTS = 480
 MONITOR_DASHBOARD_RENDER_MIN_S = 1.0
 MONITOR_WINDOW_RENDER_MIN_S = 1.0
+MONITOR_WINDOW_REFRESH_MS = 2000
 
 
 def _parse_text_mapping(text: str) -> dict[str, str]:
@@ -106,6 +107,7 @@ class SSMBGui:
         self.monitor_window: Optional["tk.Toplevel"] = None
         self.monitor_dashboard_sections = []
         self.monitor_active_section_key = None
+        self._monitor_window_auto_refresh_job = None
         self.theory_window: Optional["tk.Toplevel"] = None
         self.oscillation_window: Optional["tk.Toplevel"] = None
         self.lattice_window: Optional["tk.Toplevel"] = None
@@ -1413,6 +1415,7 @@ class SSMBGui:
         self.monitor_section_widgets = [({"key": ""}, {"card": detail, "text": text, "help_button": help_button, "settings_button": settings_button, "selector": selector, "canvas": canvas})]
         if self.latest_monitor_summary is not None:
             self._refresh_monitor_window_snapshot()
+        self._schedule_monitor_window_refresh()
         try:
             window.update_idletasks()
             window.deiconify()
@@ -1435,6 +1438,7 @@ class SSMBGui:
         self.monitor_dashboard_sections = []
         self.monitor_active_section_key = None
         self.monitor_section_tree = None
+        self._cancel_monitor_window_refresh()
         self.monitor_window_theory_text = None
         self.monitor_plot_controls = {}
         self.monitor_plot_canvases = {}
@@ -1486,6 +1490,29 @@ class SSMBGui:
             return
         self._load_monitor_history_cache()
         self._refresh_monitor_window_snapshot()
+
+    def _schedule_monitor_window_refresh(self) -> None:
+        if self.monitor_window is None or not self.monitor_window.winfo_exists():
+            return
+        self._cancel_monitor_window_refresh()
+        self._monitor_window_auto_refresh_job = self.root.after(MONITOR_WINDOW_REFRESH_MS, self._auto_refresh_monitor_window)
+
+    def _cancel_monitor_window_refresh(self) -> None:
+        job = getattr(self, "_monitor_window_auto_refresh_job", None)
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+        self._monitor_window_auto_refresh_job = None
+
+    def _auto_refresh_monitor_window(self) -> None:
+        self._monitor_window_auto_refresh_job = None
+        if self.monitor_window is None or not self.monitor_window.winfo_exists():
+            return
+        if self.monitor_stop_event is not None:
+            self._refresh_monitor_window_snapshot()
+        self._schedule_monitor_window_refresh()
 
     def _focus_rf_sweep_tab(self) -> None:
         notebook = getattr(self, "control_notebook", None)
@@ -1988,7 +2015,18 @@ class SSMBGui:
             values = _downsample_tail(values, DEFAULT_PLOT_MAX_POINTS)
             meta = trend_definitions().get(metric, {"label": metric, "color": "#455a64"})
             series_payload.append((meta["label"], values, meta["color"]))
-        self._draw_multi_series(canvas, series_payload, 10, 10, width - 10, height - 10, window_samples, use_log_override=settings.get("log_y"))
+        actual_samples = max((len(values) for _label, values, _color in series_payload), default=0)
+        self._draw_multi_series(
+            canvas,
+            series_payload,
+            10,
+            10,
+            width - 10,
+            height - 10,
+            window_samples,
+            use_log_override=settings.get("log_y"),
+            actual_samples=actual_samples,
+        )
 
     def _draw_series(self, canvas, values, x0, y0, x1, y1, color, label):
         canvas.create_rectangle(x0, y0, x1, y1, outline="#cfd8dc")
@@ -2001,7 +2039,7 @@ class SSMBGui:
         if len(pts) >= 4:
             canvas.create_line(*pts, fill=color, width=2, smooth=True)
 
-    def _draw_multi_series(self, canvas, series_payload, x0, y0, x1, y1, window_samples: int, use_log_override=None):
+    def _draw_multi_series(self, canvas, series_payload, x0, y0, x1, y1, window_samples: int, use_log_override=None, actual_samples=None):
         canvas.create_rectangle(x0, y0, x1, y1, outline="#cfd8dc")
         use_log = bool(self.monitor_log_scale_var.get()) if use_log_override is None else bool(use_log_override)
         clean_all = []
@@ -2037,13 +2075,17 @@ class SSMBGui:
             interval_s = max(0.01, float(self.monitor_interval_var.get()))
         except Exception:
             interval_s = 0.5
-        time_span_s = max(1.0, window_samples * interval_s)
+        displayed_samples = window_samples
+        if isinstance(actual_samples, int) and actual_samples > 1:
+            displayed_samples = min(window_samples, actual_samples)
+        time_span_s = max(interval_s, displayed_samples * interval_s)
         plot_x0 = x0 + 42
         plot_y0 = y0 + 38
         plot_x1 = x1 - 8
         plot_y1 = y1 - 22
         axis_text = "log10 scale" if use_log else ("y / 1e%d" % exponent if scale != 1.0 else "linear scale")
-        canvas.create_text(x0 + 4, y0 + 4, anchor="nw", text="last %d samples" % window_samples, fill="#607d8b", font=("Helvetica", 8))
+        label_text = "last %d samples" % displayed_samples if displayed_samples < window_samples else "last %d samples" % window_samples
+        canvas.create_text(x0 + 4, y0 + 4, anchor="nw", text=label_text, fill="#607d8b", font=("Helvetica", 8))
         canvas.create_text(x1 - 4, y0 + 4, anchor="ne", text="%.1f s window | %s" % (time_span_s, axis_text), fill="#607d8b", font=("Helvetica", 8))
         for frac, value in ((0.0, vmax), (0.5, 0.5 * (vmin + vmax)), (1.0, vmin)):
             y = plot_y0 + frac * (plot_y1 - plot_y0)
