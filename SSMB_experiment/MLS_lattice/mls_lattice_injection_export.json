@@ -1,0 +1,4162 @@
+{
+  "config": "injection",
+  "ring_name": "MLS storage ring",
+  "energy_eV": 105000000.0,
+  "circumference_m": 48.00000000000001,
+  "elements": [
+    {
+      "index": 0,
+      "family_name": "SEP_MARKER",
+      "element_type": "Marker",
+      "section": null,
+      "s_start_m": 0.0,
+      "s_end_m": 0.0,
+      "s_center_m": 0.0,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "SEP_MARKER:set",
+        "SEP_MARKER:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Lattice marker"
+    },
+    {
+      "index": 1,
+      "family_name": "DKL2K1RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 0.0,
+      "s_end_m": 1.2034,
+      "s_center_m": 0.6017,
+      "length_m": 1.2034,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DKL2K1RP_1:set",
+        "DKL2K1RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 2,
+      "family_name": "BPMZ5K1RP",
+      "element_type": "Monitor",
+      "section": "K1",
+      "s_start_m": 1.2034,
+      "s_end_m": 1.2034,
+      "s_center_m": 1.2034,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ5K1RP:rdX",
+        "BPMZ5K1RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 3,
+      "family_name": "DKL2K1RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 1.2034,
+      "s_end_m": 1.25,
+      "s_center_m": 1.2267000000000001,
+      "length_m": 0.046599999999999975,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DKL2K1RP_2:set",
+        "DKL2K1RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 4,
+      "family_name": "S3M2K1RP",
+      "element_type": "Sextupole",
+      "section": "K1",
+      "s_start_m": 1.25,
+      "s_end_m": 1.35,
+      "s_center_m": 1.3,
+      "length_m": 0.10000000000000009,
+      "power_supply": "S3P1RP",
+      "power_supply_set_pv": "S3P1RP:setCur",
+      "power_supply_rd_pv": "S3P1RP:rdCur",
+      "pv_candidates": [
+        "S3P1RP:setCur",
+        "S3P1RP:rdCur",
+        "S3M2K1RP:set",
+        "S3M2K1RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S3P1RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 9.0,
+      "PolynomB": [
+        0.0,
+        0.0,
+        9.0
+      ]
+    },
+    {
+      "index": 5,
+      "family_name": "D1L4K1RP",
+      "element_type": "Drift",
+      "section": "K1",
+      "s_start_m": 1.35,
+      "s_end_m": 1.5,
+      "s_center_m": 1.425,
+      "length_m": 0.1499999999999999,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L4K1RP:set",
+        "D1L4K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 6,
+      "family_name": "Q3M2K1RP",
+      "element_type": "Quadrupole",
+      "section": "K1",
+      "s_start_m": 1.5,
+      "s_end_m": 1.7,
+      "s_center_m": 1.6,
+      "length_m": 0.19999999999999996,
+      "power_supply": "Q3P2K1RP",
+      "power_supply_set_pv": "Q3P2K1RP:setCur",
+      "power_supply_rd_pv": "Q3P2K1RP:rdCur",
+      "pv_candidates": [
+        "Q3P2K1RP:setCur",
+        "Q3P2K1RP:rdCur",
+        "Q3M2K1RP:set",
+        "Q3M2K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 5.0973,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        5.0973
+      ]
+    },
+    {
+      "index": 7,
+      "family_name": "D1L5K1RP",
+      "element_type": "Drift",
+      "section": "K1",
+      "s_start_m": 1.7,
+      "s_end_m": 1.8499999999999999,
+      "s_center_m": 1.775,
+      "length_m": 0.1499999999999999,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L5K1RP:set",
+        "D1L5K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 8,
+      "family_name": "Q2M2K1RP",
+      "element_type": "Quadrupole",
+      "section": "K1",
+      "s_start_m": 1.8499999999999999,
+      "s_end_m": 2.05,
+      "s_center_m": 1.9499999999999997,
+      "length_m": 0.19999999999999996,
+      "power_supply": "Q2P2K1RP",
+      "power_supply_set_pv": "Q2P2K1RP:setCur",
+      "power_supply_rd_pv": "Q2P2K1RP:rdCur",
+      "pv_candidates": [
+        "Q2P2K1RP:setCur",
+        "Q2P2K1RP:rdCur",
+        "Q2M2K1RP:set",
+        "Q2M2K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": -4.4988,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        -4.4988
+      ]
+    },
+    {
+      "index": 9,
+      "family_name": "D3L3K1RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 2.05,
+      "s_end_m": 2.1039999999999996,
+      "s_center_m": 2.077,
+      "length_m": 0.053999999999999826,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L3K1RP_1:set",
+        "D3L3K1RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 10,
+      "family_name": "BPMZ6K1RP",
+      "element_type": "Monitor",
+      "section": "K1",
+      "s_start_m": 2.1039999999999996,
+      "s_end_m": 2.1039999999999996,
+      "s_center_m": 2.1039999999999996,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ6K1RP:rdX",
+        "BPMZ6K1RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 11,
+      "family_name": "D3L3K1RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 2.1039999999999996,
+      "s_end_m": 2.4749999999999996,
+      "s_center_m": 2.2894999999999994,
+      "length_m": 0.371,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L3K1RP_2:set",
+        "D3L3K1RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 12,
+      "family_name": "BM2K1RP",
+      "element_type": "Dipole",
+      "section": "K1",
+      "s_start_m": 2.4749999999999996,
+      "s_end_m": 3.675,
+      "s_center_m": 3.0749999999999997,
+      "length_m": 1.2000000000000002,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BM2K1RP:set",
+        "BM2K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Main bending dipole",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 13,
+      "family_name": "D3L4K1RP",
+      "element_type": "Drift",
+      "section": "K1",
+      "s_start_m": 3.675,
+      "s_end_m": 4.1,
+      "s_center_m": 3.8874999999999997,
+      "length_m": 0.4249999999999998,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L4K1RP:set",
+        "D3L4K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 14,
+      "family_name": "S2M2K1RP",
+      "element_type": "Sextupole",
+      "section": "K1",
+      "s_start_m": 4.1,
+      "s_end_m": 4.199999999999999,
+      "s_center_m": 4.1499999999999995,
+      "length_m": 0.09999999999999964,
+      "power_supply": "S2P1RP",
+      "power_supply_set_pv": "S2P1RP:setCur",
+      "power_supply_rd_pv": "S2P1RP:rdCur",
+      "pv_candidates": [
+        "S2P1RP:setCur",
+        "S2P1RP:rdCur",
+        "S2M2K1RP:set",
+        "S2M2K1RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S2P1RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 15,
+      "family_name": "D4L2K1RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 4.199999999999999,
+      "s_end_m": 4.249,
+      "s_center_m": 4.224499999999999,
+      "length_m": 0.04900000000000038,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D4L2K1RP_1:set",
+        "D4L2K1RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 16,
+      "family_name": "BPMZ7K1RP",
+      "element_type": "Monitor",
+      "section": "K1",
+      "s_start_m": 4.249,
+      "s_end_m": 4.249,
+      "s_center_m": 4.249,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ7K1RP:rdX",
+        "BPMZ7K1RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 17,
+      "family_name": "D4L2K1RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 4.249,
+      "s_end_m": 4.5,
+      "s_center_m": 4.374499999999999,
+      "length_m": 0.25100000000000033,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D4L2K1RP_2:set",
+        "D4L2K1RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 18,
+      "family_name": "S1M2K1RP",
+      "element_type": "Sextupole",
+      "section": "K1",
+      "s_start_m": 4.5,
+      "s_end_m": 4.6,
+      "s_center_m": 4.55,
+      "length_m": 0.09999999999999964,
+      "power_supply": "S1P1RP",
+      "power_supply_set_pv": "S1P1RP:setCur",
+      "power_supply_rd_pv": "S1P1RP:rdCur",
+      "pv_candidates": [
+        "S1P1RP:setCur",
+        "S1P1RP:rdCur",
+        "S1M2K1RP:set",
+        "S1M2K1RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S1P1RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 19,
+      "family_name": "D1L6K1RP",
+      "element_type": "Drift",
+      "section": "K1",
+      "s_start_m": 4.6,
+      "s_end_m": 4.75,
+      "s_center_m": 4.675,
+      "length_m": 0.15000000000000036,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L6K1RP:set",
+        "D1L6K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 20,
+      "family_name": "Q1M2K1RP",
+      "element_type": "Quadrupole",
+      "section": "K1",
+      "s_start_m": 4.75,
+      "s_end_m": 4.95,
+      "s_center_m": 4.85,
+      "length_m": 0.20000000000000018,
+      "power_supply": "Q1P2K1RP",
+      "power_supply_set_pv": "Q1P2K1RP:setCur",
+      "power_supply_rd_pv": "Q1P2K1RP:rdCur",
+      "pv_candidates": [
+        "Q1P2K1RP:setCur",
+        "Q1P2K1RP:rdCur",
+        "Q1M2K1RP:set",
+        "Q1M2K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 2.8234,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        2.8234
+      ]
+    },
+    {
+      "index": 21,
+      "family_name": "D2L2K1RP",
+      "element_type": "Drift",
+      "section": "K1",
+      "s_start_m": 4.95,
+      "s_end_m": 5.075,
+      "s_center_m": 5.0125,
+      "length_m": 0.125,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D2L2K1RP:set",
+        "D2L2K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 22,
+      "family_name": "OMK1RP",
+      "element_type": "Octupole",
+      "section": "K1",
+      "s_start_m": 5.075,
+      "s_end_m": 5.175,
+      "s_center_m": 5.125,
+      "length_m": 0.09999999999999964,
+      "power_supply": "OP1RP",
+      "power_supply_set_pv": "OP1RP:setCur",
+      "power_supply_rd_pv": "OP1RP:rdCur",
+      "pv_candidates": [
+        "OP1RP:setCur",
+        "OP1RP:rdCur",
+        "OMK1RP:set",
+        "OMK1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Octupole / nonlinear optics element",
+      "K": 0.0,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        0.0,
+        0.0,
+        -50.0
+      ]
+    },
+    {
+      "index": 23,
+      "family_name": "D2L1L2RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 5.175,
+      "s_end_m": 5.229,
+      "s_center_m": 5.202,
+      "length_m": 0.05400000000000027,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D2L1L2RP_1:set",
+        "D2L1L2RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 24,
+      "family_name": "BPMZ1L2RP",
+      "element_type": "Monitor",
+      "section": "L2",
+      "s_start_m": 5.229,
+      "s_end_m": 5.229,
+      "s_center_m": 5.229,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ1L2RP:rdX",
+        "BPMZ1L2RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 25,
+      "family_name": "D2L1L2RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 5.229,
+      "s_end_m": 5.3,
+      "s_center_m": 5.2645,
+      "length_m": 0.07099999999999973,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D2L1L2RP_2:set",
+        "D2L1L2RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 26,
+      "family_name": "Q1M1L2RP",
+      "element_type": "Quadrupole",
+      "section": "L2",
+      "s_start_m": 5.3,
+      "s_end_m": 5.5,
+      "s_center_m": 5.4,
+      "length_m": 0.20000000000000018,
+      "power_supply": "Q1P1L2RP",
+      "power_supply_set_pv": "Q1P1L2RP:setCur",
+      "power_supply_rd_pv": "Q1P1L2RP:rdCur",
+      "pv_candidates": [
+        "Q1P1L2RP:setCur",
+        "Q1P1L2RP:rdCur",
+        "Q1M1L2RP:set",
+        "Q1M1L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 2.8234,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        2.8234
+      ]
+    },
+    {
+      "index": 27,
+      "family_name": "D1L1L2RP",
+      "element_type": "Drift",
+      "section": "L2",
+      "s_start_m": 5.5,
+      "s_end_m": 5.65,
+      "s_center_m": 5.575,
+      "length_m": 0.15000000000000036,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L1L2RP:set",
+        "D1L1L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 28,
+      "family_name": "S1M1L2RP",
+      "element_type": "Sextupole",
+      "section": "L2",
+      "s_start_m": 5.65,
+      "s_end_m": 5.75,
+      "s_center_m": 5.7,
+      "length_m": 0.09999999999999964,
+      "power_supply": "S1P1RP",
+      "power_supply_set_pv": "S1P1RP:setCur",
+      "power_supply_rd_pv": "S1P1RP:rdCur",
+      "pv_candidates": [
+        "S1P1RP:setCur",
+        "S1P1RP:rdCur",
+        "S1M1L2RP:set",
+        "S1M1L2RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S1P1RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 29,
+      "family_name": "D4L1L2RP",
+      "element_type": "Drift",
+      "section": "L2",
+      "s_start_m": 5.75,
+      "s_end_m": 6.05,
+      "s_center_m": 5.9,
+      "length_m": 0.2999999999999998,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D4L1L2RP:set",
+        "D4L1L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 30,
+      "family_name": "S2M1L2RP",
+      "element_type": "Sextupole",
+      "section": "L2",
+      "s_start_m": 6.05,
+      "s_end_m": 6.1499999999999995,
+      "s_center_m": 6.1,
+      "length_m": 0.09999999999999964,
+      "power_supply": "S2P1RP",
+      "power_supply_set_pv": "S2P1RP:setCur",
+      "power_supply_rd_pv": "S2P1RP:rdCur",
+      "pv_candidates": [
+        "S2P1RP:setCur",
+        "S2P1RP:rdCur",
+        "S2M1L2RP:set",
+        "S2M1L2RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S2P1RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 31,
+      "family_name": "D3L1L2RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 6.1499999999999995,
+      "s_end_m": 6.204,
+      "s_center_m": 6.177,
+      "length_m": 0.05400000000000027,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L1L2RP_1:set",
+        "D3L1L2RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 32,
+      "family_name": "BPMZ2L2RP",
+      "element_type": "Monitor",
+      "section": "L2",
+      "s_start_m": 6.204,
+      "s_end_m": 6.204,
+      "s_center_m": 6.204,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ2L2RP:rdX",
+        "BPMZ2L2RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 33,
+      "family_name": "D3L1L2RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 6.204,
+      "s_end_m": 6.574999999999999,
+      "s_center_m": 6.3895,
+      "length_m": 0.37099999999999955,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L1L2RP_2:set",
+        "D3L1L2RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 34,
+      "family_name": "BM1L2RP",
+      "element_type": "Dipole",
+      "section": "L2",
+      "s_start_m": 6.574999999999999,
+      "s_end_m": 7.7749999999999995,
+      "s_center_m": 7.174999999999999,
+      "length_m": 1.2000000000000002,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BM1L2RP:set",
+        "BM1L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Main bending dipole",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 35,
+      "family_name": "D3L2L2RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 7.7749999999999995,
+      "s_end_m": 8.187199999999999,
+      "s_center_m": 7.9811,
+      "length_m": 0.41219999999999946,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L2L2RP_1:set",
+        "D3L2L2RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 36,
+      "family_name": "BPMZ3L2RP",
+      "element_type": "Monitor",
+      "section": "L2",
+      "s_start_m": 8.187199999999999,
+      "s_end_m": 8.187199999999999,
+      "s_center_m": 8.187199999999999,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ3L2RP:rdX",
+        "BPMZ3L2RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 37,
+      "family_name": "D3L2L2RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 8.187199999999999,
+      "s_end_m": 8.2,
+      "s_center_m": 8.1936,
+      "length_m": 0.012800000000000367,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L2L2RP_2:set",
+        "D3L2L2RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 38,
+      "family_name": "Q2M1L2RP",
+      "element_type": "Quadrupole",
+      "section": "L2",
+      "s_start_m": 8.2,
+      "s_end_m": 8.399999999999999,
+      "s_center_m": 8.299999999999999,
+      "length_m": 0.1999999999999993,
+      "power_supply": "Q2P1L2RP",
+      "power_supply_set_pv": "Q2P1L2RP:setCur",
+      "power_supply_rd_pv": "Q2P1L2RP:rdCur",
+      "pv_candidates": [
+        "Q2P1L2RP:setCur",
+        "Q2P1L2RP:rdCur",
+        "Q2M1L2RP:set",
+        "Q2M1L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": -4.2005,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        -4.2005
+      ]
+    },
+    {
+      "index": 39,
+      "family_name": "D1L2L2RP",
+      "element_type": "Drift",
+      "section": "L2",
+      "s_start_m": 8.399999999999999,
+      "s_end_m": 8.549999999999999,
+      "s_center_m": 8.474999999999998,
+      "length_m": 0.15000000000000036,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L2L2RP:set",
+        "D1L2L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 40,
+      "family_name": "Q3M1L2RP",
+      "element_type": "Quadrupole",
+      "section": "L2",
+      "s_start_m": 8.549999999999999,
+      "s_end_m": 8.749999999999998,
+      "s_center_m": 8.649999999999999,
+      "length_m": 0.1999999999999993,
+      "power_supply": "Q3P1L2RP",
+      "power_supply_set_pv": "Q3P1L2RP:setCur",
+      "power_supply_rd_pv": "Q3P1L2RP:rdCur",
+      "pv_candidates": [
+        "Q3P1L2RP:setCur",
+        "Q3P1L2RP:rdCur",
+        "Q3M1L2RP:set",
+        "Q3M1L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 5.1358,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        5.1358
+      ]
+    },
+    {
+      "index": 41,
+      "family_name": "D1L3L2RP",
+      "element_type": "Drift",
+      "section": "L2",
+      "s_start_m": 8.749999999999998,
+      "s_end_m": 8.899999999999999,
+      "s_center_m": 8.825,
+      "length_m": 0.15000000000000036,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L3L2RP:set",
+        "D1L3L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 42,
+      "family_name": "S3M1L2RP",
+      "element_type": "Sextupole",
+      "section": "L2",
+      "s_start_m": 8.899999999999999,
+      "s_end_m": 8.999999999999998,
+      "s_center_m": 8.95,
+      "length_m": 0.09999999999999964,
+      "power_supply": "S3P1RP",
+      "power_supply_set_pv": "S3P1RP:setCur",
+      "power_supply_rd_pv": "S3P1RP:rdCur",
+      "pv_candidates": [
+        "S3P1RP:setCur",
+        "S3P1RP:rdCur",
+        "S3M1L2RP:set",
+        "S3M1L2RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S3P1RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 9.0,
+      "PolynomB": [
+        0.0,
+        0.0,
+        9.0
+      ]
+    },
+    {
+      "index": 43,
+      "family_name": "DLL1L2RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 8.999999999999998,
+      "s_end_m": 9.046599999999998,
+      "s_center_m": 9.023299999999999,
+      "length_m": 0.04659999999999975,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DLL1L2RP_1:set",
+        "DLL1L2RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 44,
+      "family_name": "BPMZ4L2RP",
+      "element_type": "Monitor",
+      "section": "L2",
+      "s_start_m": 9.046599999999998,
+      "s_end_m": 9.046599999999998,
+      "s_center_m": 9.046599999999998,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ4L2RP:rdX",
+        "BPMZ4L2RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 45,
+      "family_name": "DLL1L2RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 9.046599999999998,
+      "s_end_m": 11.999999999999998,
+      "s_center_m": 10.523299999999999,
+      "length_m": 2.9534000000000002,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DLL1L2RP_2:set",
+        "DLL1L2RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 46,
+      "family_name": "U125",
+      "element_type": "Marker",
+      "section": null,
+      "s_start_m": 11.999999999999998,
+      "s_end_m": 11.999999999999998,
+      "s_center_m": 11.999999999999998,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "U125"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Undulator marker in the L2 straight"
+    },
+    {
+      "index": 47,
+      "family_name": "DLL2L2RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 11.999999999999998,
+      "s_end_m": 14.953399999999998,
+      "s_center_m": 13.476699999999997,
+      "length_m": 2.9534000000000002,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DLL2L2RP_1:set",
+        "DLL2L2RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 48,
+      "family_name": "BPMZ5L2RP",
+      "element_type": "Monitor",
+      "section": "L2",
+      "s_start_m": 14.953399999999998,
+      "s_end_m": 14.953399999999998,
+      "s_center_m": 14.953399999999998,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ5L2RP:rdX",
+        "BPMZ5L2RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 49,
+      "family_name": "DLL2L2RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 14.953399999999998,
+      "s_end_m": 14.999999999999998,
+      "s_center_m": 14.976699999999997,
+      "length_m": 0.04659999999999975,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DLL2L2RP_2:set",
+        "DLL2L2RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 50,
+      "family_name": "S3M2L2RP",
+      "element_type": "Sextupole",
+      "section": "L2",
+      "s_start_m": 14.999999999999998,
+      "s_end_m": 15.099999999999998,
+      "s_center_m": 15.049999999999997,
+      "length_m": 0.09999999999999964,
+      "power_supply": "S3P2RP",
+      "power_supply_set_pv": "S3P2RP:setCur",
+      "power_supply_rd_pv": "S3P2RP:rdCur",
+      "pv_candidates": [
+        "S3P2RP:setCur",
+        "S3P2RP:rdCur",
+        "S3M2L2RP:set",
+        "S3M2L2RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S3P2RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": -9.0,
+      "PolynomB": [
+        0.0,
+        0.0,
+        -9.0
+      ]
+    },
+    {
+      "index": 51,
+      "family_name": "D1L4L2RP",
+      "element_type": "Drift",
+      "section": "L2",
+      "s_start_m": 15.099999999999998,
+      "s_end_m": 15.249999999999998,
+      "s_center_m": 15.174999999999997,
+      "length_m": 0.15000000000000036,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L4L2RP:set",
+        "D1L4L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 52,
+      "family_name": "Q3M2L2RP",
+      "element_type": "Quadrupole",
+      "section": "L2",
+      "s_start_m": 15.249999999999998,
+      "s_end_m": 15.449999999999998,
+      "s_center_m": 15.349999999999998,
+      "length_m": 0.1999999999999993,
+      "power_supply": "Q3P2L2RP",
+      "power_supply_set_pv": "Q3P2L2RP:setCur",
+      "power_supply_rd_pv": "Q3P2L2RP:rdCur",
+      "pv_candidates": [
+        "Q3P2L2RP:setCur",
+        "Q3P2L2RP:rdCur",
+        "Q3M2L2RP:set",
+        "Q3M2L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 5.1358,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        5.1358
+      ]
+    },
+    {
+      "index": 53,
+      "family_name": "D1L5L2RP",
+      "element_type": "Drift",
+      "section": "L2",
+      "s_start_m": 15.449999999999998,
+      "s_end_m": 15.599999999999998,
+      "s_center_m": 15.524999999999999,
+      "length_m": 0.15000000000000036,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L5L2RP:set",
+        "D1L5L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 54,
+      "family_name": "Q2M2L2RP",
+      "element_type": "Quadrupole",
+      "section": "L2",
+      "s_start_m": 15.599999999999998,
+      "s_end_m": 15.799999999999997,
+      "s_center_m": 15.699999999999998,
+      "length_m": 0.1999999999999993,
+      "power_supply": "Q2P2L2RP",
+      "power_supply_set_pv": "Q2P2L2RP:setCur",
+      "power_supply_rd_pv": "Q2P2L2RP:rdCur",
+      "pv_candidates": [
+        "Q2P2L2RP:setCur",
+        "Q2P2L2RP:rdCur",
+        "Q2M2L2RP:set",
+        "Q2M2L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": -4.2005,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        -4.2005
+      ]
+    },
+    {
+      "index": 55,
+      "family_name": "D3L3L2RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 15.799999999999997,
+      "s_end_m": 15.853999999999997,
+      "s_center_m": 15.826999999999998,
+      "length_m": 0.05400000000000027,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L3L2RP_1:set",
+        "D3L3L2RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 56,
+      "family_name": "BPMZ6L2RP",
+      "element_type": "Monitor",
+      "section": "L2",
+      "s_start_m": 15.853999999999997,
+      "s_end_m": 15.853999999999997,
+      "s_center_m": 15.853999999999997,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ6L2RP:rdX",
+        "BPMZ6L2RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 57,
+      "family_name": "D3L3L2RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 15.853999999999997,
+      "s_end_m": 16.224999999999998,
+      "s_center_m": 16.039499999999997,
+      "length_m": 0.37100000000000044,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L3L2RP_2:set",
+        "D3L3L2RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 58,
+      "family_name": "BM2L2RP",
+      "element_type": "Dipole",
+      "section": "L2",
+      "s_start_m": 16.224999999999998,
+      "s_end_m": 17.424999999999997,
+      "s_center_m": 16.824999999999996,
+      "length_m": 1.1999999999999993,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BM2L2RP:set",
+        "BM2L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Main bending dipole",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 59,
+      "family_name": "D3L4L2RP",
+      "element_type": "Drift",
+      "section": "L2",
+      "s_start_m": 17.424999999999997,
+      "s_end_m": 17.849999999999998,
+      "s_center_m": 17.637499999999996,
+      "length_m": 0.4250000000000007,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L4L2RP:set",
+        "D3L4L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 60,
+      "family_name": "S2M2L2RP",
+      "element_type": "Sextupole",
+      "section": "L2",
+      "s_start_m": 17.849999999999998,
+      "s_end_m": 17.95,
+      "s_center_m": 17.9,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S2P2LRP",
+      "power_supply_set_pv": "S2P2LRP:setCur",
+      "power_supply_rd_pv": "S2P2LRP:rdCur",
+      "pv_candidates": [
+        "S2P2LRP:setCur",
+        "S2P2LRP:rdCur",
+        "S2M2L2RP:set",
+        "S2M2L2RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S2P2LRP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": -81.72,
+      "PolynomB": [
+        0.0,
+        0.0,
+        -81.72
+      ]
+    },
+    {
+      "index": 61,
+      "family_name": "D4L2L2RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 17.95,
+      "s_end_m": 17.999,
+      "s_center_m": 17.9745,
+      "length_m": 0.04899999999999949,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D4L2L2RP_1:set",
+        "D4L2L2RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 62,
+      "family_name": "BPMZ7L2RP",
+      "element_type": "Monitor",
+      "section": "L2",
+      "s_start_m": 17.999,
+      "s_end_m": 17.999,
+      "s_center_m": 17.999,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ7L2RP:rdX",
+        "BPMZ7L2RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 63,
+      "family_name": "D4L2L2RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 17.999,
+      "s_end_m": 18.25,
+      "s_center_m": 18.124499999999998,
+      "length_m": 0.2510000000000012,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D4L2L2RP_2:set",
+        "D4L2L2RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 64,
+      "family_name": "S1M2L2RP",
+      "element_type": "Sextupole",
+      "section": "L2",
+      "s_start_m": 18.25,
+      "s_end_m": 18.35,
+      "s_center_m": 18.3,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S1P2RP",
+      "power_supply_set_pv": "S1P2RP:setCur",
+      "power_supply_rd_pv": "S1P2RP:rdCur",
+      "pv_candidates": [
+        "S1P2RP:setCur",
+        "S1P2RP:rdCur",
+        "S1M2L2RP:set",
+        "S1M2L2RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S1P2RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 63.72,
+      "PolynomB": [
+        0.0,
+        0.0,
+        63.72
+      ]
+    },
+    {
+      "index": 65,
+      "family_name": "D1L6L2RP",
+      "element_type": "Drift",
+      "section": "L2",
+      "s_start_m": 18.35,
+      "s_end_m": 18.5,
+      "s_center_m": 18.425,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L6L2RP:set",
+        "D1L6L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 66,
+      "family_name": "Q1M2L2RP",
+      "element_type": "Quadrupole",
+      "section": "L2",
+      "s_start_m": 18.5,
+      "s_end_m": 18.7,
+      "s_center_m": 18.6,
+      "length_m": 0.1999999999999993,
+      "power_supply": "Q1P2L2RP",
+      "power_supply_set_pv": "Q1P2L2RP:setCur",
+      "power_supply_rd_pv": "Q1P2L2RP:rdCur",
+      "pv_candidates": [
+        "Q1P2L2RP:setCur",
+        "Q1P2L2RP:rdCur",
+        "Q1M2L2RP:set",
+        "Q1M2L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 2.8234,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        2.8234
+      ]
+    },
+    {
+      "index": 67,
+      "family_name": "D2L2L2RP",
+      "element_type": "Drift",
+      "section": "L2",
+      "s_start_m": 18.7,
+      "s_end_m": 18.825,
+      "s_center_m": 18.7625,
+      "length_m": 0.125,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D2L2L2RP:set",
+        "D2L2L2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 68,
+      "family_name": "OML2RP",
+      "element_type": "Octupole",
+      "section": "L2",
+      "s_start_m": 18.825,
+      "s_end_m": 18.925,
+      "s_center_m": 18.875,
+      "length_m": 0.10000000000000142,
+      "power_supply": "OP2RP",
+      "power_supply_set_pv": "OP2RP:setCur",
+      "power_supply_rd_pv": "OP2RP:rdCur",
+      "pv_candidates": [
+        "OP2RP:setCur",
+        "OP2RP:rdCur",
+        "OML2RP:set",
+        "OML2RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Octupole / nonlinear optics element",
+      "K": 0.0,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        0.0,
+        0.0,
+        -50.0
+      ]
+    },
+    {
+      "index": 69,
+      "family_name": "D2L1K3RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 18.925,
+      "s_end_m": 18.979,
+      "s_center_m": 18.951999999999998,
+      "length_m": 0.053999999999998494,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D2L1K3RP_1:set",
+        "D2L1K3RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 70,
+      "family_name": "BPMZ1K3RP",
+      "element_type": "Monitor",
+      "section": "K3",
+      "s_start_m": 18.979,
+      "s_end_m": 18.979,
+      "s_center_m": 18.979,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ1K3RP:rdX",
+        "BPMZ1K3RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 71,
+      "family_name": "D2L1K3RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 18.979,
+      "s_end_m": 19.05,
+      "s_center_m": 19.014499999999998,
+      "length_m": 0.0710000000000015,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D2L1K3RP_2:set",
+        "D2L1K3RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 72,
+      "family_name": "Q1M1K3RP",
+      "element_type": "Quadrupole",
+      "section": "K3",
+      "s_start_m": 19.05,
+      "s_end_m": 19.25,
+      "s_center_m": 19.15,
+      "length_m": 0.1999999999999993,
+      "power_supply": "Q1P1K3RP",
+      "power_supply_set_pv": "Q1P1K3RP:setCur",
+      "power_supply_rd_pv": "Q1P1K3RP:rdCur",
+      "pv_candidates": [
+        "Q1P1K3RP:setCur",
+        "Q1P1K3RP:rdCur",
+        "Q1M1K3RP:set",
+        "Q1M1K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 2.8234,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        2.8234
+      ]
+    },
+    {
+      "index": 73,
+      "family_name": "D1L1K3RP",
+      "element_type": "Drift",
+      "section": "K3",
+      "s_start_m": 19.25,
+      "s_end_m": 19.4,
+      "s_center_m": 19.325,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L1K3RP:set",
+        "D1L1K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 74,
+      "family_name": "S1M1K3RP",
+      "element_type": "Sextupole",
+      "section": "K3",
+      "s_start_m": 19.4,
+      "s_end_m": 19.5,
+      "s_center_m": 19.45,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S1P2RP",
+      "power_supply_set_pv": "S1P2RP:setCur",
+      "power_supply_rd_pv": "S1P2RP:rdCur",
+      "pv_candidates": [
+        "S1P2RP:setCur",
+        "S1P2RP:rdCur",
+        "S1M1K3RP:set",
+        "S1M1K3RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S1P2RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 63.72,
+      "PolynomB": [
+        0.0,
+        0.0,
+        63.72
+      ]
+    },
+    {
+      "index": 75,
+      "family_name": "D4L1K3RP",
+      "element_type": "Drift",
+      "section": "K3",
+      "s_start_m": 19.5,
+      "s_end_m": 19.8,
+      "s_center_m": 19.65,
+      "length_m": 0.3000000000000007,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D4L1K3RP:set",
+        "D4L1K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 76,
+      "family_name": "S2M1K3RP",
+      "element_type": "Sextupole",
+      "section": "K3",
+      "s_start_m": 19.8,
+      "s_end_m": 19.900000000000002,
+      "s_center_m": 19.85,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S2P2KRP",
+      "power_supply_set_pv": "S2P2KRP:setCur",
+      "power_supply_rd_pv": "S2P2KRP:rdCur",
+      "pv_candidates": [
+        "S2P2KRP:setCur",
+        "S2P2KRP:rdCur",
+        "S2M1K3RP:set",
+        "S2M1K3RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S2P2KRP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": -81.72,
+      "PolynomB": [
+        0.0,
+        0.0,
+        -81.72
+      ]
+    },
+    {
+      "index": 77,
+      "family_name": "D3L1K3RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 19.900000000000002,
+      "s_end_m": 19.954,
+      "s_center_m": 19.927,
+      "length_m": 0.053999999999998494,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L1K3RP_1:set",
+        "D3L1K3RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 78,
+      "family_name": "BPMZ2K3RP",
+      "element_type": "Monitor",
+      "section": "K3",
+      "s_start_m": 19.954,
+      "s_end_m": 19.954,
+      "s_center_m": 19.954,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ2K3RP:rdX",
+        "BPMZ2K3RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 79,
+      "family_name": "D3L1K3RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 19.954,
+      "s_end_m": 20.325,
+      "s_center_m": 20.139499999999998,
+      "length_m": 0.37099999999999866,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L1K3RP_2:set",
+        "D3L1K3RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 80,
+      "family_name": "BM1K3RP",
+      "element_type": "Dipole",
+      "section": "K3",
+      "s_start_m": 20.325,
+      "s_end_m": 21.525,
+      "s_center_m": 20.924999999999997,
+      "length_m": 1.1999999999999993,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BM1K3RP:set",
+        "BM1K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Main bending dipole",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 81,
+      "family_name": "D3L2K3RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 21.525,
+      "s_end_m": 21.937199999999997,
+      "s_center_m": 21.731099999999998,
+      "length_m": 0.41219999999999857,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L2K3RP_1:set",
+        "D3L2K3RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 82,
+      "family_name": "BPMZ3K3RP",
+      "element_type": "Monitor",
+      "section": "K3",
+      "s_start_m": 21.937199999999997,
+      "s_end_m": 21.937199999999997,
+      "s_center_m": 21.937199999999997,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ3K3RP:rdX",
+        "BPMZ3K3RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 83,
+      "family_name": "D3L2K3RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 21.937199999999997,
+      "s_end_m": 21.949999999999996,
+      "s_center_m": 21.943599999999996,
+      "length_m": 0.01279999999999859,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L2K3RP_2:set",
+        "D3L2K3RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 84,
+      "family_name": "Q2M1K3RP",
+      "element_type": "Quadrupole",
+      "section": "K3",
+      "s_start_m": 21.949999999999996,
+      "s_end_m": 22.149999999999995,
+      "s_center_m": 22.049999999999997,
+      "length_m": 0.1999999999999993,
+      "power_supply": "Q2P1K3RP",
+      "power_supply_set_pv": "Q2P1K3RP:setCur",
+      "power_supply_rd_pv": "Q2P1K3RP:rdCur",
+      "pv_candidates": [
+        "Q2P1K3RP:setCur",
+        "Q2P1K3RP:rdCur",
+        "Q2M1K3RP:set",
+        "Q2M1K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": -4.4988,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        -4.4988
+      ]
+    },
+    {
+      "index": 85,
+      "family_name": "D1L2K3RP",
+      "element_type": "Drift",
+      "section": "K3",
+      "s_start_m": 22.149999999999995,
+      "s_end_m": 22.299999999999994,
+      "s_center_m": 22.224999999999994,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L2K3RP:set",
+        "D1L2K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 86,
+      "family_name": "Q3M1K3RP",
+      "element_type": "Quadrupole",
+      "section": "K3",
+      "s_start_m": 22.299999999999994,
+      "s_end_m": 22.499999999999993,
+      "s_center_m": 22.39999999999999,
+      "length_m": 0.1999999999999993,
+      "power_supply": "Q3P1K3RP",
+      "power_supply_set_pv": "Q3P1K3RP:setCur",
+      "power_supply_rd_pv": "Q3P1K3RP:rdCur",
+      "pv_candidates": [
+        "Q3P1K3RP:setCur",
+        "Q3P1K3RP:rdCur",
+        "Q3M1K3RP:set",
+        "Q3M1K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 5.0973,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        5.0973
+      ]
+    },
+    {
+      "index": 87,
+      "family_name": "D1L3K3RP",
+      "element_type": "Drift",
+      "section": "K3",
+      "s_start_m": 22.499999999999993,
+      "s_end_m": 22.64999999999999,
+      "s_center_m": 22.574999999999992,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L3K3RP:set",
+        "D1L3K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 88,
+      "family_name": "S3M1K3RP",
+      "element_type": "Sextupole",
+      "section": "K3",
+      "s_start_m": 22.64999999999999,
+      "s_end_m": 22.749999999999993,
+      "s_center_m": 22.699999999999992,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S3P2RP",
+      "power_supply_set_pv": "S3P2RP:setCur",
+      "power_supply_rd_pv": "S3P2RP:rdCur",
+      "pv_candidates": [
+        "S3P2RP:setCur",
+        "S3P2RP:rdCur",
+        "S3M1K3RP:set",
+        "S3M1K3RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S3P2RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": -9.0,
+      "PolynomB": [
+        0.0,
+        0.0,
+        -9.0
+      ]
+    },
+    {
+      "index": 89,
+      "family_name": "DKL1K3RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 22.749999999999993,
+      "s_end_m": 22.796599999999994,
+      "s_center_m": 22.773299999999992,
+      "length_m": 0.04660000000000153,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DKL1K3RP_1:set",
+        "DKL1K3RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 90,
+      "family_name": "BPMZ4K3RP",
+      "element_type": "Monitor",
+      "section": "K3",
+      "s_start_m": 22.796599999999994,
+      "s_end_m": 22.796599999999994,
+      "s_center_m": 22.796599999999994,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ4K3RP:rdX",
+        "BPMZ4K3RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 91,
+      "family_name": "DKL1K3RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 22.796599999999994,
+      "s_end_m": 23.999999999999993,
+      "s_center_m": 23.398299999999992,
+      "length_m": 1.2033999999999985,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DKL1K3RP_2:set",
+        "DKL1K3RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 92,
+      "family_name": "DKL2K3RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 23.999999999999993,
+      "s_end_m": 25.20339999999999,
+      "s_center_m": 24.601699999999994,
+      "length_m": 1.2033999999999985,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DKL2K3RP_1:set",
+        "DKL2K3RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 93,
+      "family_name": "BPMZ5K3RP",
+      "element_type": "Monitor",
+      "section": "K3",
+      "s_start_m": 25.20339999999999,
+      "s_end_m": 25.20339999999999,
+      "s_center_m": 25.20339999999999,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ5K3RP:rdX",
+        "BPMZ5K3RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 94,
+      "family_name": "DKL2K3RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 25.20339999999999,
+      "s_end_m": 25.249999999999993,
+      "s_center_m": 25.226699999999994,
+      "length_m": 0.04660000000000153,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DKL2K3RP_2:set",
+        "DKL2K3RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 95,
+      "family_name": "S3M2K3RP",
+      "element_type": "Sextupole",
+      "section": "K3",
+      "s_start_m": 25.249999999999993,
+      "s_end_m": 25.349999999999994,
+      "s_center_m": 25.299999999999994,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S3P2RP",
+      "power_supply_set_pv": "S3P2RP:setCur",
+      "power_supply_rd_pv": "S3P2RP:rdCur",
+      "pv_candidates": [
+        "S3P2RP:setCur",
+        "S3P2RP:rdCur",
+        "S3M2K3RP:set",
+        "S3M2K3RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S3P2RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": -9.0,
+      "PolynomB": [
+        0.0,
+        0.0,
+        -9.0
+      ]
+    },
+    {
+      "index": 96,
+      "family_name": "D1L4K3RP",
+      "element_type": "Drift",
+      "section": "K3",
+      "s_start_m": 25.349999999999994,
+      "s_end_m": 25.499999999999993,
+      "s_center_m": 25.424999999999994,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L4K3RP:set",
+        "D1L4K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 97,
+      "family_name": "Q3M2K3RP",
+      "element_type": "Quadrupole",
+      "section": "K3",
+      "s_start_m": 25.499999999999993,
+      "s_end_m": 25.699999999999992,
+      "s_center_m": 25.599999999999994,
+      "length_m": 0.1999999999999993,
+      "power_supply": "Q3P2K3RP",
+      "power_supply_set_pv": "Q3P2K3RP:setCur",
+      "power_supply_rd_pv": "Q3P2K3RP:rdCur",
+      "pv_candidates": [
+        "Q3P2K3RP:setCur",
+        "Q3P2K3RP:rdCur",
+        "Q3M2K3RP:set",
+        "Q3M2K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 5.0973,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        5.0973
+      ]
+    },
+    {
+      "index": 98,
+      "family_name": "D1L5K3RP",
+      "element_type": "Drift",
+      "section": "K3",
+      "s_start_m": 25.699999999999992,
+      "s_end_m": 25.84999999999999,
+      "s_center_m": 25.77499999999999,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L5K3RP:set",
+        "D1L5K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 99,
+      "family_name": "Q2M2K3RP",
+      "element_type": "Quadrupole",
+      "section": "K3",
+      "s_start_m": 25.84999999999999,
+      "s_end_m": 26.04999999999999,
+      "s_center_m": 25.94999999999999,
+      "length_m": 0.1999999999999993,
+      "power_supply": "Q2P2K3RP",
+      "power_supply_set_pv": "Q2P2K3RP:setCur",
+      "power_supply_rd_pv": "Q2P2K3RP:rdCur",
+      "pv_candidates": [
+        "Q2P2K3RP:setCur",
+        "Q2P2K3RP:rdCur",
+        "Q2M2K3RP:set",
+        "Q2M2K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": -4.4988,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        -4.4988
+      ]
+    },
+    {
+      "index": 100,
+      "family_name": "D3L3K3RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 26.04999999999999,
+      "s_end_m": 26.10399999999999,
+      "s_center_m": 26.07699999999999,
+      "length_m": 0.053999999999998494,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L3K3RP_1:set",
+        "D3L3K3RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 101,
+      "family_name": "BPMZ6K3RP",
+      "element_type": "Monitor",
+      "section": "K3",
+      "s_start_m": 26.10399999999999,
+      "s_end_m": 26.10399999999999,
+      "s_center_m": 26.10399999999999,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ6K3RP:rdX",
+        "BPMZ6K3RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 102,
+      "family_name": "D3L3K3RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 26.10399999999999,
+      "s_end_m": 26.474999999999987,
+      "s_center_m": 26.28949999999999,
+      "length_m": 0.37099999999999866,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L3K3RP_2:set",
+        "D3L3K3RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 103,
+      "family_name": "BM2K3RP",
+      "element_type": "Dipole",
+      "section": "K3",
+      "s_start_m": 26.474999999999987,
+      "s_end_m": 27.674999999999986,
+      "s_center_m": 27.07499999999999,
+      "length_m": 1.1999999999999993,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BM2K3RP:set",
+        "BM2K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Main bending dipole",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 104,
+      "family_name": "D3L4K3RP",
+      "element_type": "Drift",
+      "section": "K3",
+      "s_start_m": 27.674999999999986,
+      "s_end_m": 28.099999999999987,
+      "s_center_m": 27.88749999999999,
+      "length_m": 0.4250000000000007,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L4K3RP:set",
+        "D3L4K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 105,
+      "family_name": "S2M2K3RP",
+      "element_type": "Sextupole",
+      "section": "K3",
+      "s_start_m": 28.099999999999987,
+      "s_end_m": 28.19999999999999,
+      "s_center_m": 28.149999999999988,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S2P2KRP",
+      "power_supply_set_pv": "S2P2KRP:setCur",
+      "power_supply_rd_pv": "S2P2KRP:rdCur",
+      "pv_candidates": [
+        "S2P2KRP:setCur",
+        "S2P2KRP:rdCur",
+        "S2M2K3RP:set",
+        "S2M2K3RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S2P2KRP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": -81.72,
+      "PolynomB": [
+        0.0,
+        0.0,
+        -81.72
+      ]
+    },
+    {
+      "index": 106,
+      "family_name": "D4L2K3RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 28.19999999999999,
+      "s_end_m": 28.248999999999988,
+      "s_center_m": 28.22449999999999,
+      "length_m": 0.04899999999999949,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D4L2K3RP_1:set",
+        "D4L2K3RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 107,
+      "family_name": "BPMZ7K3RP",
+      "element_type": "Monitor",
+      "section": "K3",
+      "s_start_m": 28.248999999999988,
+      "s_end_m": 28.248999999999988,
+      "s_center_m": 28.248999999999988,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ7K3RP:rdX",
+        "BPMZ7K3RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 108,
+      "family_name": "D4L2K3RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 28.248999999999988,
+      "s_end_m": 28.49999999999999,
+      "s_center_m": 28.37449999999999,
+      "length_m": 0.2510000000000012,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D4L2K3RP_2:set",
+        "D4L2K3RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 109,
+      "family_name": "S1M2K3RP",
+      "element_type": "Sextupole",
+      "section": "K3",
+      "s_start_m": 28.49999999999999,
+      "s_end_m": 28.59999999999999,
+      "s_center_m": 28.54999999999999,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S1P2RP",
+      "power_supply_set_pv": "S1P2RP:setCur",
+      "power_supply_rd_pv": "S1P2RP:rdCur",
+      "pv_candidates": [
+        "S1P2RP:setCur",
+        "S1P2RP:rdCur",
+        "S1M2K3RP:set",
+        "S1M2K3RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S1P2RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 63.72,
+      "PolynomB": [
+        0.0,
+        0.0,
+        63.72
+      ]
+    },
+    {
+      "index": 110,
+      "family_name": "D1L6K3RP",
+      "element_type": "Drift",
+      "section": "K3",
+      "s_start_m": 28.59999999999999,
+      "s_end_m": 28.74999999999999,
+      "s_center_m": 28.67499999999999,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L6K3RP:set",
+        "D1L6K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 111,
+      "family_name": "Q1M2K3RP",
+      "element_type": "Quadrupole",
+      "section": "K3",
+      "s_start_m": 28.74999999999999,
+      "s_end_m": 28.94999999999999,
+      "s_center_m": 28.849999999999987,
+      "length_m": 0.1999999999999993,
+      "power_supply": "Q1P2K3RP",
+      "power_supply_set_pv": "Q1P2K3RP:setCur",
+      "power_supply_rd_pv": "Q1P2K3RP:rdCur",
+      "pv_candidates": [
+        "Q1P2K3RP:setCur",
+        "Q1P2K3RP:rdCur",
+        "Q1M2K3RP:set",
+        "Q1M2K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 2.8234,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        2.8234
+      ]
+    },
+    {
+      "index": 112,
+      "family_name": "D2L2K3RP",
+      "element_type": "Drift",
+      "section": "K3",
+      "s_start_m": 28.94999999999999,
+      "s_end_m": 29.07499999999999,
+      "s_center_m": 29.01249999999999,
+      "length_m": 0.125,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D2L2K3RP:set",
+        "D2L2K3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 113,
+      "family_name": "OMK3RP",
+      "element_type": "Octupole",
+      "section": "K3",
+      "s_start_m": 29.07499999999999,
+      "s_end_m": 29.17499999999999,
+      "s_center_m": 29.12499999999999,
+      "length_m": 0.10000000000000142,
+      "power_supply": "OP2RP",
+      "power_supply_set_pv": "OP2RP:setCur",
+      "power_supply_rd_pv": "OP2RP:rdCur",
+      "pv_candidates": [
+        "OP2RP:setCur",
+        "OP2RP:rdCur",
+        "OMK3RP:set",
+        "OMK3RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Octupole / nonlinear optics element",
+      "K": 0.0,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        0.0,
+        0.0,
+        -50.0
+      ]
+    },
+    {
+      "index": 114,
+      "family_name": "D2L1L4RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 29.17499999999999,
+      "s_end_m": 29.22899999999999,
+      "s_center_m": 29.20199999999999,
+      "length_m": 0.053999999999998494,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D2L1L4RP_1:set",
+        "D2L1L4RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 115,
+      "family_name": "BPMZ1L4RP",
+      "element_type": "Monitor",
+      "section": "L4",
+      "s_start_m": 29.22899999999999,
+      "s_end_m": 29.22899999999999,
+      "s_center_m": 29.22899999999999,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ1L4RP:rdX",
+        "BPMZ1L4RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 116,
+      "family_name": "D2L1L4RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 29.22899999999999,
+      "s_end_m": 29.29999999999999,
+      "s_center_m": 29.26449999999999,
+      "length_m": 0.0710000000000015,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D2L1L4RP_2:set",
+        "D2L1L4RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 117,
+      "family_name": "Q1M1L4RP",
+      "element_type": "Quadrupole",
+      "section": "L4",
+      "s_start_m": 29.29999999999999,
+      "s_end_m": 29.49999999999999,
+      "s_center_m": 29.39999999999999,
+      "length_m": 0.1999999999999993,
+      "power_supply": "Q1P1L4RP",
+      "power_supply_set_pv": "Q1P1L4RP:setCur",
+      "power_supply_rd_pv": "Q1P1L4RP:rdCur",
+      "pv_candidates": [
+        "Q1P1L4RP:setCur",
+        "Q1P1L4RP:rdCur",
+        "Q1M1L4RP:set",
+        "Q1M1L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 2.8234,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        2.8234
+      ]
+    },
+    {
+      "index": 118,
+      "family_name": "D1L1L4RP",
+      "element_type": "Drift",
+      "section": "L4",
+      "s_start_m": 29.49999999999999,
+      "s_end_m": 29.649999999999988,
+      "s_center_m": 29.57499999999999,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L1L4RP:set",
+        "D1L1L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 119,
+      "family_name": "S1M1L4RP",
+      "element_type": "Sextupole",
+      "section": "L4",
+      "s_start_m": 29.649999999999988,
+      "s_end_m": 29.74999999999999,
+      "s_center_m": 29.69999999999999,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S1P2RP",
+      "power_supply_set_pv": "S1P2RP:setCur",
+      "power_supply_rd_pv": "S1P2RP:rdCur",
+      "pv_candidates": [
+        "S1P2RP:setCur",
+        "S1P2RP:rdCur",
+        "S1M1L4RP:set",
+        "S1M1L4RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S1P2RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 63.72,
+      "PolynomB": [
+        0.0,
+        0.0,
+        63.72
+      ]
+    },
+    {
+      "index": 120,
+      "family_name": "D4L1L4RP",
+      "element_type": "Drift",
+      "section": "L4",
+      "s_start_m": 29.74999999999999,
+      "s_end_m": 30.04999999999999,
+      "s_center_m": 29.89999999999999,
+      "length_m": 0.3000000000000007,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D4L1L4RP:set",
+        "D4L1L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 121,
+      "family_name": "S2M1L4RP",
+      "element_type": "Sextupole",
+      "section": "L4",
+      "s_start_m": 30.04999999999999,
+      "s_end_m": 30.14999999999999,
+      "s_center_m": 30.09999999999999,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S2P2LRP",
+      "power_supply_set_pv": "S2P2LRP:setCur",
+      "power_supply_rd_pv": "S2P2LRP:rdCur",
+      "pv_candidates": [
+        "S2P2LRP:setCur",
+        "S2P2LRP:rdCur",
+        "S2M1L4RP:set",
+        "S2M1L4RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S2P2LRP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": -81.72,
+      "PolynomB": [
+        0.0,
+        0.0,
+        -81.72
+      ]
+    },
+    {
+      "index": 122,
+      "family_name": "D3L1L4RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 30.14999999999999,
+      "s_end_m": 30.20399999999999,
+      "s_center_m": 30.176999999999992,
+      "length_m": 0.053999999999998494,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L1L4RP_1:set",
+        "D3L1L4RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 123,
+      "family_name": "BPMZ2L4RP",
+      "element_type": "Monitor",
+      "section": "L4",
+      "s_start_m": 30.20399999999999,
+      "s_end_m": 30.20399999999999,
+      "s_center_m": 30.20399999999999,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ2L4RP:rdX",
+        "BPMZ2L4RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 124,
+      "family_name": "D3L1L4RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 30.20399999999999,
+      "s_end_m": 30.57499999999999,
+      "s_center_m": 30.38949999999999,
+      "length_m": 0.37099999999999866,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L1L4RP_2:set",
+        "D3L1L4RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 125,
+      "family_name": "BM1L4RP",
+      "element_type": "Dipole",
+      "section": "L4",
+      "s_start_m": 30.57499999999999,
+      "s_end_m": 31.774999999999988,
+      "s_center_m": 31.17499999999999,
+      "length_m": 1.1999999999999993,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BM1L4RP:set",
+        "BM1L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Main bending dipole",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 126,
+      "family_name": "D3L2L4RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 31.774999999999988,
+      "s_end_m": 32.18719999999999,
+      "s_center_m": 31.98109999999999,
+      "length_m": 0.4122000000000021,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L2L4RP_1:set",
+        "D3L2L4RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 127,
+      "family_name": "BPMZ3L4RP",
+      "element_type": "Monitor",
+      "section": "L4",
+      "s_start_m": 32.18719999999999,
+      "s_end_m": 32.18719999999999,
+      "s_center_m": 32.18719999999999,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ3L4RP:rdX",
+        "BPMZ3L4RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 128,
+      "family_name": "D3L2L4RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 32.18719999999999,
+      "s_end_m": 32.19999999999999,
+      "s_center_m": 32.19359999999999,
+      "length_m": 0.01279999999999859,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L2L4RP_2:set",
+        "D3L2L4RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 129,
+      "family_name": "Q2M1L4RP",
+      "element_type": "Quadrupole",
+      "section": "L4",
+      "s_start_m": 32.19999999999999,
+      "s_end_m": 32.39999999999999,
+      "s_center_m": 32.29999999999999,
+      "length_m": 0.20000000000000284,
+      "power_supply": "Q2P1L4RP",
+      "power_supply_set_pv": "Q2P1L4RP:setCur",
+      "power_supply_rd_pv": "Q2P1L4RP:rdCur",
+      "pv_candidates": [
+        "Q2P1L4RP:setCur",
+        "Q2P1L4RP:rdCur",
+        "Q2M1L4RP:set",
+        "Q2M1L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": -4.2005,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        -4.2005
+      ]
+    },
+    {
+      "index": 130,
+      "family_name": "D1L2L4RP",
+      "element_type": "Drift",
+      "section": "L4",
+      "s_start_m": 32.39999999999999,
+      "s_end_m": 32.54999999999999,
+      "s_center_m": 32.474999999999994,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L2L4RP:set",
+        "D1L2L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 131,
+      "family_name": "Q3M1L4RP",
+      "element_type": "Quadrupole",
+      "section": "L4",
+      "s_start_m": 32.54999999999999,
+      "s_end_m": 32.74999999999999,
+      "s_center_m": 32.64999999999999,
+      "length_m": 0.20000000000000284,
+      "power_supply": "Q3P1L4RP",
+      "power_supply_set_pv": "Q3P1L4RP:setCur",
+      "power_supply_rd_pv": "Q3P1L4RP:rdCur",
+      "pv_candidates": [
+        "Q3P1L4RP:setCur",
+        "Q3P1L4RP:rdCur",
+        "Q3M1L4RP:set",
+        "Q3M1L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 5.1358,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        5.1358
+      ]
+    },
+    {
+      "index": 132,
+      "family_name": "D1L3L4RP",
+      "element_type": "Drift",
+      "section": "L4",
+      "s_start_m": 32.74999999999999,
+      "s_end_m": 32.89999999999999,
+      "s_center_m": 32.82499999999999,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L3L4RP:set",
+        "D1L3L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 133,
+      "family_name": "S3M1L4RP",
+      "element_type": "Sextupole",
+      "section": "L4",
+      "s_start_m": 32.89999999999999,
+      "s_end_m": 32.99999999999999,
+      "s_center_m": 32.94999999999999,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S3P2RP",
+      "power_supply_set_pv": "S3P2RP:setCur",
+      "power_supply_rd_pv": "S3P2RP:rdCur",
+      "pv_candidates": [
+        "S3P2RP:setCur",
+        "S3P2RP:rdCur",
+        "S3M1L4RP:set",
+        "S3M1L4RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S3P2RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": -9.0,
+      "PolynomB": [
+        0.0,
+        0.0,
+        -9.0
+      ]
+    },
+    {
+      "index": 134,
+      "family_name": "DLL1L4RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 32.99999999999999,
+      "s_end_m": 33.04659999999999,
+      "s_center_m": 33.02329999999999,
+      "length_m": 0.046599999999997976,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DLL1L4RP_1:set",
+        "DLL1L4RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 135,
+      "family_name": "BPMZ4L4RP",
+      "element_type": "Monitor",
+      "section": "L4",
+      "s_start_m": 33.04659999999999,
+      "s_end_m": 33.04659999999999,
+      "s_center_m": 33.04659999999999,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ4L4RP:rdX",
+        "BPMZ4L4RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 136,
+      "family_name": "DLL1L4RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 33.04659999999999,
+      "s_end_m": 35.849999999999994,
+      "s_center_m": 34.44829999999999,
+      "length_m": 2.8034000000000034,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DLL1L4RP_2:set",
+        "DLL1L4RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 137,
+      "family_name": "CAV",
+      "element_type": "RFCavity",
+      "section": null,
+      "s_start_m": 35.849999999999994,
+      "s_end_m": 36.14999999999999,
+      "s_center_m": 35.99999999999999,
+      "length_m": 0.29999999999999716,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "MCLKHGP:setFrq"
+      ],
+      "connected_inventory_pvs": [
+        "MCLKHGP:setFrq"
+      ],
+      "role": "Main RF cavity in the L4 long straight"
+    },
+    {
+      "index": 138,
+      "family_name": "DLL2L4RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 36.14999999999999,
+      "s_end_m": 38.95339999999999,
+      "s_center_m": 37.55169999999999,
+      "length_m": 2.8033999999999963,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DLL2L4RP_1:set",
+        "DLL2L4RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 139,
+      "family_name": "BPMZ5L4RP",
+      "element_type": "Monitor",
+      "section": "L4",
+      "s_start_m": 38.95339999999999,
+      "s_end_m": 38.95339999999999,
+      "s_center_m": 38.95339999999999,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ5L4RP:rdX",
+        "BPMZ5L4RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 140,
+      "family_name": "DLL2L4RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 38.95339999999999,
+      "s_end_m": 38.999999999999986,
+      "s_center_m": 38.97669999999999,
+      "length_m": 0.046599999999997976,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DLL2L4RP_2:set",
+        "DLL2L4RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 141,
+      "family_name": "S3M2L4RP",
+      "element_type": "Sextupole",
+      "section": "L4",
+      "s_start_m": 38.999999999999986,
+      "s_end_m": 39.09999999999999,
+      "s_center_m": 39.04999999999998,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S3P1RP",
+      "power_supply_set_pv": "S3P1RP:setCur",
+      "power_supply_rd_pv": "S3P1RP:rdCur",
+      "pv_candidates": [
+        "S3P1RP:setCur",
+        "S3P1RP:rdCur",
+        "S3M2L4RP:set",
+        "S3M2L4RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S3P1RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 9.0,
+      "PolynomB": [
+        0.0,
+        0.0,
+        9.0
+      ]
+    },
+    {
+      "index": 142,
+      "family_name": "D1L4L4RP",
+      "element_type": "Drift",
+      "section": "L4",
+      "s_start_m": 39.09999999999999,
+      "s_end_m": 39.249999999999986,
+      "s_center_m": 39.17499999999998,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L4L4RP:set",
+        "D1L4L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 143,
+      "family_name": "Q3M2L4RP",
+      "element_type": "Quadrupole",
+      "section": "L4",
+      "s_start_m": 39.249999999999986,
+      "s_end_m": 39.44999999999999,
+      "s_center_m": 39.34999999999999,
+      "length_m": 0.20000000000000284,
+      "power_supply": "Q3P2L4RP",
+      "power_supply_set_pv": "Q3P2L4RP:setCur",
+      "power_supply_rd_pv": "Q3P2L4RP:rdCur",
+      "pv_candidates": [
+        "Q3P2L4RP:setCur",
+        "Q3P2L4RP:rdCur",
+        "Q3M2L4RP:set",
+        "Q3M2L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 5.1358,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        5.1358
+      ]
+    },
+    {
+      "index": 144,
+      "family_name": "D1L5L4RP",
+      "element_type": "Drift",
+      "section": "L4",
+      "s_start_m": 39.44999999999999,
+      "s_end_m": 39.59999999999999,
+      "s_center_m": 39.52499999999999,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L5L4RP:set",
+        "D1L5L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 145,
+      "family_name": "Q2M2L4RP",
+      "element_type": "Quadrupole",
+      "section": "L4",
+      "s_start_m": 39.59999999999999,
+      "s_end_m": 39.79999999999999,
+      "s_center_m": 39.69999999999999,
+      "length_m": 0.20000000000000284,
+      "power_supply": "Q2P2L4RP",
+      "power_supply_set_pv": "Q2P2L4RP:setCur",
+      "power_supply_rd_pv": "Q2P2L4RP:rdCur",
+      "pv_candidates": [
+        "Q2P2L4RP:setCur",
+        "Q2P2L4RP:rdCur",
+        "Q2M2L4RP:set",
+        "Q2M2L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": -4.2005,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        -4.2005
+      ]
+    },
+    {
+      "index": 146,
+      "family_name": "D3L3L4RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 39.79999999999999,
+      "s_end_m": 39.85399999999999,
+      "s_center_m": 39.82699999999999,
+      "length_m": 0.054000000000002046,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L3L4RP_1:set",
+        "D3L3L4RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 147,
+      "family_name": "BPMZ6L4RP",
+      "element_type": "Monitor",
+      "section": "L4",
+      "s_start_m": 39.85399999999999,
+      "s_end_m": 39.85399999999999,
+      "s_center_m": 39.85399999999999,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ6L4RP:rdX",
+        "BPMZ6L4RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 148,
+      "family_name": "D3L3L4RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 39.85399999999999,
+      "s_end_m": 40.224999999999994,
+      "s_center_m": 40.03949999999999,
+      "length_m": 0.3710000000000022,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L3L4RP_2:set",
+        "D3L3L4RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 149,
+      "family_name": "BM2L4RP",
+      "element_type": "Dipole",
+      "section": "L4",
+      "s_start_m": 40.224999999999994,
+      "s_end_m": 41.425,
+      "s_center_m": 40.824999999999996,
+      "length_m": 1.2000000000000028,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BM2L4RP:set",
+        "BM2L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Main bending dipole",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 150,
+      "family_name": "D3L4L4RP",
+      "element_type": "Drift",
+      "section": "L4",
+      "s_start_m": 41.425,
+      "s_end_m": 41.849999999999994,
+      "s_center_m": 41.637499999999996,
+      "length_m": 0.42499999999999716,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L4L4RP:set",
+        "D3L4L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 151,
+      "family_name": "S2M2L4RP",
+      "element_type": "Sextupole",
+      "section": "L4",
+      "s_start_m": 41.849999999999994,
+      "s_end_m": 41.949999999999996,
+      "s_center_m": 41.89999999999999,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S2P1RP",
+      "power_supply_set_pv": "S2P1RP:setCur",
+      "power_supply_rd_pv": "S2P1RP:rdCur",
+      "pv_candidates": [
+        "S2P1RP:setCur",
+        "S2P1RP:rdCur",
+        "S2M2L4RP:set",
+        "S2M2L4RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S2P1RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 152,
+      "family_name": "D4L2L4RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 41.949999999999996,
+      "s_end_m": 41.998999999999995,
+      "s_center_m": 41.97449999999999,
+      "length_m": 0.04899999999999949,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D4L2L4RP_1:set",
+        "D4L2L4RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 153,
+      "family_name": "BPMZ7L4RP",
+      "element_type": "Monitor",
+      "section": "L4",
+      "s_start_m": 41.998999999999995,
+      "s_end_m": 41.998999999999995,
+      "s_center_m": 41.998999999999995,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ7L4RP:rdX",
+        "BPMZ7L4RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 154,
+      "family_name": "D4L2L4RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 41.998999999999995,
+      "s_end_m": 42.24999999999999,
+      "s_center_m": 42.1245,
+      "length_m": 0.25099999999999767,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D4L2L4RP_2:set",
+        "D4L2L4RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 155,
+      "family_name": "S1M2L4RP",
+      "element_type": "Sextupole",
+      "section": "L4",
+      "s_start_m": 42.24999999999999,
+      "s_end_m": 42.349999999999994,
+      "s_center_m": 42.3,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S1P1RP",
+      "power_supply_set_pv": "S1P1RP:setCur",
+      "power_supply_rd_pv": "S1P1RP:rdCur",
+      "pv_candidates": [
+        "S1P1RP:setCur",
+        "S1P1RP:rdCur",
+        "S1M2L4RP:set",
+        "S1M2L4RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S1P1RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 156,
+      "family_name": "D1L6L4RP",
+      "element_type": "Drift",
+      "section": "L4",
+      "s_start_m": 42.349999999999994,
+      "s_end_m": 42.49999999999999,
+      "s_center_m": 42.425,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L6L4RP:set",
+        "D1L6L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 157,
+      "family_name": "Q1M2L4RP",
+      "element_type": "Quadrupole",
+      "section": "L4",
+      "s_start_m": 42.49999999999999,
+      "s_end_m": 42.699999999999996,
+      "s_center_m": 42.599999999999994,
+      "length_m": 0.20000000000000284,
+      "power_supply": "Q1P2L4RP",
+      "power_supply_set_pv": "Q1P2L4RP:setCur",
+      "power_supply_rd_pv": "Q1P2L4RP:rdCur",
+      "pv_candidates": [
+        "Q1P2L4RP:setCur",
+        "Q1P2L4RP:rdCur",
+        "Q1M2L4RP:set",
+        "Q1M2L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 2.8234,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        2.8234
+      ]
+    },
+    {
+      "index": 158,
+      "family_name": "D2L2L4RP",
+      "element_type": "Drift",
+      "section": "L4",
+      "s_start_m": 42.699999999999996,
+      "s_end_m": 42.824999999999996,
+      "s_center_m": 42.762499999999996,
+      "length_m": 0.125,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D2L2L4RP:set",
+        "D2L2L4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 159,
+      "family_name": "OML4RP",
+      "element_type": "Octupole",
+      "section": "L4",
+      "s_start_m": 42.824999999999996,
+      "s_end_m": 42.925,
+      "s_center_m": 42.875,
+      "length_m": 0.10000000000000142,
+      "power_supply": "OP1RP",
+      "power_supply_set_pv": "OP1RP:setCur",
+      "power_supply_rd_pv": "OP1RP:rdCur",
+      "pv_candidates": [
+        "OP1RP:setCur",
+        "OP1RP:rdCur",
+        "OML4RP:set",
+        "OML4RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Octupole / nonlinear optics element",
+      "K": 0.0,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        0.0,
+        0.0,
+        -50.0
+      ]
+    },
+    {
+      "index": 160,
+      "family_name": "D2L1K1RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 42.925,
+      "s_end_m": 42.979,
+      "s_center_m": 42.952,
+      "length_m": 0.054000000000002046,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D2L1K1RP_1:set",
+        "D2L1K1RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 161,
+      "family_name": "BPMZ1K1RP",
+      "element_type": "Monitor",
+      "section": "K1",
+      "s_start_m": 42.979,
+      "s_end_m": 42.979,
+      "s_center_m": 42.979,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ1K1RP:rdX",
+        "BPMZ1K1RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 162,
+      "family_name": "D2L1K1RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 42.979,
+      "s_end_m": 43.05,
+      "s_center_m": 43.0145,
+      "length_m": 0.07099999999999795,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D2L1K1RP_2:set",
+        "D2L1K1RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 163,
+      "family_name": "Q1M1K1RP",
+      "element_type": "Quadrupole",
+      "section": "K1",
+      "s_start_m": 43.05,
+      "s_end_m": 43.25,
+      "s_center_m": 43.15,
+      "length_m": 0.20000000000000284,
+      "power_supply": "Q1P1K1RP",
+      "power_supply_set_pv": "Q1P1K1RP:setCur",
+      "power_supply_rd_pv": "Q1P1K1RP:rdCur",
+      "pv_candidates": [
+        "Q1P1K1RP:setCur",
+        "Q1P1K1RP:rdCur",
+        "Q1M1K1RP:set",
+        "Q1M1K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 2.8234,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        2.8234
+      ]
+    },
+    {
+      "index": 164,
+      "family_name": "D1L1K1RP",
+      "element_type": "Drift",
+      "section": "K1",
+      "s_start_m": 43.25,
+      "s_end_m": 43.4,
+      "s_center_m": 43.325,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L1K1RP:set",
+        "D1L1K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 165,
+      "family_name": "S1M1K1RP",
+      "element_type": "Sextupole",
+      "section": "K1",
+      "s_start_m": 43.4,
+      "s_end_m": 43.5,
+      "s_center_m": 43.45,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S1P1RP",
+      "power_supply_set_pv": "S1P1RP:setCur",
+      "power_supply_rd_pv": "S1P1RP:rdCur",
+      "pv_candidates": [
+        "S1P1RP:setCur",
+        "S1P1RP:rdCur",
+        "S1M1K1RP:set",
+        "S1M1K1RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S1P1RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 166,
+      "family_name": "D4L1K1RP",
+      "element_type": "Drift",
+      "section": "K1",
+      "s_start_m": 43.5,
+      "s_end_m": 43.8,
+      "s_center_m": 43.65,
+      "length_m": 0.29999999999999716,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D4L1K1RP:set",
+        "D4L1K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 167,
+      "family_name": "S2M1K1RP",
+      "element_type": "Sextupole",
+      "section": "K1",
+      "s_start_m": 43.8,
+      "s_end_m": 43.9,
+      "s_center_m": 43.849999999999994,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S2P1RP",
+      "power_supply_set_pv": "S2P1RP:setCur",
+      "power_supply_rd_pv": "S2P1RP:rdCur",
+      "pv_candidates": [
+        "S2P1RP:setCur",
+        "S2P1RP:rdCur",
+        "S2M1K1RP:set",
+        "S2M1K1RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S2P1RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 168,
+      "family_name": "D3L1K1RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 43.9,
+      "s_end_m": 43.954,
+      "s_center_m": 43.927,
+      "length_m": 0.054000000000002046,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L1K1RP_1:set",
+        "D3L1K1RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 169,
+      "family_name": "BPMZ2K1RP",
+      "element_type": "Monitor",
+      "section": "K1",
+      "s_start_m": 43.954,
+      "s_end_m": 43.954,
+      "s_center_m": 43.954,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ2K1RP:rdX",
+        "BPMZ2K1RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 170,
+      "family_name": "D3L1K1RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 43.954,
+      "s_end_m": 44.325,
+      "s_center_m": 44.1395,
+      "length_m": 0.3710000000000022,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L1K1RP_2:set",
+        "D3L1K1RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 171,
+      "family_name": "BM1K1RP",
+      "element_type": "Dipole",
+      "section": "K1",
+      "s_start_m": 44.325,
+      "s_end_m": 45.525000000000006,
+      "s_center_m": 44.925000000000004,
+      "length_m": 1.2000000000000028,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BM1K1RP:set",
+        "BM1K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Main bending dipole",
+      "K": 0.0,
+      "H": 0.0
+    },
+    {
+      "index": 172,
+      "family_name": "D3L2K1RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 45.525000000000006,
+      "s_end_m": 45.937200000000004,
+      "s_center_m": 45.731100000000005,
+      "length_m": 0.41219999999999857,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L2K1RP_1:set",
+        "D3L2K1RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 173,
+      "family_name": "BPMZ3K1RP",
+      "element_type": "Monitor",
+      "section": "K1",
+      "s_start_m": 45.937200000000004,
+      "s_end_m": 45.937200000000004,
+      "s_center_m": 45.937200000000004,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ3K1RP:rdX",
+        "BPMZ3K1RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 174,
+      "family_name": "D3L2K1RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 45.937200000000004,
+      "s_end_m": 45.95,
+      "s_center_m": 45.9436,
+      "length_m": 0.01279999999999859,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D3L2K1RP_2:set",
+        "D3L2K1RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 175,
+      "family_name": "Q2M1K1RP",
+      "element_type": "Quadrupole",
+      "section": "K1",
+      "s_start_m": 45.95,
+      "s_end_m": 46.150000000000006,
+      "s_center_m": 46.050000000000004,
+      "length_m": 0.20000000000000284,
+      "power_supply": "Q2P1K1RP",
+      "power_supply_set_pv": "Q2P1K1RP:setCur",
+      "power_supply_rd_pv": "Q2P1K1RP:rdCur",
+      "pv_candidates": [
+        "Q2P1K1RP:setCur",
+        "Q2P1K1RP:rdCur",
+        "Q2M1K1RP:set",
+        "Q2M1K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": -4.4988,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        -4.4988
+      ]
+    },
+    {
+      "index": 176,
+      "family_name": "D1L2K1RP",
+      "element_type": "Drift",
+      "section": "K1",
+      "s_start_m": 46.150000000000006,
+      "s_end_m": 46.300000000000004,
+      "s_center_m": 46.22500000000001,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L2K1RP:set",
+        "D1L2K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 177,
+      "family_name": "Q3M1K1RP",
+      "element_type": "Quadrupole",
+      "section": "K1",
+      "s_start_m": 46.300000000000004,
+      "s_end_m": 46.50000000000001,
+      "s_center_m": 46.400000000000006,
+      "length_m": 0.20000000000000284,
+      "power_supply": "Q3P1K1RP",
+      "power_supply_set_pv": "Q3P1K1RP:setCur",
+      "power_supply_rd_pv": "Q3P1K1RP:rdCur",
+      "pv_candidates": [
+        "Q3P1K1RP:setCur",
+        "Q3P1K1RP:rdCur",
+        "Q3M1K1RP:set",
+        "Q3M1K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Quadrupole focusing element",
+      "K": 5.0973,
+      "H": 0.0,
+      "PolynomB": [
+        0.0,
+        5.0973
+      ]
+    },
+    {
+      "index": 178,
+      "family_name": "D1L3K1RP",
+      "element_type": "Drift",
+      "section": "K1",
+      "s_start_m": 46.50000000000001,
+      "s_end_m": 46.650000000000006,
+      "s_center_m": 46.575,
+      "length_m": 0.14999999999999858,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "D1L3K1RP:set",
+        "D1L3K1RP:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 179,
+      "family_name": "S3M1K1RP",
+      "element_type": "Sextupole",
+      "section": "K1",
+      "s_start_m": 46.650000000000006,
+      "s_end_m": 46.75000000000001,
+      "s_center_m": 46.7,
+      "length_m": 0.10000000000000142,
+      "power_supply": "S3P1RP",
+      "power_supply_set_pv": "S3P1RP:setCur",
+      "power_supply_rd_pv": "S3P1RP:rdCur",
+      "pv_candidates": [
+        "S3P1RP:setCur",
+        "S3P1RP:rdCur",
+        "S3M1K1RP:set",
+        "S3M1K1RP:read"
+      ],
+      "connected_inventory_pvs": [
+        "S3P1RP:setCur"
+      ],
+      "role": "Sextupole / chromatic correction family member",
+      "K": 0.0,
+      "H": 9.0,
+      "PolynomB": [
+        0.0,
+        0.0,
+        9.0
+      ]
+    },
+    {
+      "index": 180,
+      "family_name": "DKL1K1RP_1",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 46.75000000000001,
+      "s_end_m": 46.796600000000005,
+      "s_center_m": 46.773300000000006,
+      "length_m": 0.046599999999997976,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DKL1K1RP_1:set",
+        "DKL1K1RP_1:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    },
+    {
+      "index": 181,
+      "family_name": "BPMZ4K1RP",
+      "element_type": "Monitor",
+      "section": "K1",
+      "s_start_m": 46.796600000000005,
+      "s_end_m": 46.796600000000005,
+      "s_center_m": 46.796600000000005,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "BPMZ4K1RP:rdX",
+        "BPMZ4K1RP:rdY"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Beam position monitor"
+    },
+    {
+      "index": 182,
+      "family_name": "DKL1K1RP_2",
+      "element_type": "Drift",
+      "section": null,
+      "s_start_m": 46.796600000000005,
+      "s_end_m": 48.00000000000001,
+      "s_center_m": 47.398300000000006,
+      "length_m": 1.203400000000002,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "DKL1K1RP_2:set",
+        "DKL1K1RP_2:read"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Drift"
+    }
+  ],
+  "special_locations": {
+    "rf_cavity": {
+      "index": 137,
+      "family_name": "CAV",
+      "element_type": "RFCavity",
+      "section": null,
+      "s_start_m": 35.849999999999994,
+      "s_end_m": 36.14999999999999,
+      "s_center_m": 35.99999999999999,
+      "length_m": 0.29999999999999716,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "MCLKHGP:setFrq"
+      ],
+      "connected_inventory_pvs": [
+        "MCLKHGP:setFrq"
+      ],
+      "role": "Main RF cavity in the L4 long straight"
+    },
+    "u125_undulator": {
+      "index": 46,
+      "family_name": "U125",
+      "element_type": "Marker",
+      "section": null,
+      "s_start_m": 11.999999999999998,
+      "s_end_m": 11.999999999999998,
+      "s_center_m": 11.999999999999998,
+      "length_m": 0.0,
+      "power_supply": null,
+      "power_supply_set_pv": null,
+      "power_supply_rd_pv": null,
+      "pv_candidates": [
+        "U125"
+      ],
+      "connected_inventory_pvs": [],
+      "role": "Undulator marker in the L2 straight"
+    },
+    "l4_section_bounds_m": {
+      "start": 29.22899999999999,
+      "end": 42.925
+    },
+    "l2_u125_window_bounds_m": {
+      "start": 5.229,
+      "end": 18.925
+    }
+  },
+  "power_supplies": {
+    "quadrupole": {
+      "Q1P1K1RP": [
+        "Q1M1K1RP"
+      ],
+      "Q1P2K1RP": [
+        "Q1M2K1RP"
+      ],
+      "Q1P1L2RP": [
+        "Q1M1L2RP"
+      ],
+      "Q1P2L2RP": [
+        "Q1M2L2RP"
+      ],
+      "Q1P1K3RP": [
+        "Q1M1K3RP"
+      ],
+      "Q1P2K3RP": [
+        "Q1M2K3RP"
+      ],
+      "Q1P1L4RP": [
+        "Q1M1L4RP"
+      ],
+      "Q1P2L4RP": [
+        "Q1M2L4RP"
+      ],
+      "Q2P1K1RP": [
+        "Q2M1K1RP"
+      ],
+      "Q2P2K1RP": [
+        "Q2M2K1RP"
+      ],
+      "Q2P1L2RP": [
+        "Q2M1L2RP"
+      ],
+      "Q2P2L2RP": [
+        "Q2M2L2RP"
+      ],
+      "Q2P1K3RP": [
+        "Q2M1K3RP"
+      ],
+      "Q2P2K3RP": [
+        "Q2M2K3RP"
+      ],
+      "Q2P1L4RP": [
+        "Q2M1L4RP"
+      ],
+      "Q2P2L4RP": [
+        "Q2M2L4RP"
+      ],
+      "Q3P1K1RP": [
+        "Q3M1K1RP"
+      ],
+      "Q3P2K1RP": [
+        "Q3M2K1RP"
+      ],
+      "Q3P1L2RP": [
+        "Q3M1L2RP"
+      ],
+      "Q3P2L2RP": [
+        "Q3M2L2RP"
+      ],
+      "Q3P1K3RP": [
+        "Q3M1K3RP"
+      ],
+      "Q3P2K3RP": [
+        "Q3M2K3RP"
+      ],
+      "Q3P1L4RP": [
+        "Q3M1L4RP"
+      ],
+      "Q3P2L4RP": [
+        "Q3M2L4RP"
+      ]
+    },
+    "sextupole": {
+      "S1P1RP": [
+        "S1M2K1RP",
+        "S1M1L2RP",
+        "S1M2L4RP",
+        "S1M1K1RP"
+      ],
+      "S1P2RP": [
+        "S1M2L2RP",
+        "S1M1K3RP",
+        "S1M2K3RP",
+        "S1M1L4RP"
+      ],
+      "S2P1RP": [
+        "S2M2K1RP",
+        "S2M1L2RP",
+        "S2M2L4RP",
+        "S2M1K1RP"
+      ],
+      "S2P2KRP": [
+        "S2M1K3RP",
+        "S2M2K3RP"
+      ],
+      "S2P2LRP": [
+        "S2M2L2RP",
+        "S2M1L4RP"
+      ],
+      "S3P1RP": [
+        "S3M2K1RP",
+        "S3M1L2RP",
+        "S3M2L4RP",
+        "S3M1K1RP"
+      ],
+      "S3P2RP": [
+        "S3M2L2RP",
+        "S3M1K3RP",
+        "S3M2K3RP",
+        "S3M1L4RP"
+      ]
+    },
+    "octupole": {
+      "OP1RP": [
+        "OMK1RP",
+        "OML4RP"
+      ],
+      "OP2RP": [
+        "OML2RP",
+        "OMK3RP"
+      ]
+    }
+  },
+  "connected_inventory_pvs": [
+    "BPMZ1X003GP:rdBufBpm",
+    "CUM1ZK3RP:measCur",
+    "CUM1ZK3RP:rdLt10",
+    "CUM1ZK3RP:rdLt100",
+    "ERMPCGP:rdRmp",
+    "MCLKHGP:setFrq",
+    "MLSOPCCP:actOptRmpTblSet",
+    "OPCHECKCCP:calcCurrLife",
+    "ORBITCCP:selRunMode",
+    "PAHRP:setVoltCav",
+    "QPD00ZL4RP:rdSigmaX",
+    "QPD00ZL4RP:rdSigmaY",
+    "QPD01ZL2RP:rdSigmaX",
+    "QPD01ZL2RP:rdSigmaY",
+    "RMC00VP",
+    "S1P1RP:setCur",
+    "S1P2RP:setCur",
+    "S2P1RP:setCur",
+    "S2P2KRP:setCur",
+    "S2P2LRP:setCur",
+    "S2P2RP:setCur",
+    "S3P1RP:setCur",
+    "S3P2RP:setCur",
+    "SEKRRP:rdDose",
+    "TUNEZRP:measX",
+    "TUNEZRP:measY",
+    "TUNEZRP:measZ",
+    "WFGENC1CP:rdVolt",
+    "cumz4x003gp:tuneSyn"
+  ]
+}
