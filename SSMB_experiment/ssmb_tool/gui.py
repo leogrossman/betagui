@@ -69,6 +69,7 @@ class SSMBGui:
         self.lattice_device_items = []
         self.selected_lattice_item_name = None
         self.bump_lab_plot_canvases = {}
+        self.oscillation_selected_candidate_key = None
         self.stage0_stop_event: Optional[threading.Event] = None
         self._build_vars()
         self._build_ui()
@@ -285,7 +286,10 @@ class SSMBGui:
         row += 1
         ttk.Label(frame, text="Extra oscillation candidates").grid(row=row, column=0, sticky="w")
         ttk.Entry(frame, textvariable=self.monitor_candidate_keys_var, width=42).grid(row=row, column=1, columnspan=3, sticky="ew", pady=2)
-        ttk.Label(frame, text="trend keys, comma-separated", foreground="#607d8b").grid(row=row, column=4, sticky="w")
+        chooser = ttk.Frame(frame)
+        chooser.grid(row=row, column=4, sticky="w")
+        ttk.Label(chooser, text="trend keys, comma-separated", foreground="#607d8b").pack(side="left")
+        ttk.Button(chooser, text="Choose...", command=self._open_candidate_picker).pack(side="left", padx=(6, 0))
         row += 1
         button_row = ttk.Frame(frame)
         button_row.grid(row=row, column=0, columnspan=5, sticky="ew", pady=(8, 8))
@@ -330,6 +334,32 @@ class SSMBGui:
             seen.add(key)
             keys.append(key)
         return keys
+
+    def _open_candidate_picker(self) -> None:
+        window = tk.Toplevel(self.root)
+        window.title("Choose Oscillation Candidates")
+        window.geometry("420x520")
+        frame = ttk.Frame(window, padding=10)
+        frame.pack(fill="both", expand=True)
+        frame.rowconfigure(1, weight=1)
+        ttk.Label(frame, text="Select extra trend keys to include in the oscillation study").grid(row=0, column=0, sticky="w")
+        listbox = tk.Listbox(frame, selectmode="multiple", exportselection=False)
+        listbox.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+        current = set(self._extra_oscillation_candidates())
+        keys = sorted(trend_definitions().keys())
+        for idx, key in enumerate(keys):
+            meta = trend_definitions().get(key, {})
+            listbox.insert("end", "%s  |  %s" % (key, meta.get("label", key)))
+            if key in current:
+                listbox.selection_set(idx)
+        def apply_selection():
+            selected = [keys[index] for index in listbox.curselection()]
+            self.monitor_candidate_keys_var.set(", ".join(selected))
+            window.destroy()
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        ttk.Button(buttons, text="Apply", command=apply_selection).pack(side="left")
+        ttk.Button(buttons, text="Close", command=window.destroy).pack(side="right")
 
     def _build_sweep_tab(self, frame: "ttk.Frame") -> None:
         row = 0
@@ -724,11 +754,11 @@ class SSMBGui:
             return
         window = tk.Toplevel(self.root)
         window.title("SSMB Live Monitor")
-        window.geometry("1800x1040")
+        window.geometry("1920x1080")
         outer = ttk.Frame(window, padding=10)
         outer.pack(fill="both", expand=True)
-        outer.columnconfigure(0, weight=8)
-        outer.columnconfigure(1, weight=3)
+        outer.columnconfigure(0, weight=11)
+        outer.columnconfigure(1, weight=2)
         outer.rowconfigure(0, weight=1)
         left = ttk.Frame(outer)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
@@ -774,7 +804,7 @@ class SSMBGui:
         )
         helper.grid(row=2, column=0, sticky="w", pady=(0, 8))
         ttk.Label(right, text="Current channel snapshot").grid(row=3, column=0, sticky="w", pady=(0, 0))
-        self.monitor_window_channels_text = tk.Text(right, wrap="none", height=24)
+        self.monitor_window_channels_text = tk.Text(right, wrap="none", height=14)
         self.monitor_window_channels_text.grid(row=4, column=0, sticky="nsew")
         self.monitor_window_channels_text.configure(state="disabled")
         self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
@@ -865,6 +895,9 @@ class SSMBGui:
         self.oscillation_window = window
         self.oscillation_window_text = text
         self.oscillation_window_table = candidate_table
+        button_row = ttk.Frame(frame)
+        button_row.grid(row=0, column=1, sticky="e")
+        ttk.Button(button_row, text="Open Selected In Lattice", command=self._open_selected_oscillation_candidate_in_lattice).pack(side="right")
         self.oscillation_plot_canvases = canvases
         self._update_oscillation_window(self.latest_monitor_summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates()))
         window.protocol("WM_DELETE_WINDOW", self._close_oscillation_window)
@@ -916,6 +949,13 @@ class SSMBGui:
         if not selection:
             return
         key = selection[0]
+        self.oscillation_selected_candidate_key = key
+        self._draw_oscillation_candidate_plots(self.latest_monitor_summary)
+
+    def _open_selected_oscillation_candidate_in_lattice(self) -> None:
+        key = self.oscillation_selected_candidate_key
+        if not key:
+            return
         mapping = {
             "qpd_l4_center_x_avg_um": "QPD00ZL4RP",
             "qpd_l2_center_x_avg_um": "QPD01ZL2RP",
@@ -956,13 +996,25 @@ class SSMBGui:
             return
         trend_data = (summary or {}).get("trend_data", {})
         osc = (summary or {}).get("oscillation_study", {}) or {}
-        candidates = list(osc.get("candidates", []))[:3]
-        while len(candidates) < 3:
-            candidates.append(None)
+        selected_key = self.oscillation_selected_candidate_key
+        selected_candidate = None
+        for candidate in osc.get("candidates", []):
+            if candidate.get("key") == selected_key:
+                selected_candidate = candidate
+                break
+        forced_candidates = []
+        for forced_key in ("climate_kw13_return_temp_c", "climate_sr_temp_c"):
+            for candidate in osc.get("candidates", []):
+                if candidate.get("key") == forced_key:
+                    forced_candidates.append(candidate)
+                    break
         plot_defs = [
             ("P1 avg only", [("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa")]),
         ]
-        for candidate in candidates:
+        comparison_candidates = [selected_candidate] + forced_candidates
+        while len(comparison_candidates) < 3:
+            comparison_candidates.append(None)
+        for candidate in comparison_candidates[:3]:
             if candidate is None:
                 plot_defs.append(("Candidate pending", []))
                 continue
@@ -1627,7 +1679,7 @@ class SSMBGui:
             )
             if item.get("name") == "BPMZ1L2RP":
                 lines.append("BPMZ1L2RP sits on the L2 / undulator side, so it helps anchor the source-region orbit during the bump-controlled RF sweep.")
-        if item.get("pv_label", "").startswith("l4_bump_hcorr"):
+        if (item.get("pv_label") or "").startswith("l4_bump_hcorr"):
             lines.extend(
                 [
                     "",
@@ -1671,17 +1723,16 @@ class SSMBGui:
         if key and key in trend_data:
             meta = trend_definitions().get(key, {"label": key, "color": "#1565c0"})
             series_payload.append((meta["label"], list(trend_data.get(key, [])), meta["color"]))
-            series_payload.append(("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa"))
         elif item.get("name") == "QPD00ZL4RP":
             series_payload.append(("QPD00 center [um]", list(trend_data.get("qpd_l4_center_x_avg_um", [])), "#6a1b9a"))
             series_payload.append(("σδ", list(trend_data.get("sigma_delta", [])), "#6d4c41"))
+            series_payload.append(("QPD00 center L2 [um]", list(trend_data.get("qpd_l2_center_x_avg_um", [])), "#8e24aa"))
         elif item.get("name") == "QPD01ZL2RP":
             series_payload.append(("QPD01 center [um]", list(trend_data.get("qpd_l2_center_x_avg_um", [])), "#8e24aa"))
             series_payload.append(("BPMZ1L2 [mm]", list(trend_data.get("bump_bpm_l2_mm", [])), "#0d47a1"))
         elif (item.get("pv_label") or "").startswith("l4_bump_hcorr"):
             series_payload.append(("Orbit error [mm]", list(trend_data.get("bump_orbit_error_mm", [])), "#c2185b"))
             series_payload.append(("BPM avg [mm]", list(trend_data.get("bump_bpm_avg_mm", [])), "#00838f"))
-            series_payload.append(("P1 avg", list(trend_data.get("p1_h1_ampl_avg", [])), "#8e24aa"))
         elif item.get("pv_label") in trend_data:
             meta = trend_definitions().get(item.get("pv_label"), {"label": item.get("pv_label"), "color": "#1565c0"})
             series_payload.append((meta["label"], list(trend_data.get(item.get("pv_label"), [])), meta["color"]))

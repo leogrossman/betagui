@@ -67,7 +67,6 @@ OSCILLATION_CANDIDATE_KEYS = (
     "climate_sr_temp1_c",
     "tune_y",
     "tune_s",
-    "p1_h1_ampl_dev",
     "p3_h1_ampl_avg",
 )
 
