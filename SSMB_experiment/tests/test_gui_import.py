@@ -71,6 +71,11 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         self.assertIn("ssmb_experiment_live_monitor", str(path))
         self.assertNotIn("/tmp/betagui/SSMB_experiment/.ssmb_local", str(path))
 
+    def test_open_monitor_window_can_handle_no_live_sample(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        self.assertTrue(hasattr(gui.SSMBGui, "_open_monitor_window"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1170,6 +1170,7 @@ class SSMBGui:
                     list(self.monitor_history),
                     extra_candidate_keys=self._extra_oscillation_candidates(),
                     include_oscillation=self._should_compute_extended_analysis(),
+                    include_extended=self._should_compute_extended_analysis(),
                 )
                 self._debug("monitor sample %d summary complete" % sample_index)
                 self._enqueue_monitor_update(
@@ -1239,6 +1240,7 @@ class SSMBGui:
             list(self.monitor_history),
             extra_candidate_keys=self._extra_oscillation_candidates(),
             include_oscillation=True,
+            include_extended=True,
         )
         self.latest_monitor_summary = summary
         return summary
@@ -1318,8 +1320,29 @@ class SSMBGui:
         self.monitor_window_channels_text = tk.Text(snap_frame, wrap="none", height=6, width=48)
         self.monitor_window_channels_text.grid(row=1, column=0, sticky="nsew")
         self.monitor_window_channels_text.configure(state="disabled")
-        self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
-        self._update_monitor_dashboard(self.latest_monitor_summary or summarize_live_monitor([], extra_candidate_keys=self._extra_oscillation_candidates()))
+        if self.latest_monitor_sample is None:
+            self._set_text_widget(
+                self.monitor_window_channels_text,
+                [
+                    "No live sample yet.",
+                    "",
+                    "Start Live Monitor first, then this window will show",
+                    "the live snapshot and rolling plots.",
+                ],
+            )
+            self._set_text_widget(
+                self.monitor_summary_text,
+                [
+                    "SSMB Live Monitor",
+                    "",
+                    "No live sample yet.",
+                    "Start Live Monitor to populate the live dashboard.",
+                ],
+            )
+        else:
+            self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
+        if self.latest_monitor_summary is not None:
+            self._update_monitor_dashboard(self.latest_monitor_summary)
         try:
             window.update_idletasks()
             window.deiconify()

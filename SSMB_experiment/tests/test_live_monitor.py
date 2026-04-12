@@ -299,10 +299,12 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
             }
             for index in range(12)
         ]
-        summary = summarize_live_monitor(samples, include_oscillation=False)
+        summary = summarize_live_monitor(samples, include_oscillation=False, include_extended=False)
         self.assertEqual(summary["oscillation_study"]["reason"], "disabled_for_fast_monitor_path")
         self.assertFalse(summary["oscillation_study"]["available"])
         self.assertIn("trend_data", summary)
+        self.assertEqual(summary["rf_sweep_detection"]["reason"], "disabled_for_fast_monitor_path")
+        self.assertFalse(summary["rf_sweep_metrics"]["available"])
 
 
 if __name__ == "__main__":

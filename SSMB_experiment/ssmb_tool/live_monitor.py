@@ -408,6 +408,7 @@ def summarize_live_monitor(
     samples: Sequence[Dict[str, object]],
     extra_candidate_keys: Optional[Sequence[str]] = None,
     include_oscillation: bool = True,
+    include_extended: bool = True,
 ) -> Dict[str, object]:
     latest = samples[-1] if samples else {}
     derived = latest.get("derived", {})
@@ -480,7 +481,7 @@ def summarize_live_monitor(
         },
     }
 
-    sweep_state = detect_rf_sweep_active(samples)
+    sweep_state = detect_rf_sweep_active(samples) if include_extended else {"active": False, "reason": "disabled_for_fast_monitor_path", "rf_span_khz": 0.0}
     summary["rf_sweep_detection"] = sweep_state
     sweep_metrics: Dict[str, object] = {"available": False}
 
@@ -523,7 +524,7 @@ def summarize_live_monitor(
     qpd00_center_delta = []
     qpd01_center_delta = []
     beam_current_delta = []
-    if len(delta_series) >= 3 and sweep_state["active"]:
+    if include_extended and len(delta_series) >= 3 and sweep_state["active"]:
         for sample in samples:
             d = _valid_float(sample.get("derived", {}).get("delta_l4_bpm_first_order"))
             if d is None:
@@ -573,21 +574,28 @@ def summarize_live_monitor(
         "p1_avg_vs_bump_strength": _linear_fit(
             [x for x, y in bump_strength_series if y is not None],
             [y for _x, y in bump_strength_series if y is not None],
-        ) if len([1 for _x, y in bump_strength_series if y is not None]) >= 2 else None,
+        ) if include_extended and len([1 for _x, y in bump_strength_series if y is not None]) >= 2 else None,
         "p1_avg_vs_bump_error": _linear_fit(
             [x for x, y in bump_error_series if y is not None],
             [y for _x, y in bump_error_series if y is not None],
-        ) if len([1 for _x, y in bump_error_series if y is not None]) >= 2 else None,
+        ) if include_extended and len([1 for _x, y in bump_error_series if y is not None]) >= 2 else None,
     }
     summary["environment_monitor"] = {
-        "p1_avg_vs_kw13_temp": _fit_channel_against_p1avg(samples, "climate_kw13_return_temp_c"),
-        "p1_avg_vs_sr_temp": _fit_channel_against_p1avg(samples, "climate_sr_temp_c"),
-        "p1_avg_vs_sr_temp1": _fit_channel_against_p1avg(samples, "climate_sr_temp1_c"),
-        "p1_avg_vs_qpd00_center": _fit_channel_against_p1avg(samples, "qpd_l4_center_x_avg_um"),
-        "p1_avg_vs_qpd01_center": _fit_channel_against_p1avg(samples, "qpd_l2_center_x_avg_um"),
+        "p1_avg_vs_kw13_temp": _fit_channel_against_p1avg(samples, "climate_kw13_return_temp_c") if include_extended else None,
+        "p1_avg_vs_sr_temp": _fit_channel_against_p1avg(samples, "climate_sr_temp_c") if include_extended else None,
+        "p1_avg_vs_sr_temp1": _fit_channel_against_p1avg(samples, "climate_sr_temp1_c") if include_extended else None,
+        "p1_avg_vs_qpd00_center": _fit_channel_against_p1avg(samples, "qpd_l4_center_x_avg_um") if include_extended else None,
+        "p1_avg_vs_qpd01_center": _fit_channel_against_p1avg(samples, "qpd_l2_center_x_avg_um") if include_extended else None,
     }
     summary["temperature_state"] = _summarize_temperature_state(summary)
-    summary["alpha_assessment"] = assess_alpha_monitor(summary)
+    summary["alpha_assessment"] = assess_alpha_monitor(summary) if include_extended else {
+        "legacy_alpha0": (summary.get("current") or {}).get("legacy_alpha0_corrected"),
+        "bpm_alpha0": None,
+        "difference": None,
+        "contamination_likely": False,
+        "message": "Extended alpha/slip-factor fitting is deferred in the fast live-monitor path. Open the study windows for the full fit chain.",
+        "color": "yellow",
+    }
     summary["trend_data"] = extract_trend_data(samples)
     if include_oscillation:
         summary["oscillation_study"] = analyze_p1_oscillation(samples, extra_candidate_keys=extra_candidate_keys)
@@ -609,14 +617,14 @@ def summarize_live_monitor(
         }
     tune_s_period = summary["current"].get("tune_s_period_s")
     p1_period = (summary.get("oscillation_study") or {}).get("dominant_period_s")
+    ratio = _resonance_mismatch(p1_period, tune_s_period)
     summary["ssmb_resonance"] = {
         "observed_p1_period_s": p1_period,
         "synchrotron_period_s": tune_s_period,
-        "period_ratio_to_qs": _resonance_mismatch(p1_period, tune_s_period),
+        "period_ratio_to_qs": ratio,
         "message": (
             "Observed P1 period is many orders slower than the synchrotron period; that points to a slow control / thermal / optics modulation rather than a direct turn-by-turn Qs oscillation."
-            if _resonance_mismatch(p1_period, tune_s_period) not in (None, 0.0)
-            and abs(float(_resonance_mismatch(p1_period, tune_s_period))) > 100.0
+            if include_extended and ratio not in (None, 0.0) and abs(float(ratio)) > 100.0
             else "Observed P1 period is being compared live to the synchrotron period for a quick resonance sanity check."
         ),
     }
