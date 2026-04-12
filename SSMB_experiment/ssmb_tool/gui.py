@@ -15,7 +15,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Optional, Sequence
 
-from .config import LoggerConfig, SSMB_ROOT, parse_labeled_pvs
+from .config import LATTICE_DIR, LoggerConfig, SSMB_ROOT, parse_labeled_pvs
 from .epics_io import EpicsAdapter, EpicsUnavailableError, ReadOnlyEpicsAdapter
 from .inventory import spec_index
 from .lattice import LatticeElement
@@ -28,7 +28,7 @@ from .live_monitor import (
     summarize_live_monitor,
     trend_definitions,
 )
-from .log_now import BPM_NONLINEAR_MM, BPM_WARNING_MM, build_specs, estimate_passive_session_bytes, estimate_sample_breakdown, inventory_overview_lines, run_stage0_logger
+from .log_now import BPM_NONLINEAR_MM, BPM_WARNING_MM, DEFAULT_L4_DISPERSION_M, _first_order_delta_from_bpms, build_specs, estimate_passive_session_bytes, estimate_sample_breakdown, inventory_overview_lines, run_stage0_logger
 from .sweep import RF_PV_NAME, SweepRuntimeConfig, build_plan_from_hz, estimate_sweep_session_bytes, preview_lines, run_rf_sweep_session
 
 try:  # pragma: no cover - depends on host GUI packages
@@ -109,6 +109,7 @@ class SSMBGui:
         self.monitor_thread: Optional[threading.Thread] = None
         self.monitor_stop_event: Optional[threading.Event] = None
         self.monitor_history = collections.deque(maxlen=2400)
+        self.monitor_derived_context = None
         self._monitor_message_lock = threading.Lock()
         self._pending_monitor_payload = None
         self._monitor_update_queued = False
@@ -224,6 +225,7 @@ class SSMBGui:
         self.note_var = tk.StringVar(value="")
         self.laser_shots_var = tk.StringVar(value="0")
         self.output_dir_var = tk.StringVar(value=str(SSMB_ROOT / ".ssmb_local" / "ssmb_stage0"))
+        self.lattice_model_var = tk.StringVar(value="")
         self.include_bpm_buffer_var = tk.BooleanVar(value=True)
         self.include_candidate_bpm_var = tk.BooleanVar(value=True)
         self.include_ring_bpm_var = tk.BooleanVar(value=True)
@@ -531,6 +533,28 @@ class SSMBGui:
         clipped = list(values[-window_samples:])
         return _downsample_tail(clipped, max_points)
 
+    def _delta_variant_estimates(self):
+        sample = self.latest_monitor_sample or {}
+        channels = sample.get("channels", {}) or {}
+        context = self.monitor_derived_context or {}
+        refs = context.get("l4_bpm_reference_mm", {}) or {}
+        variants = {}
+        subsets = {
+            "delta_s": dict(DEFAULT_L4_DISPERSION_M),
+            "delta_s_inner": {
+                "bpmz4l4rp_x": DEFAULT_L4_DISPERSION_M["bpmz4l4rp_x"],
+                "bpmz5l4rp_x": DEFAULT_L4_DISPERSION_M["bpmz5l4rp_x"],
+            },
+            "delta_s_outer": {
+                "bpmz3l4rp_x": DEFAULT_L4_DISPERSION_M["bpmz3l4rp_x"],
+                "bpmz6l4rp_x": DEFAULT_L4_DISPERSION_M["bpmz6l4rp_x"],
+            },
+        }
+        for key, dispersion_map in subsets.items():
+            value, used = _first_order_delta_from_bpms(channels, refs, dispersion_map)
+            variants[key] = {"value": value, "used": used}
+        return variants
+
     def _should_compute_extended_analysis(self) -> bool:
         for name in ("oscillation_window", "ssmb_study_window"):
             window = getattr(self, name, None)
@@ -641,6 +665,26 @@ class SSMBGui:
         config = self._collect_logger_config(allow_writes=False)
         _lattice, specs = build_specs(config)
         return _lattice, _filter_live_monitor_specs(specs, self._extra_monitor_labels())
+
+    def _available_lattice_exports(self):
+        exports = sorted(LATTICE_DIR.glob("*_export.json"))
+        return [path.resolve() for path in exports]
+
+    def _lattice_export_choices(self):
+        result = []
+        for path in self._available_lattice_exports():
+            label = path.stem.replace("mls_lattice_", "")
+            result.append((label, path))
+        return result
+
+    def _selected_lattice_export_path(self) -> Path:
+        var = getattr(self, "lattice_model_var", None)
+        current = ((var.get() if var is not None else "") or "").strip()
+        for label, path in self._lattice_export_choices():
+            if current == label:
+                return path
+        config = self._collect_logger_config(allow_writes=False)
+        return config.lattice_export
 
     def _open_candidate_picker(self) -> None:
         window = tk.Toplevel(self.root)
@@ -1213,6 +1257,7 @@ class SSMBGui:
                             for label in ("bpmz3l4rp_x", "bpmz4l4rp_x", "bpmz5l4rp_x", "bpmz6l4rp_x")
                         },
                     }
+                    self.monitor_derived_context = dict(derived_context)
                 self._debug("monitor sample %d capture complete" % sample_index)
                 self.monitor_history.append(sample)
                 self._trim_monitor_history()
@@ -2271,6 +2316,12 @@ class SSMBGui:
         if self.lattice_window is not None and self.lattice_window.winfo_exists():
             self.lattice_window.lift()
             return
+        if not self.lattice_model_var.get():
+            current_export = self._collect_logger_config(allow_writes=False).lattice_export
+            for label, path in self._lattice_export_choices():
+                if path == current_export:
+                    self.lattice_model_var.set(label)
+                    break
         config = self._lattice_inspection_config()
         lattice, specs = build_specs(config)
         window = tk.Toplevel(self.root)
@@ -2286,17 +2337,31 @@ class SSMBGui:
         side = ttk.Frame(outer)
         side.grid(row=0, column=1, sticky="nsew")
         side.columnconfigure(0, weight=1)
-        side.rowconfigure(0, weight=1)
-        side.rowconfigure(1, weight=0)
-        info = tk.Text(side, wrap="word", width=42, height=22)
-        info.grid(row=0, column=0, sticky="nsew")
+        side.rowconfigure(1, weight=1)
+        side.rowconfigure(2, weight=0)
+        side.rowconfigure(3, weight=0)
+        controls = ttk.Frame(side)
+        controls.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        controls.columnconfigure(1, weight=1)
+        ttk.Label(controls, text="Lattice model").grid(row=0, column=0, sticky="w")
+        model_box = ttk.Combobox(controls, textvariable=self.lattice_model_var, state="readonly", width=28)
+        model_box["values"] = [label for label, _path in self._lattice_export_choices()]
+        model_box.grid(row=0, column=1, sticky="ew", padx=(6, 6))
+        model_box.bind("<<ComboboxSelected>>", lambda _event: self._reload_lattice_model())
+        ttk.Button(controls, text="Reload model", command=self._reload_lattice_model).grid(row=0, column=2, padx=(0, 6))
+        ttk.Button(controls, text="Save machine snapshot…", command=self._save_lattice_snapshot).grid(row=0, column=3)
+        info = tk.Text(side, wrap="word", width=42, height=18)
+        info.grid(row=1, column=0, sticky="nsew")
         info.configure(state="disabled")
         detail_canvas = tk.Canvas(side, bg="white", width=360, height=190, highlightthickness=1, highlightbackground="#cfd8dc")
-        detail_canvas.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        detail_canvas.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        optics_canvas = tk.Canvas(side, bg="white", width=360, height=220, highlightthickness=1, highlightbackground="#cfd8dc")
+        optics_canvas.grid(row=3, column=0, sticky="ew", pady=(8, 0))
         self.lattice_window = window
         self.lattice_canvas = canvas
         self.lattice_info_text = info
         self.lattice_detail_canvas = detail_canvas
+        self.lattice_optics_canvas = optics_canvas
         self.lattice_context = lattice
         self.lattice_specs = specs
         canvas.bind("<Button-1>", self._on_lattice_click)
@@ -2304,12 +2369,14 @@ class SSMBGui:
         window.protocol("WM_DELETE_WINDOW", self._close_lattice_window)
         window.update_idletasks()
         self._draw_lattice_view(lattice, specs)
+        self.selected_lattice_item_name = "Optics functions"
         self._refresh_lattice_view()
 
     def _lattice_inspection_config(self):
         base = self._collect_logger_config(allow_writes=False)
         return replace(
             base,
+            lattice_export=self._selected_lattice_export_path(),
             include_candidate_bpm_scalars=True,
             include_ring_bpm_scalars=True,
             include_quadrupoles=True,
@@ -2325,6 +2392,45 @@ class SSMBGui:
             if item.get("name") == "Temperature monitor":
                 self._show_lattice_item_info(item)
                 break
+
+    def _reload_lattice_model(self) -> None:
+        if self.lattice_window is None or not self.lattice_window.winfo_exists():
+            return
+        config = self._lattice_inspection_config()
+        lattice, specs = build_specs(config)
+        self.lattice_context = lattice
+        self.lattice_specs = specs
+        self.selected_lattice_item_name = "Optics functions"
+        self._draw_lattice_view(lattice, specs)
+        self._refresh_lattice_view()
+
+    def _save_lattice_snapshot(self) -> None:
+        snapshot = {
+            "timestamp_epoch_s": time.time(),
+            "lattice_model_label": self.lattice_model_var.get() or "current",
+            "lattice_export": str(self._selected_lattice_export_path()),
+            "monitor_interval_s": self._monitor_interval_seconds(),
+            "history_span_s": self._monitor_history_span_seconds(),
+            "latest_monitor_sample": self.latest_monitor_sample,
+            "latest_monitor_summary": self.latest_monitor_summary,
+            "live_spec_labels": sorted(self.live_spec_lookup.keys()),
+            "machine_notes": {
+                "purpose": "Control-room machine snapshot for offline lattice / pyAT refinement.",
+                "selected_lattice_item": self.selected_lattice_item_name,
+            },
+        }
+        path = None
+        if filedialog is not None:
+            path = filedialog.asksaveasfilename(
+                title="Save machine snapshot",
+                defaultextension=".json",
+                initialfile="ssmb_machine_snapshot.json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            )
+        if not path:
+            return
+        Path(path).write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+        self._append_log("Saved machine snapshot to %s" % path)
 
     def _on_lattice_canvas_configure(self, _event=None) -> None:
         if self.lattice_context is None or self.lattice_specs is None:
@@ -2786,6 +2892,7 @@ class SSMBGui:
             )
         self._set_text_widget(self.lattice_info_text, lines)
         self._draw_lattice_item_history(item)
+        self._draw_lattice_optics_overview(item)
 
     def _draw_lattice_item_history(self, item: dict) -> None:
         canvas = getattr(self, "lattice_detail_canvas", None)
@@ -2903,6 +3010,41 @@ class SSMBGui:
                 "QPD01 beam proxy",
             )
 
+    def _draw_lattice_optics_overview(self, item: dict) -> None:
+        canvas = getattr(self, "lattice_optics_canvas", None)
+        if canvas is None:
+            return
+        canvas.delete("all")
+        width = int(canvas.winfo_width() or 360)
+        height = int(canvas.winfo_height() or 220)
+        optics = (self.lattice_context.optics_samples if self.lattice_context is not None else {}) or {}
+        if not optics:
+            canvas.create_rectangle(10, 10, width - 10, height - 10, outline="#cfd8dc")
+            canvas.create_text(width / 2, height / 2, text="No bundled optics samples available", fill="#90a4ae")
+            return
+        payload = [
+            ("βx [m]", list(optics.get("beta_x_m", [])), "#1d3557"),
+            ("βy [m]", list(optics.get("beta_y_m", [])), "#d62828"),
+            ("ηx [m]", list(optics.get("eta_x_m", [])), "#2a9d8f"),
+            ("ηy [m]", list(optics.get("eta_y_m", [])), "#8e24aa"),
+        ]
+        beta_z_like = list(optics.get("beta_z_like_m", []))
+        if beta_z_like:
+            payload.append(("βz-like [m]", beta_z_like, "#6d4c41"))
+        actual_samples = max((len(values) for _label, values, _color in payload), default=0)
+        self._draw_multi_series(
+            canvas,
+            payload,
+            10,
+            10,
+            width - 10,
+            height - 10,
+            max(20, actual_samples),
+            actual_samples=actual_samples,
+            independent_scales=True,
+        )
+        canvas.create_text(width / 2, 12, anchor="n", text="Bundled lattice optics overview", fill="#37474f", font=("Helvetica", 10, "bold"))
+
     def _history_series_for_label(self, label):
         if not label:
             return None
@@ -2922,6 +3064,7 @@ class SSMBGui:
         self.lattice_canvas = None
         self.lattice_info_text = None
         self.lattice_detail_canvas = None
+        self.lattice_optics_canvas = None
         self.lattice_context = None
         self.lattice_specs = None
         self.lattice_device_items = []
@@ -3345,6 +3488,7 @@ class SSMBGui:
         beam_stability = safe_summary.get("beam_stability", {}) or {}
         phase_quality = safe_summary.get("phase_scan_quality", {}) or {}
         sweep_detection = safe_summary.get("rf_sweep_detection", {}) or {}
+        delta_variants = self._delta_variant_estimates()
         if getattr(self, "ssmb_study_rf_state", None) is not None:
             active = bool(sweep_detection.get("active"))
             self.ssmb_study_rf_state.configure(
@@ -3355,6 +3499,20 @@ class SSMBGui:
         if self.ssmb_study_table is not None and self.ssmb_study_table.winfo_exists():
             rows = [
                 ("delta_s", quantity_defs["delta_s"]),
+                ("delta_s_inner", {
+                    "label": "δₛ inner pair",
+                    "raw": "BPMZ4L4RP + BPMZ5L4RP",
+                    "derived": "L4 inner-pair cross-check",
+                    "current": lambda current, sweep, osc, res, quality: self._format_plot_value((delta_variants.get("delta_s_inner") or {}).get("value")),
+                    "plot_keys": ["delta_s", "beam_energy_mev", "rf_offset_hz"],
+                }),
+                ("delta_s_outer", {
+                    "label": "δₛ outer pair",
+                    "raw": "BPMZ3L4RP + BPMZ6L4RP",
+                    "derived": "L4 outer-pair cross-check",
+                    "current": lambda current, sweep, osc, res, quality: self._format_plot_value((delta_variants.get("delta_s_outer") or {}).get("value")),
+                    "plot_keys": ["delta_s", "beam_energy_mev", "rf_offset_hz"],
+                }),
                 ("eta", quantity_defs["eta"]),
                 ("alpha0_bpm", quantity_defs["alpha0_bpm"]),
                 ("alpha0_legacy", quantity_defs["alpha0_legacy"]),
