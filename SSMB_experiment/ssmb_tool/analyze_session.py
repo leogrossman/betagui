@@ -107,7 +107,7 @@ def _extract_phase_samples(samples: Sequence[Dict[str, object]], phase: str = "s
 def _linear_fit(x: Sequence[float], y: Sequence[float]) -> Optional[Dict[str, float]]:
     x_arr = np.asarray(x, dtype=float)
     y_arr = np.asarray(y, dtype=float)
-    if x_arr.size < 3 or x_arr.size != y_arr.size or np.allclose(x_arr, x_arr[0]):
+    if x_arr.size < 3 or x_arr.size != y_arr.size or float(np.max(x_arr) - np.min(x_arr)) == 0.0:
         return None
     design = np.column_stack((x_arr, np.ones_like(x_arr)))
     coeffs, _, _, _ = np.linalg.lstsq(design, y_arr, rcond=None)

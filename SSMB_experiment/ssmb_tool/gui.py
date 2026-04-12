@@ -596,7 +596,7 @@ class SSMBGui:
             text.configure(state="disabled")
             self.monitor_section_widgets.append((card, text))
         ttk.Label(right, text="Rolling SSMB monitor trends").grid(row=0, column=0, sticky="w")
-        self.monitor_plot_canvas = tk.Canvas(right, bg="white", width=440, height=260)
+        self.monitor_plot_canvas = tk.Canvas(right, bg="white", width=440, height=360)
         self.monitor_plot_canvas.grid(row=1, column=0, sticky="ew")
         ttk.Label(right, text="Theory and equations").grid(row=2, column=0, sticky="w", pady=(8, 0))
         self.monitor_equations_text = tk.Text(right, wrap="word", height=10)
@@ -666,6 +666,7 @@ class SSMBGui:
         height = int(canvas.winfo_height() or 260)
         self._draw_series(canvas, trend_data.get("rf_offset_hz", []), 20, 20, width - 20, 110, "#1e88e5", "ΔfRF [Hz]")
         self._draw_series(canvas, trend_data.get("delta_s", []), 20, 140, width - 20, 230, "#43a047", "δₛ")
+        self._draw_series(canvas, trend_data.get("p1_h1_ampl_avg", []), 20, 240, width - 20, 330, "#8e24aa", "P1 avg")
         legacy = trend_data.get("legacy_alpha0", [])
         bpm_summary = self.latest_monitor_summary or {}
         bpm_alpha = ((bpm_summary.get("rf_sweep_metrics") or {}).get("alpha0_from_bpm_eta"))

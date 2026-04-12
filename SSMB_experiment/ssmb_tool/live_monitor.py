@@ -41,6 +41,7 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
     summary: Dict[str, object] = {
         "current": {
             "rf_readback_khz": _valid_float(derived.get("rf_readback")),
+            "rf_readback_499mhz_khz": _valid_float(channels.get("rf_readback_499mhz", {}).get("value")),
             "rf_offset_hz": _valid_float(derived.get("rf_offset_hz")),
             "delta_l4_bpm_first_order": _valid_float(derived.get("delta_l4_bpm_first_order")),
             "beam_energy_from_bpm_mev": _valid_float(derived.get("beam_energy_from_bpm_mev")),
@@ -52,13 +53,20 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
             "tune_s_unitless": _valid_float(derived.get("tune_s_unitless")),
             "tune_s_khz": _valid_float(derived.get("tune_s_khz")),
             "beam_current": _valid_float(channels.get("beam_current", {}).get("value")),
+            "beam_current_scope": _valid_float(channels.get("beam_current_scope", {}).get("value")),
             "qpd_l4_sigma_x_mm": _valid_float(derived.get("qpd_l4_sigma_x_mm")),
             "qpd_l4_sigma_y_mm": _valid_float(derived.get("qpd_l4_sigma_y_mm")),
+            "p1_h1_ampl": _valid_float(channels.get("p1_h1_ampl", {}).get("value")),
+            "p1_h1_ampl_avg": _valid_float(channels.get("p1_h1_ampl_avg", {}).get("value")),
+            "p1_h1_ampl_dev": _valid_float(channels.get("p1_h1_ampl_dev", {}).get("value")),
+            "p3_h1_ampl": _valid_float(channels.get("p3_h1_ampl", {}).get("value")),
+            "p3_h1_ampl_avg": _valid_float(channels.get("p3_h1_ampl_avg", {}).get("value")),
             "nonlinear_bpms": list(derived.get("bpm_x_nonlinear_labels") or []),
         },
         "bump_state": bump,
         "what_can_be_measured_now": [
             "Passive readout: tunes, synchrotron monitor, beam current, orbit BPMs, QPD beam-size proxies, bump states, cavity voltage, beam energy readback.",
+            "Passive readout of coherent-light observables P1 and P3 from the scope channels.",
             "From passive L4 BPM orbit: first-order delta_s and BPM-based beam energy shift relative to the monitor baseline.",
             "From QPD00ZL4RP sigma_x: first-order momentum spread proxy and corresponding sigma_E estimate.",
             "From the 4-corrector bump PVs: whether the L4 bump is active, and whether bump feedback is enabled.",
@@ -67,6 +75,7 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
             "Slip factor eta from fitted RF-vs-delta_s slope.",
             "Alpha0 from alpha0 = eta + 1/gamma^2 using reconstructed delta_s rather than RF alone.",
             "Tune slopes versus delta_s as chromaticity cross-checks in x, y, and synchrotron channels.",
+            "P1 and P3 versus f_RF or versus delta_s as the key SSMB observables during the sweep.",
         ],
     }
 
@@ -79,18 +88,27 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
     qx_series = []
     qy_series = []
     qs_series = []
+    p1_series = []
+    p1_avg_series = []
+    p3_series = []
     for sample in samples:
         d = _valid_float(sample.get("derived", {}).get("delta_l4_bpm_first_order"))
         rf = _valid_float(sample.get("derived", {}).get("rf_readback"))
         qx = _valid_float(sample.get("derived", {}).get("tune_x_unitless"))
         qy = _valid_float(sample.get("derived", {}).get("tune_y_unitless"))
         qs = _valid_float(sample.get("derived", {}).get("tune_s_unitless"))
+        p1 = _valid_float(sample.get("channels", {}).get("p1_h1_ampl", {}).get("value"))
+        p1_avg = _valid_float(sample.get("channels", {}).get("p1_h1_ampl_avg", {}).get("value"))
+        p3 = _valid_float(sample.get("channels", {}).get("p3_h1_ampl", {}).get("value"))
         if d is not None and rf is not None:
             delta_series.append(d)
             rf_series.append(rf)
             qx_series.append((d, qx))
             qy_series.append((d, qy))
             qs_series.append((d, qs))
+            p1_series.append((d, p1, rf))
+            p1_avg_series.append((d, p1_avg, rf))
+            p3_series.append((d, p3, rf))
     if len(delta_series) >= 3 and sweep_state["active"]:
         slip = fit_slip_factor(delta_series, rf_series)
         beam_energy_mev = _valid_float(channels.get("beam_energy_mev", {}).get("value"))
@@ -107,6 +125,12 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
             "sample_count": len(delta_series),
             "legacy_alpha0_current": legacy_alpha,
             "alpha0_difference": None if legacy_alpha is None or alpha_bpm is None else legacy_alpha - alpha_bpm,
+            "p1_vs_delta": _linear_fit([x for x, y, _rf in p1_series if y is not None], [y for _x, y, _rf in p1_series if y is not None]),
+            "p1_avg_vs_delta": _linear_fit([x for x, y, _rf in p1_avg_series if y is not None], [y for _x, y, _rf in p1_avg_series if y is not None]),
+            "p3_vs_delta": _linear_fit([x for x, y, _rf in p3_series if y is not None], [y for _x, y, _rf in p3_series if y is not None]),
+            "p1_vs_rf": _linear_fit([rf for _x, y, rf in p1_series if y is not None], [y for _x, y, rf in p1_series if y is not None]),
+            "p1_avg_vs_rf": _linear_fit([rf for _x, y, rf in p1_avg_series if y is not None], [y for _x, y, rf in p1_avg_series if y is not None]),
+            "p3_vs_rf": _linear_fit([rf for _x, y, rf in p3_series if y is not None], [y for _x, y, rf in p3_series if y is not None]),
         }
     summary["rf_sweep_metrics"] = sweep_metrics
     summary["alpha_assessment"] = assess_alpha_monitor(summary)
@@ -159,6 +183,9 @@ def extract_trend_data(samples: Sequence[Dict[str, object]]) -> Dict[str, List[O
         "legacy_alpha0": [_valid_float(sample.get("derived", {}).get("legacy_alpha0_corrected")) for sample in history],
         "beam_energy_mev": [_valid_float(sample.get("derived", {}).get("beam_energy_from_bpm_mev")) for sample in history],
         "sigma_delta": [_valid_float(sample.get("derived", {}).get("qpd_l4_sigma_delta_first_order")) for sample in history],
+        "p1_h1_ampl": [_valid_float(sample.get("channels", {}).get("p1_h1_ampl", {}).get("value")) for sample in history],
+        "p1_h1_ampl_avg": [_valid_float(sample.get("channels", {}).get("p1_h1_ampl_avg", {}).get("value")) for sample in history],
+        "p3_h1_ampl": [_valid_float(sample.get("channels", {}).get("p3_h1_ampl", {}).get("value")) for sample in history],
     }
 
 
@@ -173,7 +200,9 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
             "color": "green" if not current.get("nonlinear_bpms") else "yellow",
             "rows": [
                 ("Beam current", "%s mA" % _fmt(current.get("beam_current"))),
+                ("Beam current (scope)", "%s µA" % _fmt(current.get("beam_current_scope"))),
                 ("RF readback", "%s kHz" % _fmt(current.get("rf_readback_khz"))),
+                ("RF rdFrq499", "%s kHz" % _fmt(current.get("rf_readback_499mhz_khz"))),
                 ("RF offset", "%s Hz" % _fmt(current.get("rf_offset_hz"))),
                 ("L4 bump", "%s" % bump.get("state_label", "unknown")),
                 ("Bump max |I|", "%s A" % _fmt(bump.get("max_abs_corrector_a"))),
@@ -181,6 +210,24 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
             ],
             "equations": [],
             "note": "This section is available even when no RF sweep is running.",
+        },
+        {
+            "title": "Coherent Light Monitor",
+            "color": "green" if current.get("p1_h1_ampl") is not None or current.get("p1_h1_ampl_avg") is not None else "yellow",
+            "rows": [
+                ("P1 live", _fmt(current.get("p1_h1_ampl"))),
+                ("P1 avg", _fmt(current.get("p1_h1_ampl_avg"))),
+                ("P1 std", _fmt(current.get("p1_h1_ampl_dev"))),
+                ("P3 live", _fmt(current.get("p3_h1_ampl"))),
+                ("P3 avg", _fmt(current.get("p3_h1_ampl_avg"))),
+                ("dP1/dδ", _fmt((sweep.get("p1_vs_delta") or {}).get("slope"))),
+                ("dP1/dfRF", _fmt((sweep.get("p1_vs_rf") or {}).get("slope"))),
+            ],
+            "equations": [
+                "P1 = coherent-light harmonic observable measured during the RF sweep",
+                "Track P1(f_RF) and P1(δₛ) together with α₀ and η",
+            ],
+            "note": "For this experiment, P1 versus f_RF is the key observable. Compare it against BPM-derived δₛ and phase-slip fits.",
         },
         {
             "title": "Energy And Momentum",
@@ -262,12 +309,15 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
             "",
             "Current readout:",
             "RF readback: %s kHz" % _fmt(current.get("rf_readback_khz")),
+            "RF rdFrq499: %s kHz" % _fmt(current.get("rf_readback_499mhz_khz")),
             "RF offset: %s Hz" % _fmt(current.get("rf_offset_hz")),
             "delta_s from L4 BPMs: %s" % _fmt(current.get("delta_l4_bpm_first_order")),
             "BPM-based beam energy: %s MeV" % _fmt(current.get("beam_energy_from_bpm_mev")),
             "QPD00 sigma_delta proxy: %s" % _fmt(current.get("qpd_l4_sigma_delta_first_order")),
             "QPD00 sigma_E proxy: %s MeV" % _fmt(current.get("qpd_l4_sigma_energy_mev")),
             "Legacy alpha0 shortcut: %s" % _fmt(current.get("legacy_alpha0_corrected")),
+            "P1 live / avg / std: %s / %s / %s" % (_fmt(current.get("p1_h1_ampl")), _fmt(current.get("p1_h1_ampl_avg")), _fmt(current.get("p1_h1_ampl_dev"))),
+            "P3 live / avg: %s / %s" % (_fmt(current.get("p3_h1_ampl")), _fmt(current.get("p3_h1_ampl_avg"))),
             "Tunes (x, y, s): %s, %s, %s" % (
                 _fmt(current.get("tune_x_unitless")),
                 _fmt(current.get("tune_y_unitless")),
@@ -299,6 +349,9 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
                 "alpha0 from BPM eta: %s" % _fmt(sweep_metrics.get("alpha0_from_bpm_eta")),
                 "legacy alpha0 shortcut: %s" % _fmt(sweep_metrics.get("legacy_alpha0_current")),
                 "legacy - BPM alpha0: %s" % _fmt(sweep_metrics.get("alpha0_difference")),
+                "P1 vs f_RF slope: %s" % _fmt((sweep_metrics.get("p1_vs_rf") or {}).get("slope")),
+                "P1 vs δ slope: %s" % _fmt((sweep_metrics.get("p1_vs_delta") or {}).get("slope")),
+                "P3 vs f_RF slope: %s" % _fmt((sweep_metrics.get("p3_vs_rf") or {}).get("slope")),
                 "Qx vs delta slope: %s" % _fmt((sweep_metrics.get("qx_vs_delta") or {}).get("slope")),
                 "Qy vs delta slope: %s" % _fmt((sweep_metrics.get("qy_vs_delta") or {}).get("slope")),
                 "Qs vs delta slope: %s" % _fmt((sweep_metrics.get("qs_vs_delta") or {}).get("slope")),

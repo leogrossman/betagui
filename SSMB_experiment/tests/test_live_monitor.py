@@ -23,6 +23,13 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
                     "channels": {
                         "beam_energy_mev": {"value": 250.0},
                         "beam_current": {"value": 4.2},
+                        "beam_current_scope": {"value": 512.293},
+                        "rf_readback_499mhz": {"value": 685.685},
+                        "p1_h1_ampl": {"value": 0.035 + 0.005 * index},
+                        "p1_h1_ampl_avg": {"value": 0.061 + 0.006 * index},
+                        "p1_h1_ampl_dev": {"value": 0.018},
+                        "p3_h1_ampl": {"value": 0.019 + 0.002 * index},
+                        "p3_h1_ampl_avg": {"value": 0.006 + 0.001 * index},
                         "l4_bump_hcorr_k3_upstream": {"value": 0.0},
                         "l4_bump_hcorr_l4_upstream": {"value": 0.0},
                         "l4_bump_hcorr_l4_downstream": {"value": 0.0},
@@ -52,6 +59,8 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         self.assertTrue(summary["rf_sweep_metrics"]["available"])
         self.assertIsNotNone(summary["rf_sweep_metrics"]["phase_slip_factor_eta"])
         self.assertIsNotNone(summary["rf_sweep_metrics"]["alpha0_from_bpm_eta"])
+        self.assertIsNotNone(summary["rf_sweep_metrics"]["p1_vs_rf"])
+        self.assertIsNotNone(summary["rf_sweep_metrics"]["p1_vs_delta"])
 
     def test_summarize_live_monitor_detects_bump_state(self):
         sample = {
@@ -106,6 +115,8 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         alpha_section = [section for section in sections if section["title"] == "α₀ And Phase Slip"][0]
         self.assertIn("α₀ = η + 1/γ²", alpha_section["equations"])
         self.assertTrue(any(label == "BPM α₀" for label, _value in alpha_section["rows"]))
+        light_section = [section for section in sections if section["title"] == "Coherent Light Monitor"][0]
+        self.assertTrue(any(label == "P1 avg" for label, _value in light_section["rows"]))
 
 
 if __name__ == "__main__":
