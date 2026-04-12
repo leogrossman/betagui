@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import queue
 import shutil
 import threading
+import time
 from pathlib import Path
 from typing import Optional, Sequence
 
 from .config import LoggerConfig, SSMB_ROOT, parse_labeled_pvs
 from .epics_io import EpicsUnavailableError, ReadOnlyEpicsAdapter
+from .live_monitor import format_channel_snapshot, format_monitor_summary, summarize_live_monitor
 from .log_now import BPM_NONLINEAR_MM, BPM_WARNING_MM, build_specs, estimate_passive_session_bytes, inventory_overview_lines, run_stage0_logger
 from .sweep import RF_PV_NAME, SweepRuntimeConfig, build_plan_from_hz, estimate_sweep_session_bytes, preview_lines, run_rf_sweep_session
 
@@ -39,6 +42,10 @@ class SSMBGui:
         self.start_safe_mode = start_safe_mode
         self.queue: "queue.Queue[object]" = queue.Queue()
         self.worker: Optional[threading.Thread] = None
+        self.monitor_thread: Optional[threading.Thread] = None
+        self.monitor_stop_event: Optional[threading.Event] = None
+        self.monitor_history = collections.deque(maxlen=120)
+        self.monitor_window: Optional["tk.Toplevel"] = None
         self.stage0_stop_event: Optional[threading.Event] = None
         self._build_vars()
         self._build_ui()
@@ -70,6 +77,7 @@ class SSMBGui:
         self.settle_var = tk.StringVar(value="1.0")
         self.samples_per_point_var = tk.StringVar(value="1")
         self.sample_spacing_var = tk.StringVar(value="0.0")
+        self.monitor_interval_var = tk.StringVar(value="0.5")
 
     def _build_ui(self) -> None:
         self.root.title("SSMB Experiment Stage 0 / RF Sweep")
@@ -87,11 +95,14 @@ class SSMBGui:
         notebook = ttk.Notebook(control)
         notebook.pack(fill="both", expand=False)
 
+        monitor_frame = ttk.Frame(notebook, padding=8)
         logger_frame = ttk.Frame(notebook, padding=8)
         sweep_frame = ttk.Frame(notebook, padding=8)
+        notebook.add(monitor_frame, text="Live Monitor")
         notebook.add(logger_frame, text="Stage 0 Logger")
         notebook.add(sweep_frame, text="RF Sweep")
 
+        self._build_monitor_tab(monitor_frame)
         self._build_logger_tab(logger_frame)
         self._build_sweep_tab(sweep_frame)
 
@@ -186,6 +197,38 @@ class SSMBGui:
         self.stop_manual_button = ttk.Button(button_row, text="Stop Manual Log", command=self._stop_manual_stage0)
         self.stop_manual_button.pack(side="left", padx=6)
         self.stop_manual_button.state(["disabled"])
+
+    def _build_monitor_tab(self, frame: "ttk.Frame") -> None:
+        row = 0
+        info = "Read-only live SSMB monitor. Use this before the experiment or during another operator's RF sweep to preview the same observables without saving data."
+        ttk.Label(frame, text=info, wraplength=380, justify="left").grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        row += 1
+        ttk.Label(frame, text="Monitor interval [s]").grid(row=row, column=0, sticky="w")
+        ttk.Entry(frame, textvariable=self.monitor_interval_var, width=12).grid(row=row, column=1, sticky="w", pady=2)
+        row += 1
+        button_row = ttk.Frame(frame)
+        button_row.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 8))
+        self.start_monitor_button = ttk.Button(button_row, text="Start Live Monitor", command=self._start_monitor)
+        self.start_monitor_button.pack(side="left")
+        self.stop_monitor_button = ttk.Button(button_row, text="Stop Live Monitor", command=self._stop_monitor)
+        self.stop_monitor_button.pack(side="left", padx=6)
+        self.stop_monitor_button.state(["disabled"])
+        ttk.Button(button_row, text="Reset Monitor Baseline", command=self._reset_monitor_baseline).pack(side="left")
+        ttk.Button(button_row, text="Open Monitor Window", command=self._open_monitor_window).pack(side="left", padx=6)
+        row += 1
+        ttk.Label(frame, text="Live SSMB summary").grid(row=row, column=0, columnspan=3, sticky="w")
+        row += 1
+        self.monitor_summary_text = tk.Text(frame, wrap="word", height=18)
+        self.monitor_summary_text.grid(row=row, column=0, columnspan=3, sticky="nsew")
+        self.monitor_summary_text.configure(state="disabled")
+        row += 1
+        ttk.Label(frame, text="Current channel snapshot").grid(row=row, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        row += 1
+        self.monitor_channels_text = tk.Text(frame, wrap="none", height=16)
+        self.monitor_channels_text.grid(row=row, column=0, columnspan=3, sticky="nsew")
+        self.monitor_channels_text.configure(state="disabled")
+        frame.rowconfigure(row - 1, weight=1)
+        frame.columnconfigure(2, weight=1)
 
     def _build_sweep_tab(self, frame: "ttk.Frame") -> None:
         row = 0
@@ -343,6 +386,12 @@ class SSMBGui:
         self.inventory_text.insert("1.0", "\n".join(lines))
         self.inventory_text.configure(state="disabled")
 
+    def _set_text_widget(self, widget: "tk.Text", lines: list[str]) -> None:
+        widget.configure(state="normal")
+        widget.delete("1.0", "end")
+        widget.insert("1.0", "\n".join(lines))
+        widget.configure(state="disabled")
+
     def _drain_queue(self) -> None:
         while True:
             try:
@@ -357,6 +406,13 @@ class SSMBGui:
                     self.start_manual_button.state(["!disabled"])
                     self.stop_manual_button.state(["disabled"])
                     self._append_log("Manual logging task finalized.")
+                elif message.get("kind") == "monitor_update":
+                    self._update_live_monitor(message)
+                elif message.get("kind") == "monitor_done":
+                    self.monitor_stop_event = None
+                    self.start_monitor_button.state(["!disabled"])
+                    self.stop_monitor_button.state(["disabled"])
+                    self._append_log("Live monitor stopped.")
             else:
                 self._append_log(str(message))
         self.root.after(100, self._drain_queue)
@@ -398,6 +454,19 @@ class SSMBGui:
                 self.bpm_status_text.insert("end", "- %s\n" % label, "red")
         self.bpm_status_text.configure(state="disabled")
 
+    def _update_live_monitor(self, payload: dict) -> None:
+        summary_lines = payload.get("summary_lines", [])
+        channel_lines = payload.get("channel_lines", [])
+        self._set_text_widget(self.monitor_summary_text, summary_lines)
+        self._set_text_widget(self.monitor_channels_text, channel_lines)
+        if self.monitor_window is not None and self.monitor_window.winfo_exists():
+            summary_widget = getattr(self, "monitor_window_summary_text", None)
+            channel_widget = getattr(self, "monitor_window_channels_text", None)
+            if summary_widget is not None:
+                self._set_text_widget(summary_widget, summary_lines)
+            if channel_widget is not None:
+                self._set_text_widget(channel_widget, channel_lines)
+
     def _run_in_worker(self, target, *args) -> None:
         if self.worker is not None and self.worker.is_alive():
             self._emit("Another SSMB task is still running.")
@@ -411,6 +480,111 @@ class SSMBGui:
 
         self.worker = threading.Thread(target=runner, daemon=True)
         self.worker.start()
+
+    def _start_monitor(self) -> None:
+        if self.monitor_thread is not None and self.monitor_thread.is_alive():
+            self._append_log("Live monitor is already running.")
+            return
+        interval = float(self.monitor_interval_var.get())
+        if interval <= 0.0:
+            raise ValueError("Monitor interval must be positive.")
+        self.monitor_history.clear()
+        self.monitor_stop_event = threading.Event()
+        self.start_monitor_button.state(["disabled"])
+        self.stop_monitor_button.state(["!disabled"])
+        self.monitor_thread = threading.Thread(target=self._monitor_loop, args=(interval,), daemon=True)
+        self.monitor_thread.start()
+        self._append_log("Started live read-only SSMB monitor.")
+
+    def _stop_monitor(self) -> None:
+        if self.monitor_stop_event is None:
+            self._append_log("Live monitor is not running.")
+            return
+        self.monitor_stop_event.set()
+        self._append_log("Stopping live monitor after the current sample.")
+
+    def _reset_monitor_baseline(self) -> None:
+        self.monitor_history.clear()
+        self._append_log("Live monitor baseline/history cleared.")
+
+    def _monitor_loop(self, interval: float) -> None:
+        try:
+            config = self._collect_logger_config(allow_writes=False)
+            adapter = ReadOnlyEpicsAdapter(timeout=config.timeout_seconds)
+            _lattice, specs = build_specs(config)
+            sample_index = 0
+            start = time.monotonic()
+            derived_context = None
+            while self.monitor_stop_event is not None and not self.monitor_stop_event.is_set():
+                sample = self._capture_monitor_sample(adapter, specs, sample_index, time.monotonic() - start, derived_context)
+                if derived_context is None:
+                    derived_context = {
+                        "rf_reference_khz": sample.get("derived", {}).get("rf_readback"),
+                        "l4_bpm_reference_mm": {
+                            label: sample.get("channels", {}).get(label, {}).get("value")
+                            for label in ("bpmz3l4rp_x", "bpmz4l4rp_x", "bpmz5l4rp_x", "bpmz6l4rp_x")
+                        },
+                    }
+                self.monitor_history.append(sample)
+                summary = summarize_live_monitor(list(self.monitor_history))
+                self.queue.put(
+                    {
+                        "kind": "monitor_update",
+                        "summary_lines": format_monitor_summary(summary),
+                        "channel_lines": format_channel_snapshot(sample),
+                    }
+                )
+                sample_index += 1
+                if self.monitor_stop_event.wait(interval):
+                    break
+        except Exception as exc:
+            self.queue.put("Live monitor failed: %s" % exc)
+        finally:
+            self.queue.put({"kind": "monitor_done"})
+
+    def _capture_monitor_sample(self, adapter, specs, sample_index: int, t_rel_s: float, derived_context):
+        from .log_now import capture_sample
+
+        return capture_sample(
+            adapter,
+            specs,
+            sample_index=sample_index,
+            t_rel_s=t_rel_s,
+            extra_fields={"phase": "live_monitor"},
+            derived_context=derived_context,
+        )
+
+    def _open_monitor_window(self) -> None:
+        if self.monitor_window is not None and self.monitor_window.winfo_exists():
+            self.monitor_window.lift()
+            return
+        window = tk.Toplevel(self.root)
+        window.title("SSMB Live Monitor")
+        window.geometry("1100x800")
+        frame = ttk.Frame(window, padding=10)
+        frame.pack(fill="both", expand=True)
+        frame.rowconfigure(1, weight=1)
+        frame.rowconfigure(3, weight=1)
+        frame.columnconfigure(0, weight=1)
+        ttk.Label(frame, text="Live SSMB summary").grid(row=0, column=0, sticky="w")
+        self.monitor_window_summary_text = tk.Text(frame, wrap="word", height=18)
+        self.monitor_window_summary_text.grid(row=1, column=0, sticky="nsew")
+        self.monitor_window_summary_text.configure(state="disabled")
+        ttk.Label(frame, text="Current channel snapshot").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self.monitor_window_channels_text = tk.Text(frame, wrap="none", height=20)
+        self.monitor_window_channels_text.grid(row=3, column=0, sticky="nsew")
+        self.monitor_window_channels_text.configure(state="disabled")
+        self.monitor_window = window
+        self._set_text_widget(self.monitor_window_summary_text, self.monitor_summary_text.get("1.0", "end").splitlines())
+        self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
+        window.protocol("WM_DELETE_WINDOW", self._close_monitor_window)
+
+    def _close_monitor_window(self) -> None:
+        if self.monitor_window is not None and self.monitor_window.winfo_exists():
+            self.monitor_window.destroy()
+        self.monitor_window = None
+        self.monitor_window_summary_text = None
+        self.monitor_window_channels_text = None
 
     def _refresh_inventory(self) -> None:
         try:

@@ -40,6 +40,7 @@ and averages these BPMs for bump feedback:
 
 Compared with the baseline `SSMB/` tool, this experiment copy adds:
 
+- a read-only live monitor tab and pop-out window for pre-experiment viewing
 - preference for the bundled `ssmb_250mev` lattice export
 - live first-order `δ_s` reconstruction from the L4 BPM set
 - live slip-factor and BPM-based `α₀` estimates during RF sweeps
@@ -139,11 +140,52 @@ interpreter was:
 
 Suggested control-room order:
 
-1. `low_alpha`
-2. `bump_off`
-3. `bump_on`
-4. `rf_sweep_bump_off`
-5. `rf_sweep_bump_on`
+1. start the live monitor and inspect machine state before the experiment
+2. `low_alpha`
+3. `bump_off`
+4. `bump_on`
+5. `rf_sweep_bump_off`
+6. `rf_sweep_bump_on`
+
+Use the monitor tab when you want read-only live feedback without saving a
+session yet. Use logging or RF sweep mode only when you want a recorded
+measurement.
+
+## Live Monitor
+
+The `Live Monitor` tab is read-only and can be used even when the RF sweep is
+being driven elsewhere.
+
+It gives you:
+
+- live preview of the same core PVs without writing or saving
+- a full current channel snapshot for the configured logging profile
+- live `δ_s` estimate from the L4 BPM set
+- live BPM-based beam-energy estimate
+- live QPD00-based first-order `σ_δ` and `σ_E` proxies
+- live tune readout and synchrotron-monitor readout
+- automatic RF-motion detection
+- automatic live `η`, BPM-based `α₀`, and tune-vs-`δ` slope estimates once RF
+  motion is detected
+
+The pop-out monitor window is useful if you want the live readout on a second
+screen while using the logger or sweep tabs.
+
+What you can estimate without RF sweep:
+
+- tunes and synchrotron monitor
+- beam current
+- bump state and corrector state
+- L4 BPM orbit offsets
+- first-order `δ_s` relative to the monitor baseline
+- BPM-based beam energy shift
+- QPD00-based first-order momentum-spread proxy
+
+What becomes available once RF moves:
+
+- slip factor `η`
+- BPM-based `α₀`
+- tune slopes versus `δ_s` as chromaticity cross-checks
 
 Use the GUI presets and labels for three main jobs:
 
