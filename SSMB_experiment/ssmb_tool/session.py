@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import threading
 import time
 from dataclasses import dataclass, field
@@ -43,7 +44,15 @@ class SessionLogger:
         root_dir = Path(root) if root is not None else Path.cwd() / DEFAULT_LOG_DIRNAME
         session_name = "%s_%s_pid%s" % (prefix, time.strftime("%Y%m%d_%H%M%S"), os.getpid())
         session_dir = root_dir / session_name
-        session_dir.mkdir(parents=True, exist_ok=False)
+        suffix = 0
+        while True:
+            candidate = session_dir if suffix == 0 else root_dir / ("%s_%02d" % (session_name, suffix))
+            try:
+                candidate.mkdir(parents=True, exist_ok=False)
+                session_dir = candidate
+                break
+            except FileExistsError:
+                suffix += 1
         return cls(session_dir=session_dir, text_log_path=session_dir / "session.log")
 
     def log(self, message: str) -> None:
@@ -61,3 +70,17 @@ class SessionLogger:
                 json.dump(json_ready(payload), stream, indent=2, sort_keys=True)
                 stream.write("\n")
         return path
+
+    def append_jsonl(self, relative_name: str, payload: Any) -> Path:
+        path = self.session_dir / relative_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(json_ready(payload), sort_keys=True) + "\n")
+                stream.flush()
+        return path
+
+
+def disk_usage_summary(path: Path) -> Dict[str, int]:
+    usage = shutil.disk_usage(path)
+    return {"total_bytes": int(usage.total), "used_bytes": int(usage.used), "free_bytes": int(usage.free)}

@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import argparse
 import queue
+import shutil
 import threading
 from pathlib import Path
 from typing import Optional, Sequence
 
 from .config import LoggerConfig, SSMB_ROOT, parse_labeled_pvs
 from .epics_io import EpicsUnavailableError, ReadOnlyEpicsAdapter
-from .log_now import build_specs, inventory_overview_lines, run_stage0_logger
-from .sweep import RF_PV_NAME, SweepRuntimeConfig, build_plan_from_hz, preview_lines, run_rf_sweep_session
+from .log_now import BPM_NONLINEAR_MM, BPM_WARNING_MM, build_specs, estimate_passive_session_bytes, inventory_overview_lines, run_stage0_logger
+from .sweep import RF_PV_NAME, SweepRuntimeConfig, build_plan_from_hz, estimate_sweep_session_bytes, preview_lines, run_rf_sweep_session
 
 try:  # pragma: no cover - depends on host GUI packages
     import tkinter as tk
@@ -35,7 +36,7 @@ class SSMBGui:
     def __init__(self, root: "tk.Tk", allow_writes: bool = False):
         self.root = root
         self.allow_writes = allow_writes
-        self.queue: "queue.Queue[str]" = queue.Queue()
+        self.queue: "queue.Queue[object]" = queue.Queue()
         self.worker: Optional[threading.Thread] = None
         self._build_vars()
         self._build_ui()
@@ -92,7 +93,8 @@ class SSMBGui:
         right = ttk.Frame(outer)
         right.grid(row=0, column=1, sticky="nsew")
         right.rowconfigure(1, weight=1)
-        right.rowconfigure(3, weight=1)
+        right.rowconfigure(3, weight=0)
+        right.rowconfigure(5, weight=1)
         right.columnconfigure(0, weight=1)
 
         ttk.Label(right, text="Logged Channel Overview").grid(row=0, column=0, sticky="w")
@@ -100,9 +102,17 @@ class SSMBGui:
         self.inventory_text.grid(row=1, column=0, sticky="nsew")
         self.inventory_text.configure(state="disabled")
 
-        ttk.Label(right, text="Session / Run Log").grid(row=2, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(right, text="BPM Nonlinearity Watch").grid(row=2, column=0, sticky="w", pady=(10, 0))
+        self.bpm_status_text = tk.Text(right, wrap="none", height=10)
+        self.bpm_status_text.grid(row=3, column=0, sticky="nsew")
+        self.bpm_status_text.configure(state="disabled")
+        self.bpm_status_text.tag_configure("green", foreground="#1b5e20")
+        self.bpm_status_text.tag_configure("yellow", foreground="#8d6e00")
+        self.bpm_status_text.tag_configure("red", foreground="#b71c1c")
+
+        ttk.Label(right, text="Session / Run Log").grid(row=4, column=0, sticky="w", pady=(10, 0))
         self.log_text = tk.Text(right, wrap="word")
-        self.log_text.grid(row=3, column=0, sticky="nsew")
+        self.log_text.grid(row=5, column=0, sticky="nsew")
         self.log_text.configure(state="disabled")
 
     def _build_logger_tab(self, frame: "ttk.Frame") -> None:
@@ -274,11 +284,48 @@ class SSMBGui:
                 message = self.queue.get_nowait()
             except queue.Empty:
                 break
-            self._append_log(message)
+            if isinstance(message, dict) and message.get("kind") == "bpm_status":
+                self._update_bpm_status(message)
+            else:
+                self._append_log(str(message))
         self.root.after(100, self._drain_queue)
 
     def _emit(self, message: str) -> None:
         self.queue.put(message)
+
+    def _emit_bpm_status(self, sample: dict) -> None:
+        derived = sample.get("derived", {})
+        self.queue.put(
+            {
+                "kind": "bpm_status",
+                "sample_index": sample.get("sample_index"),
+                "phase": sample.get("phase", ""),
+                "entries": derived.get("bpm_x_status", []),
+                "nonlinear_labels": derived.get("bpm_x_nonlinear_labels", []),
+                "warning_mm": derived.get("bpm_x_warning_mm", BPM_WARNING_MM),
+                "nonlinear_mm": derived.get("bpm_x_nonlinear_mm", BPM_NONLINEAR_MM),
+            }
+        )
+
+    def _update_bpm_status(self, payload: dict) -> None:
+        entries = payload.get("entries", [])
+        warning_mm = payload.get("warning_mm", BPM_WARNING_MM)
+        nonlinear_mm = payload.get("nonlinear_mm", BPM_NONLINEAR_MM)
+        nonlinear = payload.get("nonlinear_labels", [])
+        self.bpm_status_text.configure(state="normal")
+        self.bpm_status_text.delete("1.0", "end")
+        self.bpm_status_text.insert("end", "Current horizontal BPM status\n")
+        self.bpm_status_text.insert("end", "yellow >= %.1f mm | red >= %.1f mm\n" % (warning_mm, nonlinear_mm))
+        self.bpm_status_text.insert("end", "sample %s phase=%s\n\n" % (payload.get("sample_index"), payload.get("phase")))
+        if not entries:
+            self.bpm_status_text.insert("end", "No BPM X values available yet.\n")
+        for entry in entries:
+            self.bpm_status_text.insert("end", "%s = %.3f mm\n" % (entry["label"], entry["value_mm"]), entry.get("severity", "green"))
+        if nonlinear:
+            self.bpm_status_text.insert("end", "\nNonlinear-range BPMs detected:\n", "red")
+            for label in nonlinear:
+                self.bpm_status_text.insert("end", "- %s\n" % label, "red")
+        self.bpm_status_text.configure(state="disabled")
 
     def _run_in_worker(self, target, *args) -> None:
         if self.worker is not None and self.worker.is_alive():
@@ -296,18 +343,32 @@ class SSMBGui:
 
     def _refresh_inventory(self) -> None:
         try:
-            _, specs = build_specs(self._collect_logger_config(allow_writes=False))
+            config = self._collect_logger_config(allow_writes=False)
+            _, specs = build_specs(config)
         except Exception as exc:
             self._set_inventory_text(["Could not build inventory: %s" % exc])
             return
-        self._set_inventory_text(inventory_overview_lines(specs))
+        lines = inventory_overview_lines(specs)
+        try:
+            estimate_bytes = estimate_passive_session_bytes(specs, config.duration_seconds, config.sample_hz)
+            disk = shutil.disk_usage(config.output_root if config.output_root.exists() else config.output_root.parent)
+            lines.extend(
+                [
+                    "",
+                    "Estimated passive-session size: %.2f MB" % (estimate_bytes / (1024.0 * 1024.0)),
+                    "Free space at output root: %.2f GB" % (disk.free / (1024.0 * 1024.0 * 1024.0)),
+                ]
+            )
+        except Exception:
+            pass
+        self._set_inventory_text(lines)
 
     def _run_stage0(self) -> None:
         config = self._collect_logger_config(allow_writes=False)
         self._run_in_worker(self._run_stage0_worker, config)
 
     def _run_stage0_worker(self, config: LoggerConfig) -> None:
-        session_dir = run_stage0_logger(config, progress_callback=self._emit)
+        session_dir = run_stage0_logger(config, progress_callback=self._emit, sample_callback=self._emit_bpm_status)
         self._emit("Stage 0 log saved to: %s" % session_dir)
 
     def _read_live_rf(self) -> None:
@@ -351,6 +412,19 @@ class SSMBGui:
         except Exception:
             current_rf = None
         lines = preview_lines(runtime.plan, current_rf)
+        try:
+            _, specs = build_specs(runtime.logger_config)
+            estimate_bytes = estimate_sweep_session_bytes(specs, runtime.plan)
+            disk = shutil.disk_usage(runtime.logger_config.output_root if runtime.logger_config.output_root.exists() else runtime.logger_config.output_root.parent)
+            lines.extend(
+                [
+                    "",
+                    "Estimated sweep size: %.2f MB" % (estimate_bytes / (1024.0 * 1024.0)),
+                    "Free space at output root: %.2f GB" % (disk.free / (1024.0 * 1024.0 * 1024.0)),
+                ]
+            )
+        except Exception:
+            pass
         self._set_inventory_text(lines)
         self._append_log("RF sweep preview updated.")
 
@@ -374,7 +448,7 @@ class SSMBGui:
         self._run_in_worker(self._run_sweep_worker, runtime)
 
     def _run_sweep_worker(self, runtime: SweepRuntimeConfig) -> None:
-        session_dir = run_rf_sweep_session(runtime, progress_callback=self._emit)
+        session_dir = run_rf_sweep_session(runtime, progress_callback=self._emit, sample_callback=self._emit_bpm_status)
         self._emit("RF sweep log saved to: %s" % session_dir)
 
 

@@ -12,8 +12,8 @@ import numpy as np
 from .analyze_session import alpha0_from_eta, fit_slip_factor
 from .config import LoggerConfig, parse_labeled_pvs
 from .epics_io import EpicsAdapter
-from .log_now import build_metadata, build_specs, capture_sample, write_session_outputs
-from .session import SessionLogger
+from .log_now import build_metadata, build_specs, capture_sample, estimate_sample_bytes, write_session_outputs
+from .session import SessionLogger, disk_usage_summary
 
 
 RF_PV_NAME = "MCLKHGP:setFrq"
@@ -113,6 +113,7 @@ def _sweep_sample_summary(sample: Dict[str, object], all_samples: Sequence[Dict[
     delta = derived.get("delta_l4_bpm_first_order")
     bpm_energy = derived.get("beam_energy_from_bpm_mev")
     alpha_old = derived.get("legacy_alpha0_corrected")
+    nonlinear = derived.get("bpm_x_nonlinear_labels") or []
 
     good_pairs = []
     for item in all_samples:
@@ -142,10 +143,17 @@ def _sweep_sample_summary(sample: Dict[str, object], all_samples: Sequence[Dict[
         "η=%.6e" % eta if eta is not None else "η=n/a",
         "α0_BPM=%.6e" % alpha_bpm if alpha_bpm is not None else "α0_BPM=n/a",
     ]
+    if nonlinear:
+        parts.append("nonlinear_bpms=%s" % ",".join(nonlinear))
     return " | ".join(parts)
 
 
-def run_rf_sweep_session(runtime_config: SweepRuntimeConfig, adapter=None, progress_callback=None) -> Path:
+def estimate_sweep_session_bytes(specs, plan: RFSweepPlan) -> int:
+    sample_count = 2 + int(plan.n_points) * int(plan.samples_per_point)
+    return sample_count * estimate_sample_bytes(specs)
+
+
+def run_rf_sweep_session(runtime_config: SweepRuntimeConfig, adapter=None, progress_callback=None, sample_callback=None) -> Path:
     runtime_config.validate()
     config = runtime_config.logger_config
     lattice, specs = build_specs(config)
@@ -203,7 +211,17 @@ def run_rf_sweep_session(runtime_config: SweepRuntimeConfig, adapter=None, progr
             "allow_writes": True,
         },
     )
+    estimated_bytes = estimate_sweep_session_bytes(specs, plan)
+    disk = disk_usage_summary(config.output_root if config.output_root.exists() else config.output_root.parent)
+    metadata["disk_usage_at_start"] = disk
+    metadata["estimated_session_size_bytes"] = estimated_bytes
+    metadata["write_strategy"] = "incremental_jsonl_with_final_csv"
+    metadata["session_status"] = "running"
+    logger.write_json("metadata.json", metadata)
+    emit("Estimated sweep size: %.2f MB; free space: %.2f GB." % (estimated_bytes / (1024.0 * 1024.0), disk["free_bytes"] / (1024.0 * 1024.0 * 1024.0)))
 
+    session_failed = False
+    failure_message = None
     try:
         baseline = capture_sample(
             adapter,
@@ -213,6 +231,9 @@ def run_rf_sweep_session(runtime_config: SweepRuntimeConfig, adapter=None, progr
             extra_fields={"phase": "baseline", "target_rf_pv": initial_rf},
         )
         samples.append(baseline)
+        logger.append_jsonl("samples.jsonl", baseline)
+        if sample_callback is not None:
+            sample_callback(baseline)
         derived_context = _make_derived_context(baseline)
         sample_index += 1
         emit("Online analysis sensors: BPMZ3L4RP, BPMZ4L4RP, BPMZ5L4RP, BPMZ6L4RP for delta_s; QPD00ZL4RP for sigma_x/y; tune PVs for cross-checks.")
@@ -224,8 +245,8 @@ def run_rf_sweep_session(runtime_config: SweepRuntimeConfig, adapter=None, progr
             if plan.settle_seconds > 0.0:
                 time.sleep(plan.settle_seconds)
             for sample_slot in range(plan.samples_per_point):
-                samples.append(
-                    capture_sample(
+                try:
+                    sample = capture_sample(
                         adapter,
                         specs,
                         sample_index=sample_index,
@@ -239,19 +260,48 @@ def run_rf_sweep_session(runtime_config: SweepRuntimeConfig, adapter=None, progr
                         },
                         derived_context=derived_context,
                     )
-                )
+                except Exception as exc:
+                    emit("Sweep sample %d capture failed: %s" % (sample_index, exc))
+                    sample = {
+                        "timestamp_epoch_s": time.time(),
+                        "t_rel_s": time.monotonic() - start,
+                        "sample_index": sample_index,
+                        "channels": {},
+                        "derived": {},
+                        "error": str(exc),
+                        "phase": "capture_error",
+                        "sweep_index": point_index - 1,
+                        "sample_slot": sample_slot,
+                        "target_rf_pv": float(target_rf),
+                        "target_delta_hz": float(delta_hz),
+                    }
+                samples.append(sample)
+                logger.append_jsonl("samples.jsonl", sample)
+                if sample_callback is not None:
+                    sample_callback(sample)
                 emit(_sweep_sample_summary(samples[-1], samples))
                 sample_index += 1
                 if sample_slot + 1 < plan.samples_per_point and plan.sample_spacing_seconds > 0.0:
                     time.sleep(plan.sample_spacing_seconds)
+    except Exception as exc:
+        session_failed = True
+        failure_message = str(exc)
+        emit("RF sweep failed: %s" % exc)
+        raise
     finally:
         if plan.restore_initial_rf:
             emit("Restoring RF PV to %.6f" % initial_rf)
-            adapter.put(RF_PV_NAME, initial_rf)
+            try:
+                adapter.put(RF_PV_NAME, initial_rf)
+            except Exception as exc:
+                session_failed = True
+                if failure_message is None:
+                    failure_message = "RF restore failed: %s" % exc
+                emit("RF restore failed: %s" % exc)
             if plan.settle_seconds > 0.0:
                 time.sleep(plan.settle_seconds)
-            samples.append(
-                capture_sample(
+            try:
+                restored = capture_sample(
                     adapter,
                     specs,
                     sample_index=sample_index,
@@ -259,8 +309,27 @@ def run_rf_sweep_session(runtime_config: SweepRuntimeConfig, adapter=None, progr
                     extra_fields={"phase": "restored", "target_rf_pv": initial_rf},
                     derived_context=derived_context if "derived_context" in locals() else None,
                 )
-            )
-
+            except Exception as exc:
+                emit("Restore sample capture failed: %s" % exc)
+                restored = {
+                    "timestamp_epoch_s": time.time(),
+                    "t_rel_s": time.monotonic() - start,
+                    "sample_index": sample_index,
+                    "channels": {},
+                    "derived": {},
+                    "error": str(exc),
+                    "phase": "restore_error",
+                    "target_rf_pv": initial_rf,
+                }
+            samples.append(restored)
+            logger.append_jsonl("samples.jsonl", restored)
+            if sample_callback is not None:
+                sample_callback(restored)
+    metadata["session_status"] = "failed" if session_failed else "completed"
+    if failure_message is not None:
+        metadata["failure"] = failure_message
+    metadata["partial_sample_count"] = len(samples)
+    logger.write_json("metadata.json", metadata)
     return write_session_outputs(logger, metadata, samples)
 
 

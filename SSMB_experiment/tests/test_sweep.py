@@ -83,10 +83,17 @@ class SSMBExperimentSweepTest(unittest.TestCase):
 
             metadata = json.loads((session_dir / "metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(metadata["online_analysis"]["primary_l4_bpms"], list(PRIMARY_L4_BPM_LABELS))
+            self.assertEqual(metadata["session_status"], "completed")
+            self.assertIn("estimated_session_size_bytes", metadata)
+            self.assertIn("disk_usage_at_start", metadata)
 
             log_text = (session_dir / "session.log").read_text(encoding="utf-8")
             self.assertIn("Online analysis sensors:", log_text)
             self.assertIn("α0_BPM=", log_text)
+            self.assertIn("samples.jsonl", log_text)
+
+            sample_lines = (session_dir / "samples.jsonl").read_text(encoding="utf-8").strip().splitlines()
+            self.assertGreaterEqual(len(sample_lines), 1 + plan.n_points * plan.samples_per_point + 1)
 
 
 if __name__ == "__main__":

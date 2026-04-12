@@ -44,6 +44,25 @@ class SSMBExperimentLogNowTest(unittest.TestCase):
             derived["delta_l4_bpms_used"],
             ["bpmz3l4rp_x", "bpmz4l4rp_x", "bpmz5l4rp_x", "bpmz6l4rp_x"],
         )
+        self.assertEqual(derived["bpm_x_nonlinear_labels"], [])
+
+    def test_derived_metrics_flag_nonlinear_bpms(self):
+        sample = {
+            "channels": {
+                "beam_energy_mev": {"value": 250.0},
+                "bpmz3l4rp_x": {"value": 4.2},
+                "bpmz4l4rp_x": {"value": 3.2},
+                "bpmz5l4rp_x": {"value": 0.5},
+                "bpmz6l4rp_x": {"value": -4.6},
+            }
+        }
+        derived = _derived_metrics(sample, derived_context={"l4_bpm_reference_mm": {}})
+        lookup = {item["label"]: item for item in derived["bpm_x_status"]}
+        self.assertEqual(lookup["bpmz3l4rp_x"]["severity"], "red")
+        self.assertEqual(lookup["bpmz4l4rp_x"]["severity"], "yellow")
+        self.assertEqual(lookup["bpmz5l4rp_x"]["severity"], "green")
+        self.assertEqual(lookup["bpmz6l4rp_x"]["severity"], "red")
+        self.assertEqual(set(derived["bpm_x_nonlinear_labels"]), {"bpmz3l4rp_x", "bpmz6l4rp_x"})
 
     def test_inventory_includes_recovered_bump_hardware(self):
         lattice = LatticeContext.load(DEFAULT_LATTICE_EXPORT)

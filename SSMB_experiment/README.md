@@ -80,6 +80,10 @@ SSMB_experiment/.ssmb_local/
 That includes logs, sweep sessions, and a local Matplotlib cache. It is meant
 to be machine-local runtime state, not source-controlled content.
 
+Session directories are timestamped and unique. Runtime logs live under the
+gitignored `.ssmb_local/` tree, so a normal `git pull` should not overwrite
+captured data.
+
 ## Recommended Environment
 
 This tool was validated against the repo-style `pyenv` environment:
@@ -150,6 +154,15 @@ During a sweep, the run log summarizes:
 - corrected legacy `α₀`
 - running `η`
 - running BPM-based `α₀`
+
+The GUI also keeps a live `BPM Nonlinearity Watch` panel:
+
+- green: `|x| < 3 mm`
+- yellow: `3 mm <= |x| < 4 mm`
+- red: `|x| >= 4 mm`
+
+That warning never stops the logger or sweep. It only flags that a BPM may be
+entering a nonlinear orbit-response regime during the RF scan.
 
 Those values are intended as live operator guidance, not the final publication
 analysis. The final numbers should still come from offline fitting.

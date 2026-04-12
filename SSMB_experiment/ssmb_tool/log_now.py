@@ -33,6 +33,8 @@ DEFAULT_L4_DISPERSION_M = {
 }
 DEFAULT_QPD_L4_ETA_X_M = -0.9744634305320904
 DEFAULT_QPD_L4_BETA_X_M = 7.979840309839388
+BPM_WARNING_MM = 3.0
+BPM_NONLINEAR_MM = 4.0
 
 
 def _safe_float(value, default=None):
@@ -202,6 +204,32 @@ def _derived_metrics(sample: Dict[str, object], derived_context: Optional[Dict[s
         cavity_voltage_kv=cavity_voltage_kv,
         beam_energy_mev=beam_energy_mev,
     )
+    bpm_x_status = []
+    max_abs_bpm_x_mm = None
+    for label, payload in sorted(channels.items()):
+        if not (label.startswith("bpm") and label.endswith("_x")):
+            continue
+        value_mm = _safe_float(payload.get("value"), None)
+        if value_mm is None:
+            continue
+        abs_value = abs(value_mm)
+        if max_abs_bpm_x_mm is None or abs_value > max_abs_bpm_x_mm:
+            max_abs_bpm_x_mm = abs_value
+        severity = "green"
+        if abs_value >= BPM_NONLINEAR_MM:
+            severity = "red"
+        elif abs_value >= BPM_WARNING_MM:
+            severity = "yellow"
+        bpm_x_status.append(
+            {
+                "label": label,
+                "value_mm": value_mm,
+                "abs_value_mm": abs_value,
+                "severity": severity,
+                "nonlinear": abs_value >= BPM_NONLINEAR_MM,
+            }
+        )
+    nonlinear_bpms = [item["label"] for item in bpm_x_status if item["nonlinear"]]
     return {
         "rf_readback": rf_readback,
         "rf_reference_khz": rf_reference_khz,
@@ -222,6 +250,11 @@ def _derived_metrics(sample: Dict[str, object], derived_context: Optional[Dict[s
         "qpd_l4_sigma_energy_mev": None if qpd_sigma_delta is None or beam_energy_mev is None else beam_energy_mev * qpd_sigma_delta,
         "qpd_l4_sigma_x_mm": _safe_float(channels.get("qpd_l4_sigma_x", {}).get("value"), None),
         "qpd_l4_sigma_y_mm": _safe_float(channels.get("qpd_l4_sigma_y", {}).get("value"), None),
+        "bpm_x_status": bpm_x_status,
+        "bpm_x_nonlinear_labels": nonlinear_bpms,
+        "bpm_x_warning_mm": BPM_WARNING_MM,
+        "bpm_x_nonlinear_mm": BPM_NONLINEAR_MM,
+        "max_abs_bpm_x_mm": max_abs_bpm_x_mm,
     }
 
 
@@ -333,7 +366,22 @@ def write_session_outputs(
     return logger.session_dir
 
 
-def run_stage0_logger(config: LoggerConfig, adapter=None, progress_callback=None, session_prefix: str = "ssmb_stage0", extra_metadata: Optional[Dict[str, object]] = None) -> Path:
+def estimate_sample_bytes(specs: Sequence[ChannelSpec]) -> int:
+    total = 0
+    for spec in specs:
+        if spec.kind == "waveform":
+            total += 64 * 1024
+        else:
+            total += 256
+    return total
+
+
+def estimate_passive_session_bytes(specs: Sequence[ChannelSpec], duration_seconds: float, sample_hz: float) -> int:
+    sample_count = max(1, int(math.ceil(float(duration_seconds) * float(sample_hz))))
+    return sample_count * estimate_sample_bytes(specs)
+
+
+def run_stage0_logger(config: LoggerConfig, adapter=None, progress_callback=None, sample_callback=None, session_prefix: str = "ssmb_stage0", extra_metadata: Optional[Dict[str, object]] = None) -> Path:
     if config.allow_writes or not config.safe_mode:
         raise ValueError("Stage 0 logger is read-only only. Use the separate RF sweep tool for explicit writes.")
     lattice, specs = build_specs(config)
@@ -365,25 +413,77 @@ def run_stage0_logger(config: LoggerConfig, adapter=None, progress_callback=None
             logger.write_json("metadata.json", metadata)
             raise
 
-    metadata = build_metadata(config, lattice, specs, "SSMB Stage 0 logger", extra=extra_metadata)
+    estimated_bytes = estimate_passive_session_bytes(specs, config.duration_seconds, config.sample_hz)
+    from .session import disk_usage_summary
+
+    disk_root = config.output_root if config.output_root.exists() else config.output_root.parent
+    disk = disk_usage_summary(disk_root)
+    metadata = build_metadata(
+        config,
+        lattice,
+        specs,
+        "SSMB Stage 0 logger",
+        extra={
+            **(extra_metadata or {}),
+            "disk_usage_at_start": disk,
+            "estimated_session_size_bytes": estimated_bytes,
+            "write_strategy": "incremental_jsonl_with_final_csv",
+            "session_status": "running",
+        },
+    )
+    logger.write_json("metadata.json", metadata)
+    emit("Estimated session size: %.2f MB; free space: %.2f GB." % (estimated_bytes / (1024.0 * 1024.0), disk["free_bytes"] / (1024.0 * 1024.0 * 1024.0)))
     deadline = time.monotonic() + config.duration_seconds
     period = 1.0 / config.sample_hz
     sample_index = 0
     start = time.monotonic()
     samples: List[Dict[str, object]] = []
 
-    while True:
-        now = time.monotonic()
-        if now > deadline:
-            break
-        sample = capture_sample(adapter, specs, sample_index=sample_index, t_rel_s=now - start)
-        samples.append(sample)
-        sample_index += 1
-        next_target = start + sample_index * period
-        sleep_s = next_target - time.monotonic()
-        if sleep_s > 0.0:
-            time.sleep(sleep_s)
+    try:
+        while True:
+            now = time.monotonic()
+            if now > deadline:
+                break
+            try:
+                sample = capture_sample(adapter, specs, sample_index=sample_index, t_rel_s=now - start)
+            except Exception as exc:
+                emit("Sample %d capture failed: %s" % (sample_index, exc))
+                sample = {
+                    "timestamp_epoch_s": time.time(),
+                    "t_rel_s": now - start,
+                    "sample_index": sample_index,
+                    "channels": {},
+                    "derived": {},
+                    "error": str(exc),
+                    "phase": "capture_error",
+                }
+            samples.append(sample)
+            logger.append_jsonl("samples.jsonl", sample)
+            if sample_callback is not None:
+                sample_callback(sample)
+            nonlinear = sample.get("derived", {}).get("bpm_x_nonlinear_labels") or []
+            if nonlinear:
+                emit("Sample %d nonlinear BPM warning: %s" % (sample_index, ", ".join(nonlinear)))
+            sample_index += 1
+            next_target = start + sample_index * period
+            sleep_s = next_target - time.monotonic()
+            if sleep_s > 0.0:
+                time.sleep(sleep_s)
+    except Exception as exc:
+        metadata["session_status"] = "failed"
+        metadata["failure"] = str(exc)
+        logger.write_json("metadata.json", metadata)
+        raise
+    else:
+        metadata["session_status"] = "completed"
+    finally:
+        metadata["partial_sample_count"] = len(samples)
+        logger.write_json("metadata.json", metadata)
+        if samples:
+            _write_csv(logger.session_dir / "samples.csv", [_flatten_for_csv(sample) for sample in samples])
+            logger.log("Partial/final CSV written with %d samples." % len(samples))
 
+    logger.log("Samples were written incrementally to samples.jsonl during capture.")
     return write_session_outputs(logger, metadata, samples)
 
 
