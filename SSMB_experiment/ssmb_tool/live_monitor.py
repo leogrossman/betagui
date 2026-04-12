@@ -26,6 +26,8 @@ TREND_DEFINITIONS: Dict[str, Dict[str, object]] = {
     "p3_h1_ampl_avg": {"label": "P3 avg", "color": "#fb8c00"},
     "beam_current": {"label": "Beam current [mA]", "color": "#2e7d32"},
     "bump_strength_a": {"label": "max |I_bump| [A]", "color": "#ad1457"},
+    "bump_bpm_avg_mm": {"label": "⟨x_bump BPM⟩ [mm]", "color": "#00838f"},
+    "bump_orbit_error_mm": {"label": "x_ref - ⟨x⟩ [mm]", "color": "#c2185b"},
 }
 
 
@@ -81,6 +83,16 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
             "p3_h1_ampl": _valid_float(channels.get("p3_h1_ampl", {}).get("value")),
             "p3_h1_ampl_avg": _valid_float(channels.get("p3_h1_ampl_avg", {}).get("value")),
             "nonlinear_bpms": list(derived.get("bpm_x_nonlinear_labels") or []),
+            "bump_bpm_avg_mm": bump.get("bpm_avg_mm"),
+            "bump_orbit_error_mm": bump.get("orbit_error_mm"),
+            "bump_feedback_ref_mm": bump.get("reference_mm"),
+            "bump_feedback_gain": bump.get("gain"),
+            "bump_feedback_deadband_mm": bump.get("deadband"),
+            "bump_step_estimate": bump.get("step_estimate"),
+            "bump_bpm_k1_mm": bump.get("bpm_values_mm", {}).get("l4_bump_orbit_bpm_k1"),
+            "bump_bpm_l2_mm": bump.get("bpm_values_mm", {}).get("l4_bump_orbit_bpm_l2"),
+            "bump_bpm_k3_mm": bump.get("bpm_values_mm", {}).get("l4_bump_orbit_bpm_k3"),
+            "bump_bpm_l4_mm": bump.get("bpm_values_mm", {}).get("l4_bump_orbit_bpm_l4"),
         },
         "bump_state": bump,
         "what_can_be_measured_now": [
@@ -110,6 +122,8 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
     p1_series = []
     p1_avg_series = []
     p3_series = []
+    bump_strength_series = []
+    bump_error_series = []
     for sample in samples:
         d = _valid_float(sample.get("derived", {}).get("delta_l4_bpm_first_order"))
         rf = _valid_float(sample.get("derived", {}).get("rf_readback"))
@@ -119,6 +133,13 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
         p1 = _valid_float(sample.get("channels", {}).get("p1_h1_ampl", {}).get("value"))
         p1_avg = _valid_float(sample.get("channels", {}).get("p1_h1_ampl_avg", {}).get("value"))
         p3 = _valid_float(sample.get("channels", {}).get("p3_h1_ampl", {}).get("value"))
+        bump_state_sample = _summarize_bump_state(sample.get("channels", {}))
+        bump_strength = _valid_float(bump_state_sample.get("max_abs_corrector_a"))
+        bump_error = _valid_float(bump_state_sample.get("orbit_error_mm"))
+        if bump_strength is not None:
+            bump_strength_series.append((bump_strength, p1_avg))
+        if bump_error is not None:
+            bump_error_series.append((bump_error, p1_avg))
         if d is not None and rf is not None:
             delta_series.append(d)
             rf_series.append(rf)
@@ -152,6 +173,17 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
             "p3_vs_rf": _linear_fit([rf for _x, y, rf in p3_series if y is not None], [y for _x, y, rf in p3_series if y is not None]),
         }
     summary["rf_sweep_metrics"] = sweep_metrics
+    summary["bump_monitor"] = {
+        "feedback_active": bool(bump.get("active")),
+        "p1_avg_vs_bump_strength": _linear_fit(
+            [x for x, y in bump_strength_series if y is not None],
+            [y for _x, y in bump_strength_series if y is not None],
+        ) if len([1 for _x, y in bump_strength_series if y is not None]) >= 2 else None,
+        "p1_avg_vs_bump_error": _linear_fit(
+            [x for x, y in bump_error_series if y is not None],
+            [y for _x, y in bump_error_series if y is not None],
+        ) if len([1 for _x, y in bump_error_series if y is not None]) >= 2 else None,
+    }
     summary["alpha_assessment"] = assess_alpha_monitor(summary)
     summary["trend_data"] = extract_trend_data(samples)
     return summary
@@ -220,6 +252,18 @@ def extract_trend_data(samples: Sequence[Dict[str, object]]) -> Dict[str, List[O
             )
             for sample in history
         ],
+        "bump_bpm_avg_mm": [
+            _valid_float(
+                _summarize_bump_state(sample.get("channels", {})).get("bpm_avg_mm")
+            )
+            for sample in history
+        ],
+        "bump_orbit_error_mm": [
+            _valid_float(
+                _summarize_bump_state(sample.get("channels", {})).get("orbit_error_mm")
+            )
+            for sample in history
+        ],
         "p1_h1_ampl": [_valid_float(sample.get("channels", {}).get("p1_h1_ampl", {}).get("value")) for sample in history],
         "p1_h1_ampl_avg": [_valid_float(sample.get("channels", {}).get("p1_h1_ampl_avg", {}).get("value")) for sample in history],
         "p1_h1_ampl_dev": [_valid_float(sample.get("channels", {}).get("p1_h1_ampl_dev", {}).get("value")) for sample in history],
@@ -232,6 +276,7 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
     current = summary.get("current", {})
     bump = summary.get("bump_state", {})
     sweep = summary.get("rf_sweep_metrics", {})
+    bump_monitor = summary.get("bump_monitor", {})
     alpha = summary.get("alpha_assessment", {})
     sections = [
         {
@@ -252,6 +297,33 @@ def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]
             "note": "This section is available even when no RF sweep is running.",
             "default_trend": "beam_current",
             "trend_options": ["beam_current", "rf_offset_hz", "bump_strength_a"],
+        },
+        {
+            "key": "bump_feedback",
+            "title": "Bump Feedback / Orbit Lock",
+            "color": "red" if bump.get("active") else "green",
+            "rows": [
+                ("Feedback state", bump.get("state_label", "unknown")),
+                ("RF ctrl enable", _fmt(bump.get("rf_frequency_control_enable"))),
+                ("Gain", _fmt(current.get("bump_feedback_gain"))),
+                ("Ref orbit", "%s mm" % _fmt(current.get("bump_feedback_ref_mm"))),
+                ("Deadband", "%s mm" % _fmt(current.get("bump_feedback_deadband_mm"))),
+                ("⟨x⟩ of 4 bump BPMs", "%s mm" % _fmt(current.get("bump_bpm_avg_mm"))),
+                ("Orbit error", "%s mm" % _fmt(current.get("bump_orbit_error_mm"))),
+                ("Estimated step", _fmt(current.get("bump_step_estimate"))),
+                ("BPMZ1L2RP", "%s mm" % _fmt(current.get("bump_bpm_l2_mm"))),
+                ("BPMZ1K3RP", "%s mm" % _fmt(current.get("bump_bpm_k3_mm"))),
+                ("BPMZ1L4RP", "%s mm" % _fmt(current.get("bump_bpm_l4_mm"))),
+                ("P1avg vs bump |I| slope", _fmt((bump_monitor.get("p1_avg_vs_bump_strength") or {}).get("slope"))),
+            ],
+            "equations": [
+                "x̄ = (x_K1 + x_L2 + x_K3 + x_L4) / 4",
+                "Δu = g · (x_ref - x̄)  if  |x_ref - x̄| > deadband",
+                "I_i ← I_i + f_i · Δu",
+            ],
+            "note": "This is a global orbit-lock loop. BPMZ1L2RP is near the L2/undulator side, while the other feedback BPMs are spread through K3 and L4, so the bump constrains a ring-wide closed-orbit family rather than only the undulator center.",
+            "default_trend": "bump_orbit_error_mm",
+            "trend_options": ["bump_orbit_error_mm", "bump_bpm_avg_mm", "bump_strength_a", "p1_h1_ampl_avg", "p1_h1_ampl_dev"],
         },
         {
             "key": "coherent_light",
@@ -343,11 +415,13 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
     current = summary.get("current", {})
     bump = summary.get("bump_state", {})
     sweep = summary.get("rf_sweep_metrics", {})
+    bump_monitor = summary.get("bump_monitor", {})
     return [
         {
             "title": "1. Raw Instruments",
             "lines": [
                 "L4 BPM chain: BPMZ3L4RP, BPMZ4L4RP, BPMZ5L4RP, BPMZ6L4RP",
+                "Bump-loop BPM chain: BPMZ1K1RP, BPMZ1L2RP, BPMZ1K3RP, BPMZ1L4RP",
                 "Profile monitor: QPD00ZL4RP (σx, σy)",
                 "Coherent-light observables: SCOPE1ZULP:h1p1:* and h1p3:*",
                 "RF references: MCLKHGP:setFrq, MCLKHGP:rdFrq499",
@@ -356,7 +430,24 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             ],
         },
         {
-            "title": "2. Momentum Offset δₛ",
+            "title": "2. Bump-Controlled Orbit Family",
+            "equations": [
+                "x̄ = (x_{K1}+x_{L2}+x_{K3}+x_{L4})/4",
+                "u ← u + g · (x_ref - x̄)",
+                "x(s;δ) = x_disp(s,δ) + u(δ) · B(s)",
+            ],
+            "lines": [
+                "The recovered notebook shows a scalar orbit-lock loop, not a feed-forward RF-to-bump table.",
+                "Because BPMZ1L2RP is in L2 near the undulator side, the loop helps keep the source-region orbit centered, but the resulting closed orbit is still global.",
+                "Current live bump state: %s, orbit error = %s mm, P1avg-vs-bump slope = %s" % (
+                    bump.get("state_label", "unknown"),
+                    _fmt(current.get("bump_orbit_error_mm")),
+                    _fmt((bump_monitor.get("p1_avg_vs_bump_strength") or {}).get("slope")),
+                ),
+            ],
+        },
+        {
+            "title": "3. Momentum Offset δₛ",
             "equations": [
                 "Δx_i = x_i - x_{i,ref}",
                 "Δx_i ≈ D_{x,i} · δₛ",
@@ -369,7 +460,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             ],
         },
         {
-            "title": "3. Phase Slip Factor η",
+            "title": "4. Phase Slip Factor η",
             "equations": [
                 "-Δf_RF / f_RF ≈ η · δₛ",
                 "η = -(1/f_RF) · d f_RF / dδₛ",
@@ -381,7 +472,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             ],
         },
         {
-            "title": "4. Momentum Compaction α₀",
+            "title": "5. Momentum Compaction α₀",
             "equations": [
                 "α₀ = η + 1/γ²",
                 "α₀,legacy ∝ Qₛ² · E / (f_RF² · U_cav)",
@@ -396,7 +487,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             ],
         },
         {
-            "title": "5. Spread And Coherent-Light Observables",
+            "title": "6. Spread And Coherent-Light Observables",
             "equations": [
                 "σₓ² ≈ βₓ εₓ + (ηₓ σδ)²",
                 "σ_E ≈ E₀ · σδ",
@@ -404,7 +495,7 @@ def build_theory_sections(summary: Dict[str, object]) -> List[Dict[str, object]]
             ],
             "lines": [
                 "QPD00ZL4RP provides the first-order spread proxy through σx in a dispersive region.",
-                "P1 is the main SSMB observable; compare P1(f_RF) and P1(δₛ) against α₀ and bump state.",
+                "P1 is the main SSMB observable; compare P1(f_RF), P1(δₛ), and P1 versus bump activity against α₀ and bump state.",
                 "Bump status now: %s, max |I| = %s A" % (bump.get("state_label", "unknown"), _fmt(bump.get("max_abs_corrector_a"))),
             ],
         },
@@ -419,6 +510,7 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
     current = summary.get("current", {})
     sweep_state = summary.get("rf_sweep_detection", {})
     sweep_metrics = summary.get("rf_sweep_metrics", {})
+    bump_monitor = summary.get("bump_monitor", {})
     lines = [
         "SSMB Live Monitor",
         "",
@@ -458,6 +550,13 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
             "QPD00 sigma_x / sigma_y: %s mm / %s mm" % (_fmt(current.get("qpd_l4_sigma_x_mm")), _fmt(current.get("qpd_l4_sigma_y_mm"))),
             "L4 bump state: %s" % summary.get("bump_state", {}).get("state_label", "unknown"),
             "L4 bump feedback enable: %s" % summary.get("bump_state", {}).get("feedback_enable", "n/a"),
+            "Bump BPM average: %s mm" % _fmt(current.get("bump_bpm_avg_mm")),
+            "Bump orbit error: %s mm" % _fmt(current.get("bump_orbit_error_mm")),
+            "Bump BPMs (L2/K3/L4): %s / %s / %s mm" % (
+                _fmt(current.get("bump_bpm_l2_mm")),
+                _fmt(current.get("bump_bpm_k3_mm")),
+                _fmt(current.get("bump_bpm_l4_mm")),
+            ),
         ]
     )
     nonlinear = current.get("nonlinear_bpms") or []
@@ -482,6 +581,8 @@ def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
                 "P1 vs f_RF slope: %s" % _fmt((sweep_metrics.get("p1_vs_rf") or {}).get("slope")),
                 "P1 vs δ slope: %s" % _fmt((sweep_metrics.get("p1_vs_delta") or {}).get("slope")),
                 "P3 vs f_RF slope: %s" % _fmt((sweep_metrics.get("p3_vs_rf") or {}).get("slope")),
+                "P1avg vs bump |I| slope: %s" % _fmt((bump_monitor.get("p1_avg_vs_bump_strength") or {}).get("slope")),
+                "P1avg vs bump error slope: %s" % _fmt((bump_monitor.get("p1_avg_vs_bump_error") or {}).get("slope")),
                 "Qx vs delta slope: %s" % _fmt((sweep_metrics.get("qx_vs_delta") or {}).get("slope")),
                 "Qy vs delta slope: %s" % _fmt((sweep_metrics.get("qy_vs_delta") or {}).get("slope")),
                 "Qs vs delta slope: %s" % _fmt((sweep_metrics.get("qs_vs_delta") or {}).get("slope")),
@@ -526,11 +627,40 @@ def _summarize_bump_state(channels: Dict[str, object]) -> Dict[str, object]:
         if value is not None:
             max_abs = max(max_abs, abs(value))
     feedback = _valid_float(channels.get("l4_bump_feedback_enable", {}).get("value"))
+    gain = _valid_float(channels.get("l4_bump_feedback_gain", {}).get("value"))
+    reference = _valid_float(channels.get("l4_bump_feedback_ref", {}).get("value"))
+    deadband = _valid_float(channels.get("l4_bump_feedback_deadband", {}).get("value"))
+    rf_ctrl_enable = _valid_float(channels.get("rf_frequency_control_enable", {}).get("value"))
+    bpm_labels = (
+        "l4_bump_orbit_bpm_k1",
+        "l4_bump_orbit_bpm_l2",
+        "l4_bump_orbit_bpm_k3",
+        "l4_bump_orbit_bpm_l4",
+    )
+    bpm_values = {
+        label: _valid_float(channels.get(label, {}).get("value"))
+        for label in bpm_labels
+    }
+    bpm_clean = [value for value in bpm_values.values() if value is not None]
+    bpm_avg = sum(bpm_clean) / len(bpm_clean) if bpm_clean else None
+    orbit_error = None if bpm_avg is None or reference is None else reference - bpm_avg
+    step_estimate = None
+    if orbit_error is not None and gain is not None:
+        if deadband is None or abs(orbit_error) > deadband:
+            step_estimate = gain * orbit_error
     active = max_abs >= BUMP_CORRECTOR_ACTIVE_THRESHOLD_A or (feedback is not None and feedback != 0.0)
     return {
         "active": active,
         "state_label": "ON" if active else "OFF/idle",
         "feedback_enable": feedback,
+        "rf_frequency_control_enable": rf_ctrl_enable,
+        "gain": gain,
+        "reference_mm": reference,
+        "deadband": deadband,
+        "bpm_values_mm": bpm_values,
+        "bpm_avg_mm": bpm_avg,
+        "orbit_error_mm": orbit_error,
+        "step_estimate": step_estimate,
         "max_abs_corrector_a": max_abs,
         "corrector_currents_a": values,
     }

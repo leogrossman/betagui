@@ -904,7 +904,17 @@ class SSMBGui:
             return
         if not self.lattice_device_items:
             return
-        self._set_text_widget(self.lattice_info_text, ["Lattice view ready.", "", "Click a lattice marker to inspect its live readout."])
+        self._set_text_widget(
+            self.lattice_info_text,
+            [
+                "Lattice view ready.",
+                "",
+                "Click a lattice marker to inspect its live readout.",
+                "",
+                "Recovered bump-feedback BPM chain: BPMZ1K1RP, BPMZ1L2RP, BPMZ1K3RP, BPMZ1L4RP.",
+                "BPMZ1L2RP is the undulator-side/ L2 anchor of the orbit-lock loop; the others are spread through K3 and L4, so the loop constrains a global closed orbit rather than only one local point.",
+            ],
+        )
 
     def _on_lattice_click(self, event) -> None:
         if not self.lattice_device_items:
@@ -935,6 +945,16 @@ class SSMBGui:
                     "sigma_x^2 ~= beta_x*epsilon_x + (eta_x*sigma_delta)^2",
                 ]
             )
+        if item.get("name") in ("BPMZ1L2RP", "BPMZ1K3RP", "BPMZ1L4RP", "BPMZ1K1RP"):
+            lines.extend(
+                [
+                    "",
+                    "This BPM is part of the 4-BPM bump-feedback average.",
+                    "The loop tries to keep the arithmetic mean of those BPM X values close to AKC12VP.",
+                ]
+            )
+            if item.get("name") == "BPMZ1L2RP":
+                lines.append("BPMZ1L2RP sits on the L2 / undulator side, so it helps anchor the source-region orbit during the bump-controlled RF sweep.")
         if item.get("pv_label", "").startswith("l4_bump_hcorr"):
             lines.extend(
                 [

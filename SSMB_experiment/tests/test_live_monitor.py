@@ -97,6 +97,15 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
                         "l4_bump_hcorr_l4_downstream": {"value": 0.0},
                         "l4_bump_hcorr_k1_downstream": {"value": 0.0},
                         "l4_bump_feedback_enable": {"value": 1.0},
+                        "l4_bump_feedback_gain": {"value": 0.3},
+                        "l4_bump_feedback_ref": {"value": 0.0},
+                        "l4_bump_feedback_deadband": {"value": 0.01},
+                        "rf_frequency_control_enable": {"value": 0.0},
+                        "l4_bump_orbit_bpm_k1": {"value": -0.5},
+                        "l4_bump_orbit_bpm_l2": {"value": -0.4},
+                        "l4_bump_orbit_bpm_k3": {"value": -0.3},
+                        "l4_bump_orbit_bpm_l4": {"value": -0.2},
+                        "p1_h1_ampl_avg": {"value": 0.06 + 0.004 * index},
                     },
                     "derived": {
                         "rf_readback": rf,
@@ -123,6 +132,9 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         self.assertTrue(any(label == "BPM α₀" for label, _value in alpha_section["rows"]))
         light_section = [section for section in sections if section["title"] == "Coherent Light Monitor"][0]
         self.assertTrue(any(label == "P1 avg" for label, _value in light_section["rows"]))
+        bump_section = [section for section in sections if section["title"] == "Bump Feedback / Orbit Lock"][0]
+        self.assertTrue(any(label == "⟨x⟩ of 4 bump BPMs" for label, _value in bump_section["rows"]))
+        self.assertIn("x̄ = (x_K1 + x_L2 + x_K3 + x_L4) / 4", bump_section["equations"])
 
     def test_theory_sections_and_trend_catalog_exist(self):
         samples = [
@@ -135,6 +147,14 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
                     "l4_bump_hcorr_l4_downstream": {"value": 0.0},
                     "l4_bump_hcorr_k1_downstream": {"value": 0.0},
                     "l4_bump_feedback_enable": {"value": 1.0},
+                    "l4_bump_feedback_gain": {"value": 0.3},
+                    "l4_bump_feedback_ref": {"value": 0.0},
+                    "l4_bump_feedback_deadband": {"value": 0.01},
+                    "rf_frequency_control_enable": {"value": 0.0},
+                    "l4_bump_orbit_bpm_k1": {"value": -0.5},
+                    "l4_bump_orbit_bpm_l2": {"value": -0.4},
+                    "l4_bump_orbit_bpm_k3": {"value": -0.3},
+                    "l4_bump_orbit_bpm_l4": {"value": -0.2},
                     "p1_h1_ampl": {"value": 0.02},
                     "p1_h1_ampl_avg": {"value": 0.03},
                     "p1_h1_ampl_dev": {"value": 0.01},
@@ -156,9 +176,10 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         ]
         summary = summarize_live_monitor(samples)
         theory = build_theory_sections(summary)
-        self.assertTrue(any(section["title"] == "2. Momentum Offset δₛ" for section in theory))
+        self.assertTrue(any(section["title"] == "2. Bump-Controlled Orbit Family" for section in theory))
         self.assertIn("delta_s", summary["trend_data"])
         self.assertIn("alpha_difference", summary["trend_data"])
+        self.assertIn("bump_orbit_error_mm", summary["trend_data"])
         self.assertIn("p1_h1_ampl_avg", trend_definitions())
 
 
