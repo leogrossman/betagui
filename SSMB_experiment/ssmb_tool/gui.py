@@ -1847,8 +1847,17 @@ class SSMBGui:
                 "P1 avg only",
                 [("P1 avg", self._prepare_plot_series(list(trend_data.get("p1_h1_ampl_avg", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa")],
             ),
+            (
+                "Thermal / undulator-side chain",
+                [
+                    ("P1 avg", self._prepare_plot_series(list(trend_data.get("p1_h1_ampl_avg", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa"),
+                    ("KW13 temp", self._prepare_plot_series(list(trend_data.get("climate_kw13_return_temp_c", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#00838f"),
+                    ("BPMZ1L2", self._prepare_plot_series(list(trend_data.get("bump_bpm_l2_mm", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#0d47a1"),
+                    ("QPD01 center", self._prepare_plot_series(list(trend_data.get("qpd_l2_center_x_avg_um", [])), window_seconds=LONG_STUDY_PLOT_WINDOW_S, max_points=LONG_STUDY_PLOT_MAX_POINTS), "#8e24aa"),
+                ],
+            ),
         ]
-        top_candidates = list(osc.get("candidates", []))[:2]
+        top_candidates = list(osc.get("candidates", []))[:1]
         comparison_candidates = top_candidates + [selected_candidate]
         while len(comparison_candidates) < 3:
             comparison_candidates.append(None)
@@ -1863,7 +1872,7 @@ class SSMBGui:
             deduped.append(candidate)
         while len(deduped) < 3:
             deduped.append(None)
-        for candidate in deduped[:3]:
+        for candidate in deduped[:2]:
             if candidate is None:
                 plot_defs.append(("Candidate pending", []))
                 continue

@@ -144,14 +144,30 @@ def _extract_series(samples: Sequence[Dict[str, object]], key: str) -> List[Opti
     for sample in samples:
         derived = sample.get("derived", {})
         channels = sample.get("channels", {})
-        if key in ("bump_strength_a", "bump_bpm_avg_mm", "bump_orbit_error_mm"):
+        if key in (
+            "bump_strength_a",
+            "bump_bpm_avg_mm",
+            "bump_orbit_error_mm",
+            "bump_bpm_k1_mm",
+            "bump_bpm_l2_mm",
+            "bump_bpm_k3_mm",
+            "bump_bpm_l4_mm",
+        ):
             bump = _summarize_bump_state(channels)
             if key == "bump_strength_a":
                 series.append(_valid_float(bump.get("max_abs_corrector_a")))
             elif key == "bump_bpm_avg_mm":
                 series.append(_valid_float(bump.get("bpm_avg_mm")))
-            else:
+            elif key == "bump_orbit_error_mm":
                 series.append(_valid_float(bump.get("orbit_error_mm")))
+            else:
+                mapping = {
+                    "bump_bpm_k1_mm": "l4_bump_orbit_bpm_k1",
+                    "bump_bpm_l2_mm": "l4_bump_orbit_bpm_l2",
+                    "bump_bpm_k3_mm": "l4_bump_orbit_bpm_k3",
+                    "bump_bpm_l4_mm": "l4_bump_orbit_bpm_l4",
+                }
+                series.append(_valid_float((bump.get("bpm_values_mm") or {}).get(mapping.get(key))))
         elif key in derived:
             series.append(_valid_float(derived.get(key)))
         elif key in channels:
@@ -613,6 +629,10 @@ def summarize_live_monitor(
     }
     summary["temperature_state"] = _summarize_temperature_state(summary)
     summary["beam_stability"] = _beam_stability_state(summary)
+    summary["thermal_orbit_monitor"] = _summarize_thermal_orbit_monitor(samples, summary) if include_extended else {
+        "hypothesis": "deferred",
+        "message": "Thermal/orbit causality fits are deferred in the fast live-monitor path. Open the oscillation / SSMB study windows for the full chain.",
+    }
     summary["phase_scan_quality"] = _phase_scan_quality(summary)
     summary["alpha_assessment"] = assess_alpha_monitor(summary) if include_extended else {
         "legacy_alpha0": (summary.get("current") or {}).get("legacy_alpha0_corrected"),
@@ -1392,6 +1412,7 @@ def format_channel_snapshot(sample: Dict[str, object], spec_map: Optional[Dict[s
 
 def format_oscillation_study(summary: Dict[str, object]) -> List[str]:
     osc = summary.get("oscillation_study", {}) or {}
+    thermal = summary.get("thermal_orbit_monitor", {}) or {}
     lines = ["P1 Oscillation Study", ""]
     if not osc.get("available"):
         lines.extend(
@@ -1438,12 +1459,23 @@ def format_oscillation_study(summary: Dict[str, object]) -> List[str]:
     lines.extend(
         [
             "",
+            "Thermal / orbit causality hints:",
+            "Hypothesis: %s" % (thermal.get("hypothesis") or "n/a"),
+            "Temp -> BPMZ1L2 corr: %s" % _fmt((thermal.get("temp_to_bpm_l2") or {}).get("corr")),
+            "Temp -> QPD01 center corr: %s" % _fmt((thermal.get("temp_to_qpd01_center") or {}).get("corr")),
+            "Temp -> P1 corr: %s" % _fmt((thermal.get("temp_to_p1") or {}).get("corr")),
+            "BPMZ1L2 -> P1 corr: %s" % _fmt((thermal.get("bpm_l2_to_p1") or {}).get("corr")),
+            "QPD01 center -> P1 corr: %s" % _fmt((thermal.get("qpd01_center_to_p1") or {}).get("corr")),
+            thermal.get("message") or "n/a",
+            "",
             "Checked candidates:",
             ", ".join(osc.get("checked_candidate_keys") or []) or "none",
             "",
             "Interpretation:",
             "- High score with small lag and similar/harmonic period is the strongest live clue.",
             "- A temperature or QPD-center candidate suggests diagnostics/environment drift.",
+            "- Temp -> BPMZ1L2 -> P1 suggests the electron beam is moving near the undulator side.",
+            "- Temp -> QPD01 center -> P1 suggests source-point / optical-center drift near the undulator side.",
             "- A bump-error or bump-current candidate suggests the orbit-lock loop may be driving the oscillation.",
             "- This is still a live heuristic study, not a full statistical proof of SSMB resonance.",
             "- The current certainty is based on rolling FFT/autocorrelation/correlation logic, not a full offline uncertainty model yet.",
@@ -1465,6 +1497,49 @@ def _fit_channel_against_p1avg(samples: Sequence[Dict[str, object]], channel_lab
     if len(x_values) < 2:
         return None
     return _linear_fit(x_values, y_values)
+
+
+def _fit_key_against_key(samples: Sequence[Dict[str, object]], x_key: str, y_key: str):
+    x_values = _extract_series(samples, x_key)
+    y_values = _extract_series(samples, y_key)
+    a, b = _align_valid_pairs(x_values, y_values)
+    if a is None or b is None or len(a) < 3:
+        return None
+    fit = _linear_fit(a.tolist(), b.tolist())
+    if fit is None:
+        return None
+    return fit
+
+
+def _summarize_thermal_orbit_monitor(samples: Sequence[Dict[str, object]], summary: Dict[str, object]) -> Dict[str, object]:
+    monitor = {
+        "temp_to_bpm_l2": _fit_key_against_key(samples, "climate_kw13_return_temp_c", "bump_bpm_l2_mm"),
+        "temp_to_qpd01_center": _fit_key_against_key(samples, "climate_kw13_return_temp_c", "qpd_l2_center_x_avg_um"),
+        "temp_to_p1": _fit_key_against_key(samples, "climate_kw13_return_temp_c", "p1_h1_ampl_avg"),
+        "bpm_l2_to_p1": _fit_key_against_key(samples, "bump_bpm_l2_mm", "p1_h1_ampl_avg"),
+        "qpd01_center_to_p1": _fit_key_against_key(samples, "qpd_l2_center_x_avg_um", "p1_h1_ampl_avg"),
+    }
+    temp_to_bpm = abs(_valid_float((monitor.get("temp_to_bpm_l2") or {}).get("corr")) or 0.0)
+    temp_to_qpd = abs(_valid_float((monitor.get("temp_to_qpd01_center") or {}).get("corr")) or 0.0)
+    bpm_to_p1 = abs(_valid_float((monitor.get("bpm_l2_to_p1") or {}).get("corr")) or 0.0)
+    qpd_to_p1 = abs(_valid_float((monitor.get("qpd01_center_to_p1") or {}).get("corr")) or 0.0)
+    temp_to_p1 = abs(_valid_float((monitor.get("temp_to_p1") or {}).get("corr")) or 0.0)
+    if temp_to_bpm >= 0.5 and bpm_to_p1 >= 0.5:
+        hypothesis = "thermal_to_beam_orbit"
+        message = "Temperature drift is plausibly moving the electron beam near BPMZ1L2RP, and that beam motion is plausibly coupling into P1."
+    elif temp_to_qpd >= 0.5 and qpd_to_p1 >= 0.5:
+        hypothesis = "thermal_to_source_point"
+        message = "Temperature drift is plausibly moving the source-point / optical-center observable near QPD01, and that motion is plausibly coupling into P1."
+    elif temp_to_p1 >= 0.5:
+        hypothesis = "thermal_direct_or_unresolved"
+        message = "Temperature drift tracks P1, but the current beam-orbit diagnostics do not yet isolate whether the main path is electron-beam motion, optical transport, or another thermal channel."
+    else:
+        hypothesis = "unresolved"
+        message = "No strong thermal/orbit causal chain is established yet from the current live data."
+    monitor["hypothesis"] = hypothesis
+    monitor["message"] = message
+    monitor["kw13_temp_unstable"] = bool((summary.get("temperature_state") or {}).get("unstable"))
+    return monitor
 
 
 def _summarize_bump_state(channels: Dict[str, object]) -> Dict[str, object]:

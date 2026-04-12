@@ -343,6 +343,61 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         self.assertEqual(summary["rf_sweep_detection"]["reason"], "disabled_for_fast_monitor_path")
         self.assertFalse(summary["rf_sweep_metrics"]["available"])
 
+    def test_summarize_live_monitor_reports_thermal_orbit_chain(self):
+        samples = []
+        for index in range(40):
+            temp = 29.0 + 0.02 * index
+            bpm_l2 = -0.4 + 0.05 * temp
+            qpd01 = 900.0 + 20.0 * temp
+            p1 = 0.03 + 0.001 * temp
+            samples.append(
+                {
+                    "timestamp_epoch_s": 4_000_000.0 + index,
+                    "sample_index": index,
+                    "channels": {
+                        "beam_energy_mev": {"value": 250.0},
+                        "beam_current": {"value": 4.2},
+                        "p1_h1_ampl_avg": {"value": p1},
+                        "qpd_l2_center_x_avg_um": {"value": qpd01},
+                        "climate_kw13_return_temp_c": {"value": temp},
+                        "climate_sr_temp_c": {"value": temp + 0.1},
+                        "climate_sr_temp1_c": {"value": temp + 0.2},
+                        "l4_bump_hcorr_k3_upstream": {"value": 0.01},
+                        "l4_bump_hcorr_l4_upstream": {"value": 0.0},
+                        "l4_bump_hcorr_l4_downstream": {"value": 0.0},
+                        "l4_bump_hcorr_k1_downstream": {"value": 0.0},
+                        "l4_bump_feedback_enable": {"value": 1.0},
+                        "l4_bump_feedback_gain": {"value": 0.3},
+                        "l4_bump_feedback_ref": {"value": 0.0},
+                        "l4_bump_feedback_deadband": {"value": 0.01},
+                        "rf_frequency_control_enable": {"value": 0.0},
+                        "l4_bump_orbit_bpm_k1": {"value": bpm_l2 - 0.05},
+                        "l4_bump_orbit_bpm_l2": {"value": bpm_l2},
+                        "l4_bump_orbit_bpm_k3": {"value": bpm_l2 + 0.03},
+                        "l4_bump_orbit_bpm_l4": {"value": bpm_l2 + 0.05},
+                    },
+                    "derived": {
+                        "rf_readback": 499688.387,
+                        "rf_offset_hz": 0.0,
+                        "delta_l4_bpm_first_order": 0.0,
+                        "beam_energy_from_bpm_mev": 250.0,
+                        "qpd_l4_sigma_delta_first_order": 2.0e-4,
+                        "legacy_alpha0_corrected": 6.3e-4,
+                        "tune_y_unitless": 0.12,
+                        "tune_s_unitless": 0.013,
+                        "bpm_x_nonlinear_labels": [],
+                    },
+                }
+            )
+        summary = summarize_live_monitor(samples)
+        thermal = summary["thermal_orbit_monitor"]
+        self.assertIsNotNone((thermal.get("temp_to_bpm_l2") or {}).get("corr"))
+        self.assertIsNotNone((thermal.get("bpm_l2_to_p1") or {}).get("corr"))
+        self.assertIn(
+            thermal["hypothesis"],
+            ("thermal_to_beam_orbit", "thermal_to_source_point", "thermal_direct_or_unresolved", "unresolved"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
