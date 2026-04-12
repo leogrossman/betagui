@@ -108,6 +108,8 @@ class SSMBGui:
         self.monitor_dashboard_sections = []
         self.monitor_active_section_key = None
         self._monitor_window_auto_refresh_job = None
+        self._updating_monitor_section_tree = False
+        self._updating_monitor_plot_selector = False
         self.theory_window: Optional["tk.Toplevel"] = None
         self.oscillation_window: Optional["tk.Toplevel"] = None
         self.lattice_window: Optional["tk.Toplevel"] = None
@@ -1849,8 +1851,15 @@ class SSMBGui:
         if self.monitor_active_section_key not in desired_ids:
             self.monitor_active_section_key = desired_ids[0] if desired_ids else None
         if self.monitor_active_section_key is not None and selector_tree.exists(self.monitor_active_section_key):
-            selector_tree.selection_set((self.monitor_active_section_key,))
-            selector_tree.focus(self.monitor_active_section_key)
+            current_selection = tuple(selector_tree.selection())
+            desired_selection = (self.monitor_active_section_key,)
+            if current_selection != desired_selection:
+                self._updating_monitor_section_tree = True
+                try:
+                    selector_tree.selection_set(desired_selection)
+                    selector_tree.focus(self.monitor_active_section_key)
+                finally:
+                    self._updating_monitor_section_tree = False
         if not self.monitor_section_widgets:
             return
         section = next((item for item in sections if item["key"] == self.monitor_active_section_key), sections[0] if sections else None)
@@ -1891,7 +1900,13 @@ class SSMBGui:
                 latest = values[-1] if values else None
                 selector.set(key, "enabled", "[x]" if key in current_keys else "[ ]")
                 selector.set(key, "value", self._format_plot_value(latest))
-        selector.selection_set(tuple(current_keys))
+        desired_plot_selection = tuple(current_keys)
+        if tuple(selector.selection()) != desired_plot_selection:
+            self._updating_monitor_plot_selector = True
+            try:
+                selector.selection_set(desired_plot_selection)
+            finally:
+                self._updating_monitor_plot_selector = False
         widgets["help_button"].configure(command=lambda sec=section: self._show_monitor_section_help(sec))
         widgets["settings_button"].configure(command=lambda sec=section: self._open_monitor_plot_settings(sec))
         self.monitor_section_widgets = [(section, widgets)]
@@ -1916,6 +1931,8 @@ class SSMBGui:
         self._draw_section_plot(section)
 
     def _on_monitor_section_selected(self, _event=None) -> None:
+        if self._updating_monitor_section_tree:
+            return
         tree = getattr(self, "monitor_section_tree", None)
         if tree is None:
             return
@@ -1926,6 +1943,8 @@ class SSMBGui:
         self._update_monitor_dashboard(self.latest_monitor_summary)
 
     def _on_monitor_plot_selected(self, section_key: str, options: Sequence[str], tree) -> None:
+        if self._updating_monitor_plot_selector:
+            return
         selected = [item for item in tree.selection() if item in options]
         if not selected and options:
             selected = [options[0]]

@@ -155,6 +155,28 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         app2._refresh_monitor_window_snapshot.assert_not_called()
         app2._schedule_monitor_window_refresh.assert_called_once()
 
+    def test_monitor_section_selected_ignores_programmatic_tree_updates(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        app = object.__new__(gui.SSMBGui)
+        app._updating_monitor_section_tree = True
+        app.monitor_section_tree = mock.Mock()
+        app._update_monitor_dashboard = mock.Mock()
+        gui.SSMBGui._on_monitor_section_selected(app)
+        app._update_monitor_dashboard.assert_not_called()
+
+    def test_monitor_plot_selected_ignores_programmatic_selector_updates(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        tree = mock.Mock()
+        app = object.__new__(gui.SSMBGui)
+        app._updating_monitor_plot_selector = True
+        app.monitor_plot_controls = {}
+        app.latest_monitor_summary = {}
+        app._update_monitor_dashboard = mock.Mock()
+        gui.SSMBGui._on_monitor_plot_selected(app, "machine_state", ["beam_current"], tree)
+        app._update_monitor_dashboard.assert_not_called()
+
     def test_monitor_window_render_smoke(self):
         import SSMB_experiment.ssmb_tool.gui as gui
         from SSMB_experiment.ssmb_tool.live_monitor import format_channel_snapshot, format_monitor_summary, summarize_live_monitor
