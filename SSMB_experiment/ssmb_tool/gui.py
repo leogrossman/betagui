@@ -12,7 +12,7 @@ from typing import Optional, Sequence
 from .config import LoggerConfig, SSMB_ROOT, parse_labeled_pvs
 from .epics_io import EpicsUnavailableError, ReadOnlyEpicsAdapter
 from .lattice import LatticeElement
-from .live_monitor import format_channel_snapshot, format_monitor_summary, summarize_live_monitor
+from .live_monitor import build_monitor_sections, format_channel_snapshot, format_monitor_summary, summarize_live_monitor
 from .log_now import BPM_NONLINEAR_MM, BPM_WARNING_MM, build_specs, estimate_passive_session_bytes, inventory_overview_lines, run_stage0_logger
 from .sweep import RF_PV_NAME, SweepRuntimeConfig, build_plan_from_hz, estimate_sweep_session_bytes, preview_lines, run_rf_sweep_session
 
@@ -49,12 +49,14 @@ class SSMBGui:
         self.monitor_window: Optional["tk.Toplevel"] = None
         self.lattice_window: Optional["tk.Toplevel"] = None
         self.latest_monitor_sample = None
+        self.latest_monitor_summary = None
         self.lattice_device_items = []
         self.stage0_stop_event: Optional[threading.Event] = None
         self._build_vars()
         self._build_ui()
         self._apply_profile()
         self._refresh_inventory()
+        self._open_monitor_window()
         self.root.after(100, self._drain_queue)
 
     def _build_vars(self) -> None:
@@ -463,6 +465,7 @@ class SSMBGui:
         summary_lines = payload.get("summary_lines", [])
         channel_lines = payload.get("channel_lines", [])
         self.latest_monitor_sample = payload.get("sample")
+        self.latest_monitor_summary = payload.get("summary")
         self._set_text_widget(self.monitor_summary_text, summary_lines)
         self._set_text_widget(self.monitor_channels_text, channel_lines)
         if self.monitor_window is not None and self.monitor_window.winfo_exists():
@@ -472,6 +475,7 @@ class SSMBGui:
                 self._set_text_widget(summary_widget, summary_lines)
             if channel_widget is not None:
                 self._set_text_widget(channel_widget, channel_lines)
+            self._update_monitor_dashboard(payload.get("summary"))
         self._refresh_lattice_view()
 
     def _run_in_worker(self, target, *args) -> None:
@@ -540,6 +544,7 @@ class SSMBGui:
                         "summary_lines": format_monitor_summary(summary),
                         "channel_lines": format_channel_snapshot(sample),
                         "sample": sample,
+                        "summary": summary,
                     }
                 )
                 sample_index += 1
@@ -568,23 +573,45 @@ class SSMBGui:
             return
         window = tk.Toplevel(self.root)
         window.title("SSMB Live Monitor")
-        window.geometry("1100x800")
-        frame = ttk.Frame(window, padding=10)
-        frame.pack(fill="both", expand=True)
-        frame.rowconfigure(1, weight=1)
-        frame.rowconfigure(3, weight=1)
-        frame.columnconfigure(0, weight=1)
-        ttk.Label(frame, text="Live SSMB summary").grid(row=0, column=0, sticky="w")
-        self.monitor_window_summary_text = tk.Text(frame, wrap="word", height=18)
-        self.monitor_window_summary_text.grid(row=1, column=0, sticky="nsew")
-        self.monitor_window_summary_text.configure(state="disabled")
-        ttk.Label(frame, text="Current channel snapshot").grid(row=2, column=0, sticky="w", pady=(8, 0))
-        self.monitor_window_channels_text = tk.Text(frame, wrap="none", height=20)
-        self.monitor_window_channels_text.grid(row=3, column=0, sticky="nsew")
+        window.geometry("1380x900")
+        outer = ttk.Frame(window, padding=10)
+        outer.pack(fill="both", expand=True)
+        outer.columnconfigure(0, weight=3)
+        outer.columnconfigure(1, weight=2)
+        outer.rowconfigure(0, weight=1)
+        left = ttk.Frame(outer)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        right = ttk.Frame(outer)
+        right.grid(row=0, column=1, sticky="nsew")
+        left.columnconfigure(0, weight=1)
+        left.columnconfigure(1, weight=1)
+        self.monitor_cards_container = left
+        self.monitor_section_widgets = []
+        for index in range(4):
+            card = ttk.Labelframe(left, text="Section", padding=8)
+            card.grid(row=index // 2, column=index % 2, sticky="nsew", padx=4, pady=4)
+            left.rowconfigure(index // 2, weight=1)
+            text = tk.Text(card, wrap="word", height=12)
+            text.pack(fill="both", expand=True)
+            text.configure(state="disabled")
+            self.monitor_section_widgets.append((card, text))
+        ttk.Label(right, text="Rolling SSMB monitor trends").grid(row=0, column=0, sticky="w")
+        self.monitor_plot_canvas = tk.Canvas(right, bg="white", width=440, height=260)
+        self.monitor_plot_canvas.grid(row=1, column=0, sticky="ew")
+        ttk.Label(right, text="Theory and equations").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self.monitor_equations_text = tk.Text(right, wrap="word", height=10)
+        self.monitor_equations_text.grid(row=3, column=0, sticky="nsew")
+        self.monitor_equations_text.configure(state="disabled")
+        ttk.Label(right, text="Current channel snapshot").grid(row=4, column=0, sticky="w", pady=(8, 0))
+        self.monitor_window_channels_text = tk.Text(right, wrap="none", height=18)
+        self.monitor_window_channels_text.grid(row=5, column=0, sticky="nsew")
         self.monitor_window_channels_text.configure(state="disabled")
+        right.rowconfigure(5, weight=1)
+        right.columnconfigure(0, weight=1)
         self.monitor_window = window
-        self._set_text_widget(self.monitor_window_summary_text, self.monitor_summary_text.get("1.0", "end").splitlines())
+        self.monitor_window_summary_text = None
         self._set_text_widget(self.monitor_window_channels_text, self.monitor_channels_text.get("1.0", "end").splitlines())
+        self._update_monitor_dashboard(self.latest_monitor_summary)
         window.protocol("WM_DELETE_WINDOW", self._close_monitor_window)
 
     def _close_monitor_window(self) -> None:
@@ -593,6 +620,98 @@ class SSMBGui:
         self.monitor_window = None
         self.monitor_window_summary_text = None
         self.monitor_window_channels_text = None
+        self.monitor_cards_container = None
+        self.monitor_section_widgets = []
+        self.monitor_plot_canvas = None
+        self.monitor_equations_text = None
+
+    def _update_monitor_dashboard(self, summary) -> None:
+        if self.monitor_window is None or not self.monitor_window.winfo_exists() or summary is None:
+            return
+        sections = build_monitor_sections(summary)
+        for idx, (card, text_widget) in enumerate(getattr(self, "monitor_section_widgets", [])):
+            if idx < len(sections):
+                section = sections[idx]
+                card.configure(text=section["title"])
+                lines = []
+                for label, value in section.get("rows", []):
+                    lines.append("%s: %s" % (label, value))
+                if section.get("note"):
+                    lines.extend(["", section["note"]])
+                self._set_text_widget(text_widget, lines)
+                self._color_text_widget(text_widget, section.get("color", "green"))
+            else:
+                card.configure(text="Section")
+                self._set_text_widget(text_widget, [])
+        eq_lines = []
+        for section in sections:
+            if section.get("equations"):
+                eq_lines.append(section["title"])
+                for eq in section["equations"]:
+                    eq_lines.append("  " + eq)
+                eq_lines.append("")
+        self._set_text_widget(self.monitor_equations_text, eq_lines)
+        self._draw_monitor_plots(summary.get("trend_data", {}))
+
+    def _color_text_widget(self, widget: "tk.Text", color_name: str) -> None:
+        colors = {"green": "#1b5e20", "yellow": "#8d6e00", "red": "#b71c1c"}
+        widget.configure(fg=colors.get(color_name, "#263238"))
+
+    def _draw_monitor_plots(self, trend_data: dict) -> None:
+        canvas = getattr(self, "monitor_plot_canvas", None)
+        if canvas is None:
+            return
+        canvas.delete("all")
+        width = int(canvas.winfo_width() or 440)
+        height = int(canvas.winfo_height() or 260)
+        self._draw_series(canvas, trend_data.get("rf_offset_hz", []), 20, 20, width - 20, 110, "#1e88e5", "ΔfRF [Hz]")
+        self._draw_series(canvas, trend_data.get("delta_s", []), 20, 140, width - 20, 230, "#43a047", "δₛ")
+        legacy = trend_data.get("legacy_alpha0", [])
+        bpm_summary = self.latest_monitor_summary or {}
+        bpm_alpha = ((bpm_summary.get("rf_sweep_metrics") or {}).get("alpha0_from_bpm_eta"))
+        if bpm_alpha is not None and legacy:
+            bpm_series = [bpm_alpha] * len(legacy)
+            self._draw_overlay_series(canvas, legacy, bpm_series, 240, 20, width - 20, 110, "#ef6c00", "#8e24aa", "α₀ legacy vs BPM")
+
+    def _draw_series(self, canvas, values, x0, y0, x1, y1, color, label):
+        canvas.create_rectangle(x0, y0, x1, y1, outline="#cfd8dc")
+        canvas.create_text(x0 + 4, y0 + 4, anchor="nw", text=label, fill="#37474f")
+        clean = [v for v in values if isinstance(v, (int, float, float))]
+        if len(clean) < 2:
+            canvas.create_text((x0 + x1) / 2, (y0 + y1) / 2, text="waiting for data", fill="#90a4ae")
+            return
+        pts = self._series_to_points(values, x0 + 8, y0 + 20, x1 - 8, y1 - 8)
+        if len(pts) >= 4:
+            canvas.create_line(*pts, fill=color, width=2, smooth=True)
+
+    def _draw_overlay_series(self, canvas, series_a, series_b, x0, y0, x1, y1, color_a, color_b, label):
+        canvas.create_rectangle(x0, y0, x1, y1, outline="#cfd8dc")
+        canvas.create_text(x0 + 4, y0 + 4, anchor="nw", text=label, fill="#37474f")
+        pts_a = self._series_to_points(series_a, x0 + 8, y0 + 20, x1 - 8, y1 - 8)
+        pts_b = self._series_to_points(series_b, x0 + 8, y0 + 20, x1 - 8, y1 - 8, reference=series_a + series_b)
+        if len(pts_a) >= 4:
+            canvas.create_line(*pts_a, fill=color_a, width=2, smooth=True)
+        if len(pts_b) >= 4:
+            canvas.create_line(*pts_b, fill=color_b, width=2, dash=(4, 2), smooth=True)
+
+    def _series_to_points(self, values, x0, y0, x1, y1, reference=None):
+        ref = reference if reference is not None else values
+        clean = [float(v) for v in ref if isinstance(v, (int, float))]
+        if len(clean) < 2:
+            return []
+        vmin = min(clean)
+        vmax = max(clean)
+        if vmax == vmin:
+            vmax = vmin + 1.0
+        step = (x1 - x0) / max(len(values) - 1, 1)
+        points = []
+        for idx, value in enumerate(values):
+            if not isinstance(value, (int, float)):
+                continue
+            x = x0 + idx * step
+            y = y1 - (float(value) - vmin) / (vmax - vmin) * (y1 - y0)
+            points.extend([x, y])
+        return points
 
     def _open_lattice_window(self) -> None:
         if self.lattice_window is not None and self.lattice_window.winfo_exists():

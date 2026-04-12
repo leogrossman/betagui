@@ -7,6 +7,7 @@ from .analyze_session import _linear_fit, alpha0_from_eta, fit_slip_factor
 RF_SWEEP_ACTIVE_THRESHOLD_KHZ = 0.002
 RF_SWEEP_ACTIVE_MIN_POINTS = 4
 BUMP_CORRECTOR_ACTIVE_THRESHOLD_A = 0.002
+ALPHA_CONTAMINATION_THRESHOLD = 5.0e-5
 
 
 def _valid_float(value) -> Optional[float]:
@@ -108,7 +109,133 @@ def summarize_live_monitor(samples: Sequence[Dict[str, object]]) -> Dict[str, ob
             "alpha0_difference": None if legacy_alpha is None or alpha_bpm is None else legacy_alpha - alpha_bpm,
         }
     summary["rf_sweep_metrics"] = sweep_metrics
+    summary["alpha_assessment"] = assess_alpha_monitor(summary)
+    summary["trend_data"] = extract_trend_data(samples)
     return summary
+
+
+def assess_alpha_monitor(summary: Dict[str, object]) -> Dict[str, object]:
+    bump = summary.get("bump_state", {})
+    sweep = summary.get("rf_sweep_metrics", {})
+    legacy = _valid_float((summary.get("current") or {}).get("legacy_alpha0_corrected"))
+    bpm = _valid_float(sweep.get("alpha0_from_bpm_eta"))
+    difference = None if legacy is None or bpm is None else legacy - bpm
+    contamination_likely = bool(
+        bump.get("active")
+        and sweep.get("available")
+        and difference is not None
+        and abs(difference) >= ALPHA_CONTAMINATION_THRESHOLD
+    )
+    if not sweep.get("available"):
+        status = "waiting_rf_sweep"
+        message = "Waiting for enough RF motion to fit phase slip and BPM-based α₀."
+        color = "yellow"
+    elif contamination_likely:
+        status = "bump_contaminated"
+        message = "Bump is active and legacy/BPM α₀ disagree strongly. Treat RF-only α₀ as contaminated."
+        color = "red"
+    else:
+        status = "usable"
+        message = "BPM-based α₀ is available. Compare it to the legacy shortcut, but prefer the BPM/η route."
+        color = "green"
+    return {
+        "status": status,
+        "message": message,
+        "color": color,
+        "legacy_alpha0": legacy,
+        "bpm_alpha0": bpm,
+        "difference": difference,
+        "bump_active": bool(bump.get("active")),
+        "contamination_likely": contamination_likely,
+    }
+
+
+def extract_trend_data(samples: Sequence[Dict[str, object]]) -> Dict[str, List[Optional[float]]]:
+    history = list(samples)[-120:]
+    return {
+        "index": [sample.get("sample_index") for sample in history],
+        "rf_offset_hz": [_valid_float(sample.get("derived", {}).get("rf_offset_hz")) for sample in history],
+        "delta_s": [_valid_float(sample.get("derived", {}).get("delta_l4_bpm_first_order")) for sample in history],
+        "legacy_alpha0": [_valid_float(sample.get("derived", {}).get("legacy_alpha0_corrected")) for sample in history],
+        "beam_energy_mev": [_valid_float(sample.get("derived", {}).get("beam_energy_from_bpm_mev")) for sample in history],
+        "sigma_delta": [_valid_float(sample.get("derived", {}).get("qpd_l4_sigma_delta_first_order")) for sample in history],
+    }
+
+
+def build_monitor_sections(summary: Dict[str, object]) -> List[Dict[str, object]]:
+    current = summary.get("current", {})
+    bump = summary.get("bump_state", {})
+    sweep = summary.get("rf_sweep_metrics", {})
+    alpha = summary.get("alpha_assessment", {})
+    sections = [
+        {
+            "title": "Machine State",
+            "color": "green" if not current.get("nonlinear_bpms") else "yellow",
+            "rows": [
+                ("Beam current", "%s mA" % _fmt(current.get("beam_current"))),
+                ("RF readback", "%s kHz" % _fmt(current.get("rf_readback_khz"))),
+                ("RF offset", "%s Hz" % _fmt(current.get("rf_offset_hz"))),
+                ("L4 bump", "%s" % bump.get("state_label", "unknown")),
+                ("Bump max |I|", "%s A" % _fmt(bump.get("max_abs_corrector_a"))),
+                ("Nonlinear BPMs", ", ".join(current.get("nonlinear_bpms") or []) or "none"),
+            ],
+            "equations": [],
+            "note": "This section is available even when no RF sweep is running.",
+        },
+        {
+            "title": "Energy And Momentum",
+            "color": "green",
+            "rows": [
+                ("δₛ from L4 BPMs", _fmt(current.get("delta_l4_bpm_first_order"))),
+                ("E from BPMs", "%s MeV" % _fmt(current.get("beam_energy_from_bpm_mev"))),
+                ("σδ from QPD00", _fmt(current.get("qpd_l4_sigma_delta_first_order"))),
+                ("σE from QPD00", "%s MeV" % _fmt(current.get("qpd_l4_sigma_energy_mev"))),
+                ("QPD00 σₓ", "%s mm" % _fmt(current.get("qpd_l4_sigma_x_mm"))),
+                ("QPD00 σᵧ", "%s mm" % _fmt(current.get("qpd_l4_sigma_y_mm"))),
+            ],
+            "equations": [
+                "xᵢ - xᵢ,ref ≈ Dₓ,ᵢ · δₛ",
+                "E ≈ E₀ · (1 + δₛ)",
+                "σₓ² ≈ βₓεₓ + (ηₓσδ)²",
+            ],
+            "note": "This is the practical energy/spread chain for L4: BPMs for centroid, QPD00 for spread proxy.",
+        },
+        {
+            "title": "α₀ And Phase Slip",
+            "color": alpha.get("color", "yellow"),
+            "rows": [
+                ("Legacy α₀", _fmt(alpha.get("legacy_alpha0"))),
+                ("BPM α₀", _fmt(alpha.get("bpm_alpha0"))),
+                ("Legacy - BPM", _fmt(alpha.get("difference"))),
+                ("η (phase slip)", _fmt(sweep.get("phase_slip_factor_eta"))),
+                ("Bump contamination", "likely" if alpha.get("contamination_likely") else "not evident"),
+            ],
+            "equations": [
+                "Δf_RF / f_RF ≈ -η · δₛ",
+                "α₀ = η + 1/γ²",
+                "α₀,legacy ∝ Qₛ² · E / (f_RF² · U_cav)",
+            ],
+            "note": alpha.get("message"),
+        },
+        {
+            "title": "Tunes And Chromatic Cross-Checks",
+            "color": "green" if sweep.get("available") else "yellow",
+            "rows": [
+                ("Qₓ", _fmt(current.get("tune_x_unitless"))),
+                ("Qᵧ", _fmt(current.get("tune_y_unitless"))),
+                ("Qₛ", _fmt(current.get("tune_s_unitless"))),
+                ("dQₓ/dδ", _fmt((sweep.get("qx_vs_delta") or {}).get("slope"))),
+                ("dQᵧ/dδ", _fmt((sweep.get("qy_vs_delta") or {}).get("slope"))),
+                ("dQₛ/dδ", _fmt((sweep.get("qs_vs_delta") or {}).get("slope"))),
+            ],
+            "equations": [
+                "Qₓ(δ) ≈ Qₓ0 + ξₓ δ",
+                "Qᵧ(δ) ≈ Qᵧ0 + ξᵧ δ",
+            ],
+            "note": "Treat tune slopes as cross-checks. The strongest SSMB chain remains RF → δₛ → η → α₀.",
+        },
+    ]
+    return sections
 
 
 def format_monitor_summary(summary: Dict[str, object]) -> List[str]:
