@@ -59,6 +59,8 @@ class SSMBExperimentLogNowTest(unittest.TestCase):
         self.assertEqual(lookup["l4_bump_feedback_deadband"].pv, "AKC13VP")
         self.assertEqual(lookup["rf_frequency_control_enable"].pv, "MCLKHGP:ctrl:enable")
         self.assertEqual(lookup["l4_bump_orbit_bpm_l4"].pv, "BPMZ1L4RP:rdX")
+        self.assertEqual(lookup["qpd_l4_sigma_y_avg"].pv, "QPD00ZL4RP:rdSigmaYav")
+        self.assertEqual(lookup["qpd_l2_sigma_y_avg"].pv, "QPD01ZL2RP:rdSigmaYav")
 
 
 if __name__ == "__main__":

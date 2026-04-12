@@ -61,6 +61,14 @@ Verified profile/beam-screen monitor names:
 - `QPD00ZL4RP` (`QPD00`, alias noted as `qpdz0rp`) in L4
 - `QPD01ZL2RP` (`QPD01`, alias noted from the control-room screen) in L2
 
+Confirmed from copied control-room scripts:
+
+- both QPD devices behave like synchrotron-radiation camera / profile monitors
+- direct channels seen in scripts include `rdSigmaX` and `rdSigmaY`
+- archived averaged channels seen in old logs include:
+  - `QPD00ZL4RP:rdSigmaYav`
+  - `QPD01ZL2RP:rdSigmaYav`
+
 ## Runtime Layout
 
 Local runtime output stays under:
