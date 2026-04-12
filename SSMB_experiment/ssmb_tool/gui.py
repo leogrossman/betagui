@@ -983,7 +983,7 @@ class SSMBGui:
         canvas = self.lattice_canvas
         canvas.delete("all")
         width = int(canvas.winfo_width() or 1000)
-        height = int(canvas.winfo_height() or 520)
+        height = int(canvas.winfo_height() or 620)
         left = 60
         right = width - 40
         y_track = 100
@@ -992,8 +992,11 @@ class SSMBGui:
             "bpm": 160,
             "qpd": 220,
             "rf": 280,
-            "magnet": 340,
-            "bump": 410,
+            "quadrupole": 350,
+            "sextupole": 410,
+            "dipole": 470,
+            "octupole": 530,
+            "bump": 590,
         }
         canvas.create_line(left, y_track, right, y_track, fill="#37474f", width=3)
         self.lattice_device_items = []
@@ -1007,9 +1010,28 @@ class SSMBGui:
             x1 = self._s_to_x(bounds[1], lattice, left, right)
             canvas.create_rectangle(x0, y_track - 18, x1, y_track + 18, fill=color, outline="")
             canvas.create_text((x0 + x1) / 2.0, row_positions["section"], text=name, fill="#263238", font=("Helvetica", 11, "bold"))
-        for row_name, row_y in (("BPMs", row_positions["bpm"]), ("QPD / optics", row_positions["qpd"]), ("RF / tune", row_positions["rf"]), ("Main lattice", row_positions["magnet"]), ("Bump correctors", row_positions["bump"])):
+        row_specs = (
+            ("BPMs", row_positions["bpm"]),
+            ("QPD / optics", row_positions["qpd"]),
+            ("RF / tune", row_positions["rf"]),
+            ("Quadrupoles", row_positions["quadrupole"]),
+            ("Sextupoles", row_positions["sextupole"]),
+            ("Dipoles", row_positions["dipole"]),
+            ("Octupoles", row_positions["octupole"]),
+            ("Bump correctors", row_positions["bump"]),
+        )
+        for row_name, row_y in row_specs:
             canvas.create_text(10, row_y, anchor="w", text=row_name, fill="#455a64", font=("Helvetica", 10, "bold"))
             canvas.create_line(left, row_y, right, row_y, fill="#eceff1", dash=(3, 3))
+        bpm_label_specs = {
+            "BPMZ1L2RP": {"text": "BPMZ1L2", "dy": -20, "anchor": "s"},
+            "BPMZ1K3RP": {"text": "BPMZ1K3", "dy": 20, "anchor": "n"},
+            "BPMZ1L4RP": {"text": "BPMZ1L4", "dy": -20, "anchor": "s"},
+            "BPMZ3L4RP": {"text": "BPMZ3L4", "dy": -20, "anchor": "s"},
+            "BPMZ4L4RP": {"text": "BPMZ4L4", "dy": 20, "anchor": "n"},
+            "BPMZ5L4RP": {"text": "BPMZ5L4", "dy": -20, "anchor": "s"},
+            "BPMZ6L4RP": {"text": "BPMZ6L4", "dy": 20, "anchor": "n"},
+        }
         for element in lattice.elements:
             if element.element_type not in ("Monitor", "Quadrupole", "Sextupole", "Octupole", "Dipole", "RFCavity"):
                 continue
@@ -1019,10 +1041,19 @@ class SSMBGui:
             live_payload = ((self.latest_monitor_sample or {}).get("channels", {}) or {}).get(pv_label or "", {})
             live_value = live_payload.get("value")
             marker_color, marker_outline = self._live_marker_style(element, live_value, color)
-            item_id = canvas.create_rectangle(x - 5, row_y - 12, x + 5, row_y + 12, fill=marker_color, outline=marker_outline, width=2 if marker_outline else 1)
+            half_width = self._lattice_marker_half_width(element)
+            item_id = canvas.create_rectangle(
+                x - half_width,
+                row_y - 12,
+                x + half_width,
+                row_y + 12,
+                fill=marker_color,
+                outline=marker_outline,
+                width=2 if marker_outline else 1,
+            )
             is_bump_feedback_bpm = element.family_name in ("BPMZ1K1RP", "BPMZ1L2RP", "BPMZ1K3RP", "BPMZ1L4RP")
             if is_bump_feedback_bpm:
-                canvas.create_rectangle(x - 8, row_y - 15, x + 8, row_y + 15, outline="#1565c0", width=2)
+                canvas.create_rectangle(x - (half_width + 3), row_y - 15, x + (half_width + 3), row_y + 15, outline="#1565c0", width=2)
             self.lattice_device_items.append(
                 {
                     "item_id": item_id,
@@ -1033,16 +1064,23 @@ class SSMBGui:
                     "notes": "%s in %s" % (element.element_type, element.section or "ring"),
                     "x": x,
                     "y": row_y,
+                    "row": row_y,
+                    "click_radius": 16 if element.element_type == "Monitor" else 18,
                 }
             )
             if element.element_type in ("RFCavity",):
                 canvas.create_text(x, row_y - 18, text=label or element.family_name, anchor="s", font=("Helvetica", 8, "bold"))
-            elif element.element_type == "Monitor" and element.family_name in ("BPMZ1L2RP", "BPMZ1K3RP", "BPMZ1L4RP", "BPMZ3L4RP", "BPMZ4L4RP", "BPMZ5L4RP", "BPMZ6L4RP"):
-                display = element.family_name.replace("RP", "")
+            elif element.element_type == "Monitor" and element.family_name in bpm_label_specs:
+                spec = bpm_label_specs[element.family_name]
                 label_fill = "#1565c0" if is_bump_feedback_bpm else "#263238"
-                canvas.create_text(x, row_y - 16, text=display, anchor="s", font=("Helvetica", 7, "bold" if is_bump_feedback_bpm else "normal"), fill=label_fill)
-                if isinstance(live_value, (int, float)):
-                    canvas.create_text(x, row_y + 16, text="%.2f" % float(live_value), anchor="n", font=("Helvetica", 7), fill="#37474f")
+                canvas.create_text(
+                    x,
+                    row_y + spec["dy"],
+                    text=spec["text"],
+                    anchor=spec["anchor"],
+                    font=("Helvetica", 7, "bold" if is_bump_feedback_bpm else "normal"),
+                    fill=label_fill,
+                )
         extras = [
             ("QPD00ZL4RP", "qpd_l4_sigma_x", "QPD00 SR camera/profile monitor in L4", 36.0, "#d81b60", row_positions["qpd"]),
             ("QPD01ZL2RP", "qpd_l2_sigma_x", "QPD01 SR camera/profile monitor in L2", 12.0, "#8e24aa", row_positions["qpd"]),
@@ -1084,13 +1122,15 @@ class SSMBGui:
                     "notes": notes,
                     "x": x,
                     "y": row_y,
+                    "row": row_y,
+                    "click_radius": 18,
                 }
             )
         bump_state = (self.latest_monitor_summary or {}).get("bump_state", {})
         bump_label = "BUMP ON" if bump_state.get("active") else "BUMP OFF/idle"
         bump_color = "#b71c1c" if bump_state.get("active") else "#1b5e20"
         canvas.create_text(right, 24, anchor="e", text=bump_label, fill=bump_color, font=("Helvetica", 12, "bold"))
-        canvas.create_text(left, height - 18, anchor="w", text="Click a marker for live PV mapping. Rows separate BPMs, QPDs, RF, main lattice, and bump correctors.", fill="#455a64")
+        canvas.create_text(left, height - 18, anchor="w", text="Click a marker for live PV mapping. Rows separate BPMs, optics, RF, and each magnet family for easier inspection.", fill="#455a64")
 
     def _refresh_lattice_view(self) -> None:
         if self.lattice_window is None or not self.lattice_window.winfo_exists():
@@ -1124,7 +1164,10 @@ class SSMBGui:
     def _on_lattice_click(self, event) -> None:
         if not self.lattice_device_items:
             return
-        nearest = min(self.lattice_device_items, key=lambda item: (item["x"] - event.x) ** 2 + (item["y"] - event.y) ** 2)
+        nearest = min(
+            self.lattice_device_items,
+            key=lambda item: (item["x"] - event.x) ** 2 + ((item.get("row", item["y"]) - event.y) * 1.35) ** 2,
+        )
         self._show_lattice_item_info(nearest)
 
     def _show_lattice_item_info(self, item: dict) -> None:
@@ -1217,13 +1260,22 @@ class SSMBGui:
     def _element_style(self, element: LatticeElement, row_positions):
         styles = {
             "Monitor": ("#1e88e5", element.family_name, row_positions["bpm"]),
-            "Quadrupole": ("#43a047", "", row_positions["magnet"]),
-            "Sextupole": ("#fdd835", "", row_positions["magnet"]),
-            "Octupole": ("#8e24aa", "", row_positions["magnet"]),
-            "Dipole": ("#6d4c41", "", row_positions["magnet"]),
+            "Quadrupole": ("#43a047", "", row_positions["quadrupole"]),
+            "Sextupole": ("#fdd835", "", row_positions["sextupole"]),
+            "Octupole": ("#8e24aa", "", row_positions["octupole"]),
+            "Dipole": ("#6d4c41", "", row_positions["dipole"]),
             "RFCavity": ("#c62828", "CAV", row_positions["rf"]),
         }
-        return styles.get(element.element_type, ("#90a4ae", "", row_positions["magnet"]))
+        return styles.get(element.element_type, ("#90a4ae", "", row_positions["quadrupole"]))
+
+    def _lattice_marker_half_width(self, element: LatticeElement) -> int:
+        if element.element_type == "Dipole":
+            return 9
+        if element.element_type in ("Quadrupole", "Sextupole", "Octupole"):
+            return 7
+        if element.element_type == "RFCavity":
+            return 8
+        return 6
 
     def _live_marker_style(self, element: LatticeElement, live_value, default_color: str):
         if element.element_type != "Monitor":

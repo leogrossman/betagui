@@ -130,6 +130,9 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         alpha_section = [section for section in sections if section["title"] == "α₀ And Phase Slip"][0]
         self.assertIn("α₀ = η + 1/γ²", alpha_section["equations"])
         self.assertTrue(any(label == "BPM α₀" for label, _value in alpha_section["rows"]))
+        tune_section = [section for section in sections if section["title"] == "Tunes And Chromatic Cross-Checks"][0]
+        self.assertTrue(any(label == "Qₓ source" and value == "TUNEZRP:measX" for label, value in tune_section["rows"]))
+        self.assertTrue(any(label == "Qₛ source" and value == "cumz4x003gp:tuneSyn" for label, value in tune_section["rows"]))
         light_section = [section for section in sections if section["title"] == "Coherent Light Monitor"][0]
         self.assertTrue(any(label == "P1 avg" for label, _value in light_section["rows"]))
         bump_section = [section for section in sections if section["title"] == "Bump Feedback / Orbit Lock"][0]
@@ -177,6 +180,8 @@ class SSMBExperimentLiveMonitorTest(unittest.TestCase):
         summary = summarize_live_monitor(samples)
         theory = build_theory_sections(summary)
         self.assertTrue(any(section["title"] == "2. Bump-Controlled Orbit Family" for section in theory))
+        raw_section = [section for section in theory if section["title"] == "1. Raw Instruments"][0]
+        self.assertTrue(any("TUNEZRP:measX" in line for line in raw_section["lines"]))
         self.assertIn("delta_s", summary["trend_data"])
         self.assertIn("alpha_difference", summary["trend_data"])
         self.assertIn("bump_orbit_error_mm", summary["trend_data"])
