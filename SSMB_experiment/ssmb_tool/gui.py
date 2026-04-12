@@ -1946,6 +1946,9 @@ class SSMBGui:
     def _on_monitor_plot_selected(self, section_key: str, options: Sequence[str], tree) -> None:
         if self._updating_monitor_plot_selector:
             return
+        if getattr(self, "_suppress_monitor_plot_selected_once", False):
+            self._suppress_monitor_plot_selected_once = False
+            return
         selected = [item for item in tree.selection() if item in options]
         if not selected and options:
             selected = [options[0]]
@@ -1954,10 +1957,12 @@ class SSMBGui:
         focused = selected[0] if selected else None
         if focused:
             current = [key for key in current if key in options]
-            if focused in current:
+            if not current:
+                current = [focused]
+            elif focused in current:
                 current = [focused] + [key for key in current if key != focused]
             else:
-                current = [focused]
+                current = [focused] + current
         if not current and options:
             current = [options[0]]
         self.monitor_plot_controls[section_key] = current
@@ -1980,6 +1985,7 @@ class SSMBGui:
         if not current and options:
             current = [options[0]]
         self.monitor_plot_controls[section_key] = current
+        self._suppress_monitor_plot_selected_once = True
         self._updating_monitor_plot_selector = True
         try:
             tree.selection_set((row_id,))
@@ -2224,6 +2230,11 @@ class SSMBGui:
             self.lattice_window.lift()
             return
         config = self._collect_logger_config(allow_writes=False)
+        config.include_candidate_bpm_scalars = True
+        config.include_ring_bpm_scalars = True
+        config.include_quadrupoles = True
+        config.include_sextupoles = True
+        config.include_octupoles = True
         lattice, specs = build_specs(config)
         window = tk.Toplevel(self.root)
         window.title("SSMB Live Lattice View")
@@ -2233,7 +2244,7 @@ class SSMBGui:
         outer.columnconfigure(0, weight=1)
         outer.columnconfigure(1, weight=0)
         outer.rowconfigure(0, weight=1)
-        canvas = tk.Canvas(outer, bg="white", height=520)
+        canvas = tk.Canvas(outer, bg="white", height=660)
         canvas.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         side = ttk.Frame(outer)
         side.grid(row=0, column=1, sticky="nsew")
@@ -2267,7 +2278,7 @@ class SSMBGui:
         canvas = self.lattice_canvas
         canvas.delete("all")
         width = int(canvas.winfo_width() or 1000)
-        height = int(canvas.winfo_height() or 620)
+        height = int(canvas.winfo_height() or 680)
         left = 60
         right = width - 40
         y_track = 100
@@ -2280,7 +2291,7 @@ class SSMBGui:
             "sextupole": 410,
             "dipole": 470,
             "octupole": 530,
-            "bump": 590,
+            "bump": 610,
         }
         canvas.create_line(left, y_track, right, y_track, fill="#37474f", width=3)
         self.lattice_device_items = []
@@ -2481,7 +2492,12 @@ class SSMBGui:
                 short_label = "Laser"
             else:
                 short_label = name.split(":")[0]
-            canvas.create_text(x, row_y - 14, text=short_label, anchor="s", font=("Helvetica", 8))
+            label_dy = -16
+            if name in ("P1 light monitor", "QPD00ZL4RP", "HS3P2L4RP:setCur"):
+                label_dy = -26
+            elif name in ("P3 light monitor", "QPD01ZL2RP", "HS3P1L4RP:setCur"):
+                label_dy = 18
+            canvas.create_text(x, row_y + label_dy, text=short_label, anchor="s" if label_dy < 0 else "n", font=("Helvetica", 8, "bold" if name.startswith("QPD") or name.startswith("P") else "normal"))
             if isinstance(live_value, (int, float)):
                 canvas.create_text(x, row_y + 12, text="%.3f" % float(live_value), anchor="n", font=("Helvetica", 7), fill="#5d4037")
             self.lattice_device_items.append(
@@ -2558,6 +2574,9 @@ class SSMBGui:
         pv = payload.get("pv") or item.get("pv")
         spec = self.live_spec_lookup.get(item.get("pv_label")) if item.get("pv_label") else None
         unit = (getattr(spec, "unit", "") or "")
+        if spec is None and item.get("pv_label") and self.lattice_specs is not None:
+            spec = spec_index(self.lattice_specs).get(item.get("pv_label"))
+            unit = (getattr(spec, "unit", "") or "")
         lines = [
             item.get("name", "device"),
             "",
@@ -2568,6 +2587,23 @@ class SSMBGui:
             "Live value: %s%s" % (value, (" %s" % unit) if unit else ""),
             "Notes: %s" % item.get("notes", ""),
         ]
+        if spec is not None:
+            lines.extend(
+                [
+                    "Tags: %s" % (", ".join(getattr(spec, "tags", ()) or ()) or "n/a"),
+                    "Inventory note: %s" % (getattr(spec, "notes", "") or "n/a"),
+                ]
+            )
+        if item.get("element_type") in ("Quadrupole", "Sextupole", "Octupole", "Dipole"):
+            lines.extend(
+                [
+                    "",
+                    "Magnet metadata:",
+                    "Section: %s" % ((item.get("notes", "").split(" in ", 1)[1]) if " in " in item.get("notes", "") else "ring"),
+                    "Power-supply PV mapping comes from the lattice export / inventory build.",
+                    "If the live monitor is not polling this magnet family, the live value can be n/a while the PV mapping and metadata are still shown here.",
+                ]
+            )
         if item.get("pv_label") == "qpd_l4_sigma_x":
             lines.extend(
                 [
