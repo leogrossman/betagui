@@ -52,6 +52,16 @@ LONG_STUDY_PLOT_MAX_POINTS = 480
 MONITOR_DASHBOARD_RENDER_MIN_S = 1.0
 MONITOR_WINDOW_RENDER_MIN_S = 1.0
 MONITOR_WINDOW_REFRESH_MS = 2000
+DEFAULT_MONITOR_SECTION_OVERLAYS = {
+    "machine_state": ["beam_current", "rf_offset_hz", "bump_strength_a"],
+    "bump_feedback": ["bump_orbit_error_mm", "bump_bpm_avg_mm", "bump_strength_a"],
+    "coherent_light": ["p1_h1_ampl_avg", "p3_h1_ampl_avg"],
+    "camera_temperature": ["climate_kw13_return_temp_c", "climate_sr_temp_c", "qpd_l4_center_x_avg_um"],
+    "p1_oscillation": ["p1_h1_ampl_avg", "climate_kw13_return_temp_c", "bump_orbit_error_mm"],
+    "energy_momentum": ["delta_s", "beam_energy_mev", "sigma_delta"],
+    "alpha_phase_slip": ["bpm_alpha0", "legacy_alpha0", "delta_s"],
+    "tunes_chromatic": ["tune_y", "tune_s", "delta_s"],
+}
 
 
 def _parse_text_mapping(text: str) -> dict[str, str]:
@@ -127,6 +137,7 @@ class SSMBGui:
         self.live_spec_lookup = {}
         self.bump_lab_plot_canvases = {}
         self.ssmb_study_canvases = []
+        self.ssmb_study_table = None
         self.oscillation_selected_candidate_key = None
         self.stage0_stop_event: Optional[threading.Event] = None
         self._monitor_cache_append_count = 0
@@ -504,6 +515,12 @@ class SSMBGui:
     def _window_samples_for_seconds(self, seconds: float) -> int:
         interval = self._monitor_interval_seconds()
         return max(10, int(math.ceil(max(interval, seconds) / interval)))
+
+    def _default_monitor_keys(self, section_key: str, options, default_trend):
+        keys = [key for key in DEFAULT_MONITOR_SECTION_OVERLAYS.get(section_key, []) if key in options]
+        if keys:
+            return keys
+        return [default_trend] if default_trend else []
 
     def _prepare_plot_series(self, values, *, window_seconds: float, max_points: int):
         if not values:
@@ -1419,7 +1436,7 @@ class SSMBGui:
         selector.column("metric", width=180, anchor="w")
         selector.column("value", width=96, anchor="e")
         selector.grid(row=1, column=0, sticky="ns")
-        text = tk.Text(side, wrap="word", height=14, width=38)
+        text = tk.Text(side, wrap="word", height=18, width=38)
         text.grid(row=2, column=0, sticky="ew", pady=(6, 0))
         text.configure(state="disabled")
         self.monitor_section_tree = section_tree
@@ -1876,7 +1893,7 @@ class SSMBGui:
         options = section.get("trend_options", [])
         current_keys = self.monitor_plot_controls.get(section["key"])
         if not current_keys:
-            current_keys = [section.get("default_trend")] if section.get("default_trend") else []
+            current_keys = self._default_monitor_keys(section["key"], options, section.get("default_trend"))
         current_keys = [key for key in current_keys if key in options]
         if not current_keys and options:
             current_keys = [options[0]]
@@ -2513,7 +2530,7 @@ class SSMBGui:
             fill = color
             outline = ""
             width_px = 1
-            if label.startswith("l4_bump_hcorr"):
+            if (label or "").startswith("l4_bump_hcorr"):
                 try:
                     current = abs(float(live_value))
                 except (TypeError, ValueError):
@@ -2745,6 +2762,9 @@ class SSMBGui:
         if key and key in trend_data:
             meta = trend_definitions().get(key, {"label": key, "color": "#1565c0"})
             series_payload.append((meta["label"], list(trend_data.get(key, [])), meta["color"]))
+            avg_values = [value for value in trend_data.get("bump_bpm_avg_mm", [])]
+            if item.get("name", "").startswith("BPMZ1") and avg_values:
+                series_payload.append(("4-BPM avg [mm]", avg_values, "#00838f"))
         elif item.get("element_type") == "RFCavity":
             for key in ("cavity_voltage_kv", "rf_readback_499mhz_khz", "rf_offset_hz"):
                 meta = trend_definitions().get(key, {"label": key, "color": "#1565c0"})
@@ -2800,6 +2820,10 @@ class SSMBGui:
             if len(first_values) >= 2:
                 slope = (first_values[-1] - first_values[0]) / max(len(first_values) - 1, 1)
                 canvas.create_text(width - 12, height - 24, anchor="se", text="slope %.3g/sample" % slope, fill="#546e7a", font=("Helvetica", 8))
+                fitted = [first_values[0] + slope * idx for idx in range(len(first_values))]
+                fit_points = self._series_to_points(fitted, 52, 48, width - 18, height - 32, reference=first_values + fitted)
+                if len(fit_points) >= 4:
+                    canvas.create_line(*fit_points, fill="#78909c", width=1, dash=(4, 3))
         channels = ((self.latest_monitor_sample or {}).get("channels", {}) or {})
         if item.get("name") == "QPD00ZL4RP":
             self._draw_beam_proxy(
@@ -2983,17 +3007,29 @@ class SSMBGui:
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
         frame.rowconfigure(1, weight=0)
-        frame.rowconfigure(2, weight=1)
+        frame.rowconfigure(2, weight=0)
+        frame.rowconfigure(3, weight=1)
         top = ttk.Frame(frame)
         top.grid(row=0, column=0, columnspan=2, sticky="ew")
         ttk.Button(top, text="Open Theory Window", command=self._open_theory_window).pack(side="left")
         ttk.Button(top, text="Open Oscillation Study", command=self._open_oscillation_window).pack(side="left", padx=6)
         ttk.Button(top, text="Open Lattice View", command=self._open_lattice_window).pack(side="left", padx=6)
-        text = tk.Text(frame, wrap="word", height=18)
-        text.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 8))
+        ttk.Button(top, text="Derived Quantity Help", command=self._open_theory_window).pack(side="left", padx=6)
+        table = ttk.Treeview(frame, columns=("quantity", "raw", "derived", "current"), show="headings", height=7)
+        table.heading("quantity", text="Quantity")
+        table.heading("raw", text="From raw data")
+        table.heading("derived", text="How derived")
+        table.heading("current", text="Current")
+        table.column("quantity", width=160, anchor="w")
+        table.column("raw", width=240, anchor="w")
+        table.column("derived", width=360, anchor="w")
+        table.column("current", width=120, anchor="e")
+        table.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 6))
+        text = tk.Text(frame, wrap="word", height=10)
+        text.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 8))
         text.configure(state="disabled")
         plots = ttk.Frame(frame)
-        plots.grid(row=2, column=0, columnspan=2, sticky="nsew")
+        plots.grid(row=3, column=0, columnspan=2, sticky="nsew")
         plots.columnconfigure(0, weight=1)
         plots.columnconfigure(1, weight=1)
         plots.rowconfigure(0, weight=1)
@@ -3005,6 +3041,7 @@ class SSMBGui:
             canvases.append(canvas)
         self.ssmb_study_window = window
         self.ssmb_study_text = text
+        self.ssmb_study_table = table
         self.ssmb_study_canvases = canvases
         self._update_ssmb_study_window(self.latest_monitor_summary)
         window.protocol("WM_DELETE_WINDOW", self._close_ssmb_study_window)
@@ -3014,6 +3051,7 @@ class SSMBGui:
             self.ssmb_study_window.destroy()
         self.ssmb_study_window = None
         self.ssmb_study_text = None
+        self.ssmb_study_table = None
         self.ssmb_study_canvases = []
 
     def _update_ssmb_study_window(self, summary) -> None:
@@ -3026,6 +3064,28 @@ class SSMBGui:
         resonance = safe_summary.get("ssmb_resonance", {}) or {}
         beam_stability = safe_summary.get("beam_stability", {}) or {}
         phase_quality = safe_summary.get("phase_scan_quality", {}) or {}
+        if self.ssmb_study_table is not None and self.ssmb_study_table.winfo_exists():
+            rows = [
+                ("δₛ", "L4 BPM offsets", "Fit δₛ from BPMZ3L4RP..BPMZ6L4RP using dispersive response", self._format_plot_value(current.get("delta_l4_bpm_first_order"))),
+                ("η", "RF readback + δₛ history", "Fit η from -Δf_RF/f_RF versus δₛ", self._format_plot_value(sweep.get("phase_slip_factor_eta"))),
+                ("α₀ BPM", "η + beam energy", "α₀ = η + 1/γ²", self._format_plot_value(sweep.get("alpha0_from_bpm_eta"))),
+                ("α₀ legacy", "Qs, RF, cavity V, beam E", "Old shortcut cross-check only", self._format_plot_value(current.get("legacy_alpha0_corrected"))),
+                ("Beam energy", "δₛ", "E ≈ E0 · (1 + δₛ)", self._format_plot_value(current.get("beam_energy_from_bpm_mev"))),
+                ("σδ", "QPD00 σx in L4", "First-order spread proxy in dispersive region", self._format_plot_value(current.get("qpd_l4_sigma_delta_first_order"))),
+                ("P1/P3", "scope harmonic monitors", "Optical SSMB observable versus RF, δₛ, and phase-scan quality", "%s / %s" % (self._format_plot_value(current.get("p1_h1_ampl_avg")), self._format_plot_value(current.get("p3_h1_ampl_avg")))),
+            ]
+            existing = set(self.ssmb_study_table.get_children())
+            desired = set()
+            for quantity, raw, derived, current_value in rows:
+                iid = quantity
+                desired.add(iid)
+                values = (quantity, raw, derived, current_value)
+                if self.ssmb_study_table.exists(iid):
+                    self.ssmb_study_table.item(iid, values=values)
+                else:
+                    self.ssmb_study_table.insert("", "end", iid=iid, values=values)
+            for iid in existing - desired:
+                self.ssmb_study_table.delete(iid)
         lines = [
             "SSMB Oscillation / Resonance Study",
             "",
@@ -3056,6 +3116,11 @@ class SSMBGui:
                     for check in (phase_quality.get("checks") or [])
                 ) or "n/a"
             ),
+            "",
+            "How the main derived quantities are measured",
+            "δₛ: reconstruct from the horizontal L4 BPM chain using dispersive response against a stored reference orbit.",
+            "η: fit from the RF sweep relation -Δf_RF / f_RF ≈ η · δₛ using reconstructed δₛ, not raw RF alone.",
+            "α₀: preferred live value is BPM α₀ = η + 1/γ². The legacy α₀ from Qs/RF/Ucav/E is shown only as a contamination-prone shortcut cross-check.",
             "",
             "Resonance sanity check",
             "Synchrotron period from Qs: %s" % self._format_short_duration(resonance.get("synchrotron_period_s")),

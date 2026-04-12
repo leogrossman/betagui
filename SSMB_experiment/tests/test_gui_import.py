@@ -300,6 +300,18 @@ class SSMBExperimentGuiImportTest(unittest.TestCase):
         self.assertEqual(result, "break")
         app._on_monitor_plot_toggle.assert_called_once()
 
+    def test_default_monitor_keys_prefers_section_overlay_bundle(self):
+        import SSMB_experiment.ssmb_tool.gui as gui
+
+        app = object.__new__(gui.SSMBGui)
+        keys = gui.SSMBGui._default_monitor_keys(
+            app,
+            "alpha_phase_slip",
+            ["legacy_alpha0", "bpm_alpha0", "delta_s", "rf_offset_hz"],
+            "alpha_difference",
+        )
+        self.assertEqual(keys, ["bpm_alpha0", "legacy_alpha0", "delta_s"])
+
     def test_monitor_window_render_smoke(self):
         import SSMB_experiment.ssmb_tool.gui as gui
         from SSMB_experiment.ssmb_tool.live_monitor import format_channel_snapshot, format_monitor_summary, summarize_live_monitor
