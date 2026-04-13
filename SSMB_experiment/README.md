@@ -142,6 +142,72 @@ interpreter was:
 
 - `~/.pyenv/versions/betagui/bin/python`
 
+## Ubuntu Laptop Demo Setup
+
+For a normal Ubuntu x86 laptop, the easiest non-control-room setup is a local
+`pyenv` Python `3.9.x` plus a small GUI/scientific stack. This keeps the
+control-room launch path unchanged while giving you a reproducible laptop demo
+environment.
+
+System packages:
+
+```bash
+sudo apt update
+sudo apt install -y \
+  build-essential curl git tk-dev python3-tk \
+  libbz2-dev libffi-dev liblzma-dev libncurses5-dev libncursesw5-dev \
+  libreadline-dev libsqlite3-dev libssl-dev zlib1g-dev
+```
+
+If you do not already have `pyenv`, install it first, then create a local
+Python:
+
+```bash
+pyenv install 3.9.19
+pyenv virtualenv 3.9.19 ssmb-demo
+pyenv local ssmb-demo
+```
+
+Install the Python packages needed for an offline GUI/demo:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install numpy matplotlib
+```
+
+If you also want live EPICS access on a machine that can see the accelerator
+network, add:
+
+```bash
+python -m pip install pyepics
+```
+
+Full GUI launch on the laptop:
+
+```bash
+cd /path/to/betagui/SSMB_experiment
+export MPLCONFIGDIR="$PWD/.ssmb_local/mplconfig"
+python ssmb_experiment_gui.py --safe-mode
+```
+
+Offline fake-data demo if you only want to show the monitor UI without EPICS:
+
+```bash
+cd /path/to/betagui
+export PYTHONPATH="$PWD"
+export MPLCONFIGDIR="$PWD/SSMB_experiment/.ssmb_local/mplconfig"
+python SSMB_experiment/monitor_window_sandbox.py --open-monitor --rate 2
+```
+
+Notes:
+
+- The full GUI can open without EPICS, but live machine PVs will only populate
+  on a machine that can actually reach the accelerator controls network.
+- The sandbox command is the safest presentation/demo path because it shows
+  live-looking plots without needing any machine connection.
+- `--safe-mode` is recommended on the laptop too, so the UI stays read-only by
+  default.
+
 ## Recommended Measurement Flow
 
 Suggested control-room order:
