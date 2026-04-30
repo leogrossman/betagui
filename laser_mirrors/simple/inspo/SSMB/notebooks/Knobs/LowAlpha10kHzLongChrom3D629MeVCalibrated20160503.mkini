@@ -1,0 +1,28 @@
+[Knob]
+; ****************************
+; Knob title
+; ****************************
+title=3D Chromatizität long, 629MeV LowAlpha calibrated
+; ****************************
+; default attribute
+; ****************************
+attribute=setCur
+; ****************************
+; default coefficient
+; ****************************
+coeff=1.00
+
+[Devices]
+; ****************************
+; device=attribute,coefficient
+; device:attribute,coefficient
+; ****************************
+S1P1RP:setCur, -4.980
+S1P2RP:setCur, -4.980
+S2P1RP:setCur, -3.425
+S2P2KRP:setCur,-3.425
+S2P2LRP:setCur,-3.425 
+S3P1RP:setCur,  1.753
+S3P2RP:setCur,  1.753
+
+

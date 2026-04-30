@@ -1,0 +1,50 @@
+--- Start BURT header
+Time:     2022-01-14 18:19:40
+Login ID: opip (Operator Interface)
+Eff  UID: 1251
+Group ID: 125
+Keywords: 
+Comments: ALL: 250MeV SSMB state 10kHz, very strong coherent signal due to coupling correction ! (Filter: <none>)
+Type:     Absolute
+Directory /opt/OPI/DataHandling/links/PROD/etc/req
+Req File: /var/tmp/filtout2023-01-27_10:18:49_0
+--- End BURT header
+S3P1RP:setCur 1 1.212190
+S3P2RP:setCur 1 1.212190
+S2P1RP:setCur 1 6.738500
+S1P1RP:setCur 1 4.061850
+S1P2RP:setCur 1 4.066150
+S2P2LRP:setCur 1 7.521500
+S2P2KRP:setCur 1 7.521500
+Q1P1K1RP:setCur 1 19.1129
+Q1P2K1RP:setCur 1 19.1129
+Q1P1L2RP:setCur 1 21.4273
+Q1P2L2RP:setCur 1 21.5060
+Q1P1K3RP:setCur 1 19.1129
+Q1P2K3RP:setCur 1 19.1129
+Q1P1L4RP:setCur 1 19.1129
+Q1P2L4RP:setCur 1 19.1129
+Q2P1K1RP:setCur 1 27.8500
+Q2P2K1RP:setCur 1 27.8500
+Q2P1L2RP:setCur 1 26.2414
+Q2P2L2RP:setCur 1 26.2414
+Q2P1K3RP:setCur 1 27.8500
+Q2P2K3RP:setCur 1 27.8500
+Q2P1L4RP:setCur 1 26.2414
+Q2P2L4RP:setCur 1 26.2414
+Q3P1K1RP:setCur 1 30.4781
+Q3P2K1RP:setCur 1 30.4781
+Q3P1L2RP:setCur 1 30.4168
+Q3P2L2RP:setCur 1 30.4168
+Q3P1K3RP:setCur 1 30.4781
+Q3P2K3RP:setCur 1 30.4781
+Q3P1L4RP:setCur 1 30.4168
+Q3P2L4RP:setCur 1 30.4168
+CQS1P1L2RP:setCur 1 -0.0800
+CQS1P2L2RP:setCur 1 0.0000
+CQS1P1L4RP:setCur 1 0.0200
+CQS1P2L4RP:setCur 1 0.0000
+OP2RP:setCur 1 -2.0000
+OP1RP:setCur 1 -2.0000
+
+
