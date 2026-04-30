@@ -249,10 +249,20 @@ class ScanRunner:
     ) -> None:
         assert self.session_dir is not None
         start = time.perf_counter()
+        total_points = len(points)
+        self.debug(f"Starting {points[0].mode if points else 'scan'} with {total_points} points. Session dir: {self.session_dir}")
         for point in points:
             if self._stop_requested.is_set():
+                self.debug("Stop requested before next point. Ending scan gracefully.")
                 break
             targets = point.targets.as_dict()
+            self.debug(
+                "Point "
+                f"{point.index + 1}/{total_points}: "
+                f"angle=({point.angle_x_urad:.2f}, {point.angle_y_urad:.2f}) µrad "
+                f"offset=({point.offset_x_mm:.3f}, {point.offset_y_mm:.3f}) mm "
+                f"targets={{{', '.join(f'{key}={value:.2f}' for key, value in targets.items())}}}"
+            )
             moved = self.controller.move_absolute_group(
                 targets,
                 request_stop=self._stop_requested.is_set,
@@ -260,9 +270,11 @@ class ScanRunner:
                 command_path=self.session_dir / "last_move_plan.json",
             )
             if not moved:
+                self.debug(f"Move aborted at point {point.index + 1}/{total_points}.")
                 break
             if hasattr(self.signal_backend, "update_target") and point.angle_x_urad == point.angle_x_urad:
                 self.signal_backend.update_target(point.angle_x_urad, point.angle_y_urad)
+            self.debug(f"Point {point.index + 1}/{total_points}: move complete, dwelling for {max(0.0, self.config.scan.dwell_s):.2f} s.")
             time.sleep(max(0.0, self.config.scan.dwell_s))
             samples: list[float] = []
             for _ in range(max(1, self.config.scan.p1_samples_per_point)):
@@ -297,9 +309,24 @@ class ScanRunner:
                 rbv_m2_vertical=rbv["m2_vertical"],
             )
             self.measurements.append(measurement)
+            self.debug(
+                f"Point {point.index + 1}/{total_points}: "
+                f"{context.signal_label} avg={average:.6g} std={math.sqrt(variance):.6g} "
+                f"from {len(samples)} samples | "
+                f"RBV m1h={rbv['m1_horizontal']:.2f} m1v={rbv['m1_vertical']:.2f} "
+                f"m2h={rbv['m2_horizontal']:.2f} m2v={rbv['m2_vertical']:.2f}"
+            )
             on_measurement(measurement)
         self._write_session(points)
         best = choose_best_point(self.measurements, self.config.scan.objective)
+        if best is not None:
+            self.debug(
+                f"Scan finished. Best point: index={best.point_index} "
+                f"angle=({best.angle_x_urad:.2f}, {best.angle_y_urad:.2f}) µrad "
+                f"{best.signal_label}={best.signal_value:.6g} objective={best.objective}"
+            )
+        else:
+            self.debug("Scan finished with no valid best point.")
         on_finish(self.session_dir, best)
 
     def _write_session(self, points: list[ScanPoint]) -> None:

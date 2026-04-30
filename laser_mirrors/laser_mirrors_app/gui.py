@@ -157,6 +157,7 @@ class LaserMirrorApp:
         self.scan_mode_var = tk.StringVar(value=self.config.scan.mode)
         self.solve_mode_var = tk.StringVar(value=self.config.scan.solve_mode)
         self.objective_var = tk.StringVar(value=self.config.scan.objective)
+        self.interpolate_angle_map_var = tk.BooleanVar(value=False)
         self.spiral_step_x_var = tk.DoubleVar(value=self.config.scan.spiral_step_x)
         self.spiral_step_y_var = tk.DoubleVar(value=self.config.scan.spiral_step_y)
         self.spiral_turns_var = tk.IntVar(value=self.config.scan.spiral_turns)
@@ -371,25 +372,28 @@ class LaserMirrorApp:
         self._add_labeled_combo(controls, "Sweep mode", self.scan_mode_var, ["both_2d", "horizontal_only", "vertical_only"], 8)
         self._add_labeled_combo(controls, "Solve mode", self.solve_mode_var, ["two_mirror_target", "mirror1_primary", "mirror2_primary"], 9)
         self._add_labeled_combo(controls, "Objective", self.objective_var, ["max", "min"], 10)
-        ttk.Button(controls, text="Explain scan modes", command=self._show_scan_mode_help).grid(row=11, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Preview commands", command=self._preview_angle_scan).grid(row=11, column=1, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Start angle scan", command=self._start_angle_scan).grid(row=12, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Request stop", command=self._stop_scan).grid(row=12, column=1, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Move to best point", command=self._move_to_best_point).grid(row=13, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        ttk.Label(controls, textvariable=self.mode_help_var, wraplength=340, justify="left").grid(row=14, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Label(controls, textvariable=self.status_var, wraplength=340, justify="left").grid(row=15, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Label(controls, textvariable=self.best_var, wraplength=340, justify="left").grid(row=16, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Label(controls, textvariable=self.last_export_var, wraplength=340, justify="left").grid(row=17, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Button(controls, text="Save angle plot (.ps)", command=lambda: self._save_canvas_postscript(self.heatmap_canvas, "angle_scan_map.ps")).grid(row=18, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Checkbutton(controls, text="Interpolated background", variable=self.interpolate_angle_map_var, command=self._refresh_plots).grid(row=11, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Button(controls, text="Explain scan modes", command=self._show_scan_mode_help).grid(row=12, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Why this scan?", command=self._show_angle_theory).grid(row=12, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Preview commands", command=self._preview_angle_scan).grid(row=13, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Start angle scan", command=self._start_angle_scan).grid(row=13, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Request stop", command=self._stop_scan).grid(row=14, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Move to best point", command=self._move_to_best_point).grid(row=14, column=1, sticky="ew", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.mode_help_var, wraplength=340, justify="left").grid(row=15, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.status_var, wraplength=340, justify="left").grid(row=16, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.best_var, wraplength=340, justify="left").grid(row=17, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.last_export_var, wraplength=340, justify="left").grid(row=18, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Button(controls, text="Save angle plot (.ps)", command=lambda: self._save_canvas_postscript(self.heatmap_canvas, "angle_scan_map.ps")).grid(row=19, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self._add_help_button(
             controls,
-            18,
+            19,
             "2D angle map meaning:\n"
             "• each dot = one actually measured scan point\n"
-            "• x/y coordinates = requested interaction-angle coordinates at the undulator\n"
+            "• x/y coordinates = requested interaction-angle coordinates at the undulator, not raw motor coordinates\n"
             "• color = average of the selected signal over the samples-per-point window\n"
             "• cross marker = current recommended best point (max or min)\n\n"
-            "This matches the intended TUP70-style scan logic: build a response map in angle space and identify the optimum.",
+            "This matches the intended TUP70-style scan logic: build a response map in angle space and identify the optimum."
+            "\nOptional interpolation only paints a visual background between measured points; the dots remain the ground truth.",
         )
 
         self.heatmap_canvas = tk.Canvas(plots, width=760, height=380, bg="white", highlightthickness=1, highlightbackground="#cccccc")
@@ -401,7 +405,7 @@ class LaserMirrorApp:
             "Angle heatmap:\n"
             "The plotted points are the measured scan samples.\n"
             "Colors encode the average selected signal at each point.\n"
-            "This is not an interpolated field yet; it is the directly measured point cloud.",
+            "Optional interpolation paints a tiled background between measured points, but the dots remain the real data.",
         )
         self._attach_tooltip(
             self.progress_canvas,
@@ -588,6 +592,31 @@ class LaserMirrorApp:
                 "Closest to Carsten's idea:\n"
                 "Use one of the PRIMARY modes. The right default depends on which mirror you trust more as the\n"
                 "driving mirror in the control room. This app defaults to mirror1_primary."
+            ),
+        )
+
+    def _show_angle_theory(self) -> None:
+        messagebox.showinfo(
+            "Why this angle scan exists",
+            (
+                "Carsten's idea is not to scan one mirror in isolation. The goal is to vary the interaction angle of the laser at the undulator "
+                "while keeping the hit point in space as fixed as possible.\n\n"
+                "That is why two mirrors matter:\n"
+                "• one mirror is the deliberate steering mirror\n"
+                "• the other mirror counter-steers so the beam still hits the same interaction point\n\n"
+                "Physics meaning of the plot:\n"
+                "• x-axis = horizontal interaction angle at the undulator [µrad]\n"
+                "• y-axis = vertical interaction angle at the undulator [µrad]\n"
+                "• color = measured response such as P1, P3, sigmaX, or sigmaY\n\n"
+                "Why not plot only motor steps?\n"
+                "• motor coordinates are implementation details\n"
+                "• the experiment cares about overlap and modulation versus interaction angle\n"
+                "• therefore angle space is the physics-facing map, while the exact motor targets are still saved in the session files\n\n"
+                "Solve modes:\n"
+                "• two_mirror_target: solve both mirrors from the requested undulator-space target directly\n"
+                "• mirror1_primary: mirror 1 is the scanned mirror, mirror 2 counter-steers to hold point\n"
+                "• mirror2_primary: mirror 2 is the scanned mirror, mirror 1 counter-steers to hold point\n\n"
+                "The most literal implementation of Carsten's email is one of the primary modes."
             ),
         )
 
@@ -1149,6 +1178,24 @@ class LaserMirrorApp:
         lo = min(values) if values else 0.0
         hi = max(values) if values else 1.0
         span = max(hi - lo, 1e-9)
+        if self.interpolate_angle_map_var.get():
+            x_values = sorted({row.angle_x_urad for row in relevant if row.angle_x_urad == row.angle_x_urad})
+            y_values = sorted({row.angle_y_urad for row in relevant if row.angle_y_urad == row.angle_y_urad})
+            if len(x_values) >= 2 and len(y_values) >= 2:
+                x_edges = self._midpoint_edges(x_values)
+                y_edges = self._midpoint_edges(y_values)
+                samples_by_xy = {(row.angle_x_urad, row.angle_y_urad): row for row in relevant}
+                for x_index, x_value in enumerate(x_values):
+                    for y_index, y_value in enumerate(y_values):
+                        row = samples_by_xy.get((x_value, y_value))
+                        if row is None or row.signal_average != row.signal_average:
+                            continue
+                        left = margin + (x_edges[x_index] - (center_x - span_x / 2.0)) / span_x * (w - 2 * margin)
+                        right = margin + (x_edges[x_index + 1] - (center_x - span_x / 2.0)) / span_x * (w - 2 * margin)
+                        top = h - margin - (y_edges[y_index + 1] - (center_y - span_y / 2.0)) / span_y * (h - 2 * margin)
+                        bottom = h - margin - (y_edges[y_index] - (center_y - span_y / 2.0)) / span_y * (h - 2 * margin)
+                        color = self._color_for_value((row.signal_average - lo) / span)
+                        canvas.create_rectangle(left, top, right, bottom, fill=color, outline="")
         for row in relevant:
             px = margin + (row.angle_x_urad - (center_x - span_x / 2.0)) / span_x * (w - 2 * margin)
             py = h - margin - (row.angle_y_urad - (center_y - span_y / 2.0)) / span_y * (h - 2 * margin)
@@ -1163,6 +1210,17 @@ class LaserMirrorApp:
         canvas.create_text(w // 2, 18, text=f"{self.signal_label_var.get()} vs interaction angle", font=("Helvetica", 11, "bold"))
         canvas.create_text(w // 2, h - 18, text="Angle X [µrad]")
         canvas.create_text(18, h // 2, text="Angle Y [µrad]", angle=90)
+
+    @staticmethod
+    def _midpoint_edges(values: list[float]) -> list[float]:
+        if len(values) == 1:
+            value = values[0]
+            return [value - 0.5, value + 0.5]
+        edges = [values[0] - (values[1] - values[0]) / 2.0]
+        for left, right in zip(values, values[1:]):
+            edges.append((left + right) / 2.0)
+        edges.append(values[-1] + (values[-1] - values[-2]) / 2.0)
+        return edges
 
     def _draw_progress(self) -> None:
         canvas = self.progress_canvas

@@ -126,6 +126,28 @@ The GUI currently treats:
 - `Offset X / Y [mm]` as the held interaction-point offset
 - `Center X / Y [µrad]` and `Span X / Y [µrad]` as the scan coordinates
 
+### Why the 2D plot is in angle space
+
+The main physics plot is intentionally **not** a mirror-step plot.
+
+The central experimental question is:
+
+- for a fixed interaction point near the undulator,
+- how does the measured response change when the **laser interaction angle** changes?
+
+So the scan map uses:
+
+- `x` axis = horizontal interaction angle at the undulator
+- `y` axis = vertical interaction angle at the undulator
+- point color = measured signal average at that angle point
+
+Motor coordinates are still logged completely, but they are implementation coordinates.
+The angle map is the plot that best matches the overlap / modulation question from Carsten's email
+and the qualitative Fig. 7 style idea: build a response landscape in angle space and identify an optimum.
+
+The optional interpolated background in the GUI is only a visual guide.
+The measured dots remain the ground truth.
+
 ### Solve modes
 
 The angle scan supports three solve modes:
@@ -166,6 +188,26 @@ So the real commissioning question is:
 The GUI defaults to `mirror1_primary`, but this is still a commissioning choice, not
 an established physics truth.
 
+### What “best point” means
+
+The GUI can optimize either:
+
+- `max`
+- `min`
+
+for the currently selected signal.
+
+Examples:
+
+- for `P1` or `P3`, the interesting point is often the **maximum**
+- for some width or jitter metric, the interesting point might instead be the **minimum**
+
+So the recommended best point is simply:
+
+- the measured point in the scan with the best value under the selected objective
+
+The tool marks that point in the angle map and can move the mirrors back to that motor state.
+
 ## UI overview
 
 ### `Overview`
@@ -194,8 +236,10 @@ an established physics truth.
 - command preview popup
 - live 2D colored signal map
 - live signal-vs-point trace
+- optional interpolated heatmap background beneath the real measured dots
 - best-point recommendation
 - move-to-best-point button
+- live point-by-point debug narration while the scan is running
 
 ### `Mirror 2 spiral`
 
