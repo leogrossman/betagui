@@ -315,3 +315,6 @@ class ScanRunner:
                 writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
                 writer.writeheader()
                 writer.writerows(rows)
+        best = choose_best_point(self.measurements, self.config.scan.objective)
+        if best is not None:
+            (self.session_dir / "best_point.json").write_text(json.dumps(asdict(best), indent=2, sort_keys=True))

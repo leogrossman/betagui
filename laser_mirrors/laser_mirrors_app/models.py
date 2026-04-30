@@ -113,3 +113,33 @@ class BestPointRecommendation:
     offset_x_mm: float
     offset_y_mm: float
     targets: MotorTargets
+
+
+@dataclass
+class PassiveSample:
+    """One passive observation of motor state plus the selected live signal."""
+
+    elapsed_s: float
+    signal_label: str
+    signal_pv: str
+    signal_value: float
+    m1_horizontal: float
+    m1_vertical: float
+    m2_horizontal: float
+    m2_vertical: float
+    dmov_all: int
+    movn_any: int
+    source: str = "passive_poll"
+    timestamp_iso: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
+
+
+@dataclass(frozen=True)
+class PenTestPoint:
+    """One cautious motor stress-test command around a captured reference."""
+
+    index: int
+    motor_key: str
+    amplitude_steps: float
+    target_steps: float
+    dwell_s: float
+    note: str

@@ -26,6 +26,9 @@ The tool also includes:
 - controller-safe motion throttling
 - explicit previews of the EPICS motor commands that would be sent
 - graceful scan stop and hard emergency stop separation
+- passive monitoring mode that reconstructs quasi-sweeps from externally moved mirrors
+- controller pen-test diagnostics tab for cautious IOC stress probing
+- an offline digital twin that runs on a normal laptop without EPICS
 
 ## Important safety model
 
@@ -139,6 +142,30 @@ The angle scan supports three solve modes:
 
 This is the key place where the tool now goes beyond the simple early scripts.
 
+### Which one does Carsten really want?
+
+Carsten's wording was:
+
+> vary one mirror angle and keep the same point in space with the other mirror.
+
+That means the most literal implementation is **not** `two_mirror_target`.
+The most literal implementation is one of the **primary** modes:
+
+- `mirror1_primary`
+  - mirror 1 is the driving mirror
+  - mirror 2 is solved analytically to counter-steer and hold the interaction point
+- `mirror2_primary`
+  - mirror 2 is the driving mirror
+  - mirror 1 is solved analytically to counter-steer and hold the interaction point
+
+So the real commissioning question is:
+
+- which mirror do we want to use as the deliberately scanned mirror?
+- which mirror is mechanically/operationally better suited to be the compensator?
+
+The GUI defaults to `mirror1_primary`, but this is still a commissioning choice, not
+an established physics truth.
+
 ## UI overview
 
 ### `Overview`
@@ -174,6 +201,21 @@ This is the key place where the tool now goes beyond the simple early scripts.
 
 - legacy-style mirror-2 scan
 - useful for comparison with the older mirror scripts
+
+### `Passive monitor`
+
+- logs the selected signal plus all four motor RBVs at every poll
+- reconstructs passive parameter-space maps from observed motion
+- useful when an external tool or manual operation is moving the mirrors
+- lets you study a sweep without trusting this GUI to send motor commands
+
+### `Controller pen test`
+
+- intentionally experimental and conservative
+- ramps one motor around the current reference in tiny back-and-forth steps
+- returns toward the reference repeatedly
+- logs signal and motor alarm/state fields
+- meant to help diagnose controller/IOC crash sensitivity without making large moves
 
 ### `Debug / Logs`
 
@@ -294,7 +336,9 @@ Then:
 
 ## Output
 
-Run outputs are written under the system temp area:
+The output root is configurable in the GUI and saved in the config file.
+
+By default it is:
 
 ```text
 laser_mirror_runs/
@@ -307,8 +351,19 @@ Each scan creates a session directory with:
 - `commands.jsonl`
 - `measurements.csv`
 - `last_move_plan.json`
+- `best_point.json` (when available)
 
 There is also a diagnostics export button for motor snapshots.
+
+Each GUI launch also creates an application-session directory with:
+
+- `app.log`
+- `passive_samples.jsonl`
+- `passive_samples.csv`
+- `session_summary.json`
+
+That means even if mirrors are moved externally, the running GUI can still be used as a
+passive logging/reconstruction tool.
 
 ## Tests
 
@@ -316,6 +371,13 @@ From the repo root:
 
 ```bash
 python3 -m unittest discover -s laser_mirrors/tests -v
+```
+
+Digital twin on a laptop:
+
+```bash
+cd /path/to/betagui/laser_mirrors
+python3 laser_optics_digital_twin.py --animate
 ```
 
 This currently covers:
@@ -380,10 +442,13 @@ Be honest before beam time:
 | Mirror 2 spiral | Implemented | Separate tab |
 | Live 2D signal map | Implemented | Canvas-based |
 | Live 1D signal trace | Implemented | In Overview |
+| Passive quasi-sweep reconstruction | Implemented | Rebuilds signal maps from observed RBV motion |
 | Best-point recommendation | Implemented | `max` or `min` objective |
 | Move to best point | Implemented | Uses same safe motor path |
 | Preflight command preview | Implemented | For manual moves and scans |
-| Full optical CAD-style animation | Partial | Schematic only |
+| Controller pen test | Implemented | Small back-and-forth stress probe around reference |
+| Offline digital twin | Implemented | Runs on a laptop with no EPICS |
+| Full optical CAD-style animation | Partial | Faithful ordered schematic, but not surveyed metrology |
 | Measured feedback loop on beam/screen signal | Not yet | Future upgrade |
 | Controller/IOC model and bug archaeology | Not yet | Needs controls follow-up |
 

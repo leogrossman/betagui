@@ -1,22 +1,34 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
 import statistics
-import tempfile
+import threading
 import time
 from collections import deque
 from pathlib import Path
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 from .config import AppConfig
 from .geometry import LaserMirrorGeometry
 from .hardware import MOTOR_PVS, PVFactory, SIGNAL_PRESETS, MirrorController, build_signal_backend
-from .models import BestPointRecommendation, MeasurementRecord, MirrorAngles, MotorTargets, UndulatorTarget
+from .layout import default_optics_layout
+from .models import (
+    BestPointRecommendation,
+    MeasurementRecord,
+    MirrorAngles,
+    MotorTargets,
+    PassiveSample,
+    PenTestPoint,
+    UndulatorTarget,
+)
+from .monitoring import SessionRecorder
+from .pen_test import build_pen_test_sequence
 from .scan import ScanContext, ScanRunner, build_angle_scan_points, build_spiral_scan_points
-from .state import MirrorStateSnapshot, load_state, save_state
+from .state import load_state, save_state
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,6 +40,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 class LaserMirrorApp:
+    """Control-room UI for mirror steering, passive monitoring, and diagnostics.
+
+    The design intentionally keeps the previously validated motion core:
+    `MirrorController.move_absolute_group(...)` remains the single place where
+    real motor motion is executed. New features such as passive monitoring and
+    pen testing therefore reuse the same safety checks instead of bypassing
+    them with ad-hoc PV writes.
+    """
+
     def __init__(self, root: tk.Tk, config_path: Path, force_safe_mode: bool = False, force_write_mode: bool = False):
         self.root = root
         self.root.title("SSMB Laser Mirror Angle Scan Tool")
@@ -39,19 +60,36 @@ class LaserMirrorApp:
         if force_write_mode:
             self.config.controller.write_mode = True
         self.geometry = LaserMirrorGeometry(self.config.geometry)
-        self.output_root = Path(tempfile.gettempdir()) / "laser_mirror_runs"
+        self.output_root = self._resolve_output_root(self.config.controller.output_root)
         self.output_root.mkdir(parents=True, exist_ok=True)
+        self.session_recorder = SessionRecorder(self.output_root)
+        self.session_start = time.time()
         self.measurements: list[MeasurementRecord] = []
         self.best_point: BestPointRecommendation | None = None
+        self.pen_test_rows: list[dict[str, float | str]] = []
         self._poll_after_id: str | None = None
         self._signal_history: deque[float] = deque(maxlen=max(1, self.config.controller.p1_average_samples))
         self._signal_trace: deque[tuple[float, float]] = deque(maxlen=400)
+        self._passive_samples: deque[PassiveSample] = deque(maxlen=max(200, self.config.controller.motor_history_points * 4))
+        self._motor_history: dict[str, deque[tuple[float, float]]] = {
+            key: deque(maxlen=max(50, self.config.controller.motor_history_points)) for key in MOTOR_PVS
+        }
+        self._last_passive_sample: PassiveSample | None = None
+        self._pen_test_thread: threading.Thread | None = None
+        self._pen_test_stop = threading.Event()
         self._build_state()
         self._build_ui()
         self._restore_legacy_state()
         self._connect_backends()
         self._draw_geometry_preview()
         self._schedule_signal_poll()
+        self._log(f"Application session directory: {self.session_recorder.session_dir}")
+
+    def _resolve_output_root(self, configured: str) -> Path:
+        path = Path(configured).expanduser()
+        if not path.is_absolute():
+            path = (self.config_path.parent / path).resolve()
+        return path
 
     def _build_state(self) -> None:
         self.safe_mode_var = tk.BooleanVar(value=self.config.controller.safe_mode)
@@ -59,6 +97,7 @@ class LaserMirrorApp:
         self.signal_preset_var = tk.StringVar(value=self._preset_from_pv(self.config.controller.signal_pv))
         self.signal_pv_var = tk.StringVar(value=self.config.controller.signal_pv)
         self.signal_label_var = tk.StringVar(value=self.config.controller.signal_label)
+        self.output_root_var = tk.StringVar(value=str(self.output_root))
         self.poll_interval_var = tk.IntVar(value=self.config.controller.p1_poll_interval_ms)
         self.average_samples_var = tk.IntVar(value=self.config.controller.p1_average_samples)
         self.max_step_var = tk.DoubleVar(value=self.config.controller.max_step_per_put)
@@ -85,6 +124,17 @@ class LaserMirrorApp:
         self.manual_motor_var = tk.StringVar(value="m2_horizontal")
         self.manual_delta_var = tk.DoubleVar(value=1.0)
         self.manual_absolute_var = tk.DoubleVar(value=0.0)
+        self.passive_x_motor_var = tk.StringVar(value="m1_horizontal")
+        self.passive_y_motor_var = tk.StringVar(value="m2_horizontal")
+        self.passive_status_var = tk.StringVar(value="No passive sweep reconstructed yet.")
+        self.pen_motor_var = tk.StringVar(value="m2_horizontal")
+        self.pen_start_var = tk.DoubleVar(value=self.config.controller.pen_test_start_steps)
+        self.pen_stop_var = tk.DoubleVar(value=self.config.controller.pen_test_stop_steps)
+        self.pen_increment_var = tk.DoubleVar(value=self.config.controller.pen_test_step_increment)
+        self.pen_cycles_var = tk.IntVar(value=self.config.controller.pen_test_cycles_per_level)
+        self.pen_pause_var = tk.DoubleVar(value=self.config.controller.pen_test_pause_s)
+        self.pen_status_var = tk.StringVar(value="Pen test idle.")
+        self.mode_help_var = tk.StringVar(value=self._scan_mode_help_text())
         self.status_var = tk.StringVar(value="Idle")
         self.runtime_var = tk.StringVar(value="Backends not connected yet.")
         self.best_var = tk.StringVar(value="No best point yet.")
@@ -108,16 +158,22 @@ class LaserMirrorApp:
         self.manual_frame = ttk.Frame(notebook, padding=10)
         self.angle_frame = ttk.Frame(notebook, padding=10)
         self.spiral_frame = ttk.Frame(notebook, padding=10)
+        self.passive_frame = ttk.Frame(notebook, padding=10)
+        self.pen_frame = ttk.Frame(notebook, padding=10)
         self.debug_frame = ttk.Frame(notebook, padding=10)
         notebook.add(self.overview_frame, text="Overview")
         notebook.add(self.manual_frame, text="Manual control")
         notebook.add(self.angle_frame, text="Angle scan")
         notebook.add(self.spiral_frame, text="Mirror 2 spiral")
+        notebook.add(self.passive_frame, text="Passive monitor")
+        notebook.add(self.pen_frame, text="Controller pen test")
         notebook.add(self.debug_frame, text="Debug / Logs")
         self._build_overview()
         self._build_manual()
         self._build_angle()
         self._build_spiral()
+        self._build_passive()
+        self._build_pen_test()
         self._build_debug()
 
     def _build_overview(self) -> None:
@@ -142,8 +198,13 @@ class LaserMirrorApp:
         self._add_labeled_entry(top, "Settle [s]", self.settle_var, 8)
         self._add_labeled_entry(top, "Max delta from ref [steps]", self.max_delta_var, 9)
         self._add_labeled_entry(top, "Max move window [steps]", self.max_absolute_move_var, 10)
-        ttk.Button(top, text="Reconnect backends", command=self._connect_backends).grid(row=11, column=0, pady=(8, 0), sticky="w")
-        ttk.Button(top, text="Save config", command=self._save_config).grid(row=11, column=1, pady=(8, 0), sticky="e")
+        ttk.Label(top, text="Output root").grid(row=11, column=0, sticky="w", pady=(8, 0))
+        output_row = ttk.Frame(top)
+        output_row.grid(row=11, column=1, sticky="ew", pady=(8, 0))
+        ttk.Entry(output_row, textvariable=self.output_root_var, width=28).pack(side="left", fill="x", expand=True)
+        ttk.Button(output_row, text="Browse…", command=self._browse_output_root).pack(side="left", padx=(6, 0))
+        ttk.Button(top, text="Reconnect backends", command=self._connect_backends).grid(row=12, column=0, pady=(8, 0), sticky="w")
+        ttk.Button(top, text="Save config", command=self._save_config).grid(row=12, column=1, pady=(8, 0), sticky="e")
 
         target = ttk.LabelFrame(left, text="Undulator-space target", padding=10)
         target.pack(fill="x", pady=(10, 0))
@@ -153,7 +214,7 @@ class LaserMirrorApp:
         ttk.Button(target, text="Return to startup reference", command=self._return_to_reference).grid(row=2, column=1, sticky="ew", pady=(8, 0))
         ttk.Button(target, text="Return to saved motor state", command=self._return_to_recovery_state).grid(row=3, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(target, text="Capture current RBV as reference", command=self._capture_reference).grid(row=3, column=1, sticky="ew", pady=(8, 0))
-        ttk.Label(target, textvariable=self.reference_var, wraplength=500, justify="left").grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(target, textvariable=self.reference_var, wraplength=580, justify="left").grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         self.motor_tree = ttk.Treeview(
             left,
@@ -185,19 +246,20 @@ class LaserMirrorApp:
         self._labeled_value(self.signal_box, "Rolling std", self.signal_std_var, 3)
         self._labeled_value(self.signal_box, "Samples in window", self.signal_samples_var, 4)
         self._labeled_value(self.signal_box, "Last update", self.signal_last_update_var, 5)
-        self.signal_trace_canvas = tk.Canvas(self.signal_box, width=360, height=160, bg="white", highlightthickness=1, highlightbackground="#cccccc")
+        self.signal_trace_canvas = tk.Canvas(self.signal_box, width=360, height=180, bg="white", highlightthickness=1, highlightbackground="#cccccc")
         self.signal_trace_canvas.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
         info = ttk.LabelFrame(right, text="Runtime", padding=10)
         info.pack(fill="x", pady=(10, 0))
-        ttk.Label(info, textvariable=self.runtime_var, wraplength=360, justify="left").pack(anchor="w")
-        ttk.Label(info, text=f"Legacy state file: {self.legacy_state_path}", wraplength=360, justify="left").pack(anchor="w", pady=(6, 0))
-        ttk.Label(info, text=f"Motor recovery file: {self.motor_recovery_path}", wraplength=360, justify="left").pack(anchor="w", pady=(6, 0))
-        ttk.Label(info, text=f"Last command file: {self.last_command_path}", wraplength=360, justify="left").pack(anchor="w", pady=(6, 0))
+        ttk.Label(info, textvariable=self.runtime_var, wraplength=420, justify="left").pack(anchor="w")
+        ttk.Label(info, text=f"Legacy state file: {self.legacy_state_path}", wraplength=420, justify="left").pack(anchor="w", pady=(6, 0))
+        ttk.Label(info, text=f"Motor recovery file: {self.motor_recovery_path}", wraplength=420, justify="left").pack(anchor="w", pady=(6, 0))
+        ttk.Label(info, text=f"Last command file: {self.last_command_path}", wraplength=420, justify="left").pack(anchor="w", pady=(6, 0))
+        ttk.Label(info, text=f"Application session: {self.session_recorder.session_dir}", wraplength=420, justify="left").pack(anchor="w", pady=(6, 0))
 
-        schematic = ttk.LabelFrame(right, text="Laser steering schematic", padding=10)
+        schematic = ttk.LabelFrame(right, text="PoP II steering layout", padding=10)
         schematic.pack(fill="both", expand=True, pady=(10, 0))
-        self.geometry_canvas = tk.Canvas(schematic, width=380, height=280, bg="white", highlightthickness=1, highlightbackground="#cccccc")
+        self.geometry_canvas = tk.Canvas(schematic, width=520, height=360, bg="white", highlightthickness=1, highlightbackground="#cccccc")
         self.geometry_canvas.pack(fill="both", expand=True)
 
     def _build_manual(self) -> None:
@@ -221,7 +283,7 @@ class LaserMirrorApp:
             note,
             text=(
                 "Manual commands use the same ramped EPICS `.VAL` path as scans.\n"
-                "Every real command is written to the debug log and to the last-command file.\n"
+                "Every real command is written to the debug log, session log, and last-command file.\n"
                 "Use tiny steps first. Prefer graceful scan stop over hard `.STOP` unless needed."
             ),
             wraplength=420,
@@ -246,17 +308,20 @@ class LaserMirrorApp:
         self._add_labeled_combo(controls, "Sweep mode", self.scan_mode_var, ["both_2d", "horizontal_only", "vertical_only"], 8)
         self._add_labeled_combo(controls, "Solve mode", self.solve_mode_var, ["two_mirror_target", "mirror1_primary", "mirror2_primary"], 9)
         self._add_labeled_combo(controls, "Objective", self.objective_var, ["max", "min"], 10)
-        ttk.Button(controls, text="Preview commands", command=self._preview_angle_scan).grid(row=11, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Start angle scan", command=self._start_angle_scan).grid(row=11, column=1, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Request stop", command=self._stop_scan).grid(row=12, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Move to best point", command=self._move_to_best_point).grid(row=12, column=1, sticky="ew", pady=(8, 0))
-        ttk.Label(controls, textvariable=self.status_var, wraplength=320, justify="left").grid(row=13, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Label(controls, textvariable=self.best_var, wraplength=320, justify="left").grid(row=14, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Label(controls, textvariable=self.last_export_var, wraplength=320, justify="left").grid(row=15, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Button(controls, text="Explain scan modes", command=self._show_scan_mode_help).grid(row=11, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Preview commands", command=self._preview_angle_scan).grid(row=11, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Start angle scan", command=self._start_angle_scan).grid(row=12, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Request stop", command=self._stop_scan).grid(row=12, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Move to best point", command=self._move_to_best_point).grid(row=13, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.mode_help_var, wraplength=340, justify="left").grid(row=14, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.status_var, wraplength=340, justify="left").grid(row=15, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.best_var, wraplength=340, justify="left").grid(row=16, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.last_export_var, wraplength=340, justify="left").grid(row=17, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Button(controls, text="Save angle plot (.ps)", command=lambda: self._save_canvas_postscript(self.heatmap_canvas, "angle_scan_map.ps")).grid(row=18, column=0, columnspan=2, sticky="ew", pady=(8, 0))
 
-        self.heatmap_canvas = tk.Canvas(plots, width=700, height=360, bg="white", highlightthickness=1, highlightbackground="#cccccc")
+        self.heatmap_canvas = tk.Canvas(plots, width=760, height=380, bg="white", highlightthickness=1, highlightbackground="#cccccc")
         self.heatmap_canvas.pack(fill="both", expand=True)
-        self.progress_canvas = tk.Canvas(plots, width=700, height=220, bg="white", highlightthickness=1, highlightbackground="#cccccc")
+        self.progress_canvas = tk.Canvas(plots, width=760, height=240, bg="white", highlightthickness=1, highlightbackground="#cccccc")
         self.progress_canvas.pack(fill="x", pady=(10, 0))
 
     def _build_spiral(self) -> None:
@@ -272,8 +337,72 @@ class LaserMirrorApp:
         ttk.Button(controls, text="Preview commands", command=self._preview_spiral_scan).grid(row=3, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(controls, text="Start spiral", command=self._start_spiral_scan).grid(row=3, column=1, sticky="ew", pady=(8, 0))
         ttk.Button(controls, text="Request stop", command=self._stop_scan).grid(row=4, column=0, sticky="ew", pady=(8, 0))
-        self.spiral_canvas = tk.Canvas(plots, width=700, height=420, bg="white", highlightthickness=1, highlightbackground="#cccccc")
+        ttk.Button(controls, text="Save spiral plot (.ps)", command=lambda: self._save_canvas_postscript(self.spiral_canvas, "mirror2_spiral_map.ps")).grid(row=4, column=1, sticky="ew", pady=(8, 0))
+        self.spiral_canvas = tk.Canvas(plots, width=760, height=440, bg="white", highlightthickness=1, highlightbackground="#cccccc")
         self.spiral_canvas.pack(fill="both", expand=True)
+
+    def _build_passive(self) -> None:
+        controls = ttk.LabelFrame(self.passive_frame, text="Passive monitor / reconstruction", padding=10)
+        controls.grid(row=0, column=0, sticky="nsew")
+        plots = ttk.Frame(self.passive_frame)
+        plots.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+        self.passive_frame.columnconfigure(1, weight=1)
+        self.passive_frame.rowconfigure(0, weight=1)
+        self._add_labeled_combo(controls, "X motor", self.passive_x_motor_var, list(MOTOR_PVS.keys()), 0)
+        self._add_labeled_combo(controls, "Y motor", self.passive_y_motor_var, list(MOTOR_PVS.keys()), 1)
+        ttk.Button(controls, text="Clear passive buffer", command=self._clear_passive_buffer).grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Save passive plot (.ps)", command=lambda: self._save_canvas_postscript(self.passive_map_canvas, "passive_reconstruction.ps")).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.passive_status_var, wraplength=340, justify="left").grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(
+            controls,
+            text=(
+                "This tab keeps logging passive motor RBVs plus the selected signal at every poll.\n"
+                "That means you can reconstruct quasi-sweeps even if an external control program is moving the mirrors."
+            ),
+            wraplength=340,
+            justify="left",
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        map_box = ttk.LabelFrame(plots, text="Observed parameter-space map", padding=10)
+        map_box.pack(fill="both", expand=True)
+        self.passive_map_canvas = tk.Canvas(map_box, width=760, height=320, bg="white", highlightthickness=1, highlightbackground="#cccccc")
+        self.passive_map_canvas.pack(fill="both", expand=True)
+        trend_box = ttk.LabelFrame(plots, text="Signal and motor traces", padding=10)
+        trend_box.pack(fill="both", expand=True, pady=(10, 0))
+        self.passive_trend_canvas = tk.Canvas(trend_box, width=760, height=260, bg="white", highlightthickness=1, highlightbackground="#cccccc")
+        self.passive_trend_canvas.pack(fill="both", expand=True)
+
+    def _build_pen_test(self) -> None:
+        controls = ttk.LabelFrame(self.pen_frame, text="Experimental controller pen test", padding=10)
+        controls.grid(row=0, column=0, sticky="nsew")
+        plots = ttk.LabelFrame(self.pen_frame, text="Pen-test signal response", padding=10)
+        plots.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+        self.pen_frame.columnconfigure(1, weight=1)
+        self.pen_frame.rowconfigure(0, weight=1)
+        self._add_labeled_combo(controls, "Motor", self.pen_motor_var, list(MOTOR_PVS.keys()), 0)
+        self._add_labeled_entry(controls, "Start amplitude [steps]", self.pen_start_var, 1)
+        self._add_labeled_entry(controls, "Stop amplitude [steps]", self.pen_stop_var, 2)
+        self._add_labeled_entry(controls, "Increment [steps]", self.pen_increment_var, 3)
+        self._add_labeled_entry(controls, "Cycles / level", self.pen_cycles_var, 4)
+        self._add_labeled_entry(controls, "Pause [s]", self.pen_pause_var, 5)
+        ttk.Button(controls, text="Preview pen test", command=self._preview_pen_test).grid(row=6, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Start pen test", command=self._start_pen_test).grid(row=6, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Request stop", command=self._stop_pen_test).grid(row=7, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="STOP all (emergency)", command=self._hard_stop).grid(row=7, column=1, sticky="ew", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.pen_status_var, wraplength=340, justify="left").grid(row=8, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(
+            controls,
+            text=(
+                "This is intentionally experimental and conservative.\n"
+                "It ramps one motor around the captured reference in tiny back-and-forth moves,\n"
+                "returns to reference after each level, and logs signal + alarm state to help diagnose IOC/controller crashes."
+            ),
+            wraplength=340,
+            justify="left",
+        ).grid(row=9, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        self.pen_canvas = tk.Canvas(plots, width=760, height=420, bg="white", highlightthickness=1, highlightbackground="#cccccc")
+        self.pen_canvas.pack(fill="both", expand=True)
 
     def _build_debug(self) -> None:
         ttk.Label(self.debug_frame, text="Diagnostics, planned commands, and runtime logs.").pack(anchor="w")
@@ -281,7 +410,7 @@ class LaserMirrorApp:
         row.pack(fill="x", pady=(8, 8))
         ttk.Button(row, text="Refresh motor diagnostics", command=self._refresh_motor_table).pack(side="left")
         ttk.Button(row, text="Export diagnostics JSON", command=self._export_diagnostics).pack(side="left", padx=6)
-        self.debug_text = tk.Text(self.debug_frame, width=120, height=32)
+        self.debug_text = tk.Text(self.debug_frame, width=140, height=32)
         self.debug_text.pack(fill="both", expand=True)
 
     def _add_labeled_entry(self, parent: ttk.Widget, label: str, variable: tk.Variable, row: int, width: int = 14) -> None:
@@ -302,6 +431,34 @@ class LaserMirrorApp:
                 return key
         return "p1_h1_avg"
 
+    def _scan_mode_help_text(self) -> str:
+        return (
+            "Carsten mainly wants a PRIMARY solve mode: vary one mirror angle and let the other counter-steer\n"
+            "to keep the same interaction point.\n"
+            "Start with mirror1_primary if mirror 1 should be the driving mirror and mirror 2 should hold the point.\n"
+            "Use mirror2_primary if commissioning shows the opposite is more stable. two_mirror_target is a direct\n"
+            "undulator-space solve and is less close to the original request."
+        )
+
+    def _show_scan_mode_help(self) -> None:
+        messagebox.showinfo(
+            "Scan modes",
+            (
+                "Sweep modes:\n"
+                "• both_2d: 2D map in horizontal and vertical interaction-angle coordinates.\n"
+                "• horizontal_only: scan horizontal angle with the vertical angle fixed.\n"
+                "• vertical_only: scan vertical angle with the horizontal angle fixed.\n\n"
+                "Solve modes:\n"
+                "• two_mirror_target: solve both mirrors directly from the desired undulator offset + angle.\n"
+                "  Good for target-space scans, but not the most literal implementation of Carsten's request.\n"
+                "• mirror1_primary: sweep mirror 1, analytically solve mirror 2 to keep the point fixed.\n"
+                "• mirror2_primary: sweep mirror 2, analytically solve mirror 1 to keep the point fixed.\n\n"
+                "Closest to Carsten's idea:\n"
+                "Use one of the PRIMARY modes. The right default depends on which mirror you trust more as the\n"
+                "driving mirror in the control room. This app defaults to mirror1_primary."
+            ),
+        )
+
     def _pull_ui_into_config(self) -> None:
         self.config.controller.safe_mode = self.safe_mode_var.get()
         self.config.controller.write_mode = self.write_mode_var.get()
@@ -312,6 +469,7 @@ class LaserMirrorApp:
             self.signal_label_var.set(label)
         self.config.controller.signal_pv = self.signal_pv_var.get()
         self.config.controller.signal_label = self.signal_label_var.get()
+        self.config.controller.output_root = self.output_root_var.get()
         self.config.controller.p1_poll_interval_ms = max(100, int(self.poll_interval_var.get()))
         self.config.controller.p1_average_samples = max(1, int(self.average_samples_var.get()))
         self.config.controller.max_step_per_put = max(0.1, float(self.max_step_var.get()))
@@ -321,6 +479,11 @@ class LaserMirrorApp:
         self.config.controller.max_absolute_move_steps = max(1.0, float(self.max_absolute_move_var.get()))
         self.config.controller.startup_offset_x_mm = float(self.offset_x_var.get())
         self.config.controller.startup_offset_y_mm = float(self.offset_y_var.get())
+        self.config.controller.pen_test_start_steps = max(0.1, float(self.pen_start_var.get()))
+        self.config.controller.pen_test_stop_steps = max(self.config.controller.pen_test_start_steps, float(self.pen_stop_var.get()))
+        self.config.controller.pen_test_step_increment = max(0.1, float(self.pen_increment_var.get()))
+        self.config.controller.pen_test_cycles_per_level = max(1, int(self.pen_cycles_var.get()))
+        self.config.controller.pen_test_pause_s = max(0.0, float(self.pen_pause_var.get()))
         self.config.scan.offset_x_mm = float(self.offset_x_var.get())
         self.config.scan.offset_y_mm = float(self.offset_y_var.get())
         self.config.scan.center_angle_x_urad = float(self.center_x_var.get())
@@ -343,6 +506,12 @@ class LaserMirrorApp:
         self.config.save(self.config_path)
         self._log(f"Saved config to {self.config_path}")
 
+    def _browse_output_root(self) -> None:
+        chosen = filedialog.askdirectory(initialdir=self.output_root_var.get() or str(self.config_path.parent))
+        if chosen:
+            self.output_root_var.set(chosen)
+            self._log(f"Selected output root: {chosen}")
+
     def _safe_mode_changed(self) -> None:
         if self.safe_mode_var.get():
             self.write_mode_var.set(False)
@@ -355,6 +524,8 @@ class LaserMirrorApp:
 
     def _connect_backends(self) -> None:
         self._pull_ui_into_config()
+        self.output_root = self._resolve_output_root(self.output_root_var.get())
+        self.output_root.mkdir(parents=True, exist_ok=True)
         self.geometry = LaserMirrorGeometry(self.config.geometry)
         try:
             self.factory = PVFactory(self.config.controller.safe_mode)
@@ -472,6 +643,7 @@ class LaserMirrorApp:
     def _hard_stop(self) -> None:
         self.controller.stop_all()
         self.status_var.set("STOP sent to all motors.")
+        self._log("STOP all issued.")
 
     def _move_motor_targets(self, targets: dict[str, float], description: str) -> None:
         if self.scan_runner.is_running():
@@ -505,11 +677,13 @@ class LaserMirrorApp:
         self._log(json.dumps({"timestamp": record.timestamp, "action": record.action, "payload": record.payload}))
 
     def _preview_angle_scan(self) -> None:
+        self._pull_ui_into_config()
         points = build_angle_scan_points(self.config, self.geometry, self.current_reference_steps)
         preview = self.scan_runner.build_preview(points, self.current_reference_steps)
         self._show_scan_preview(preview, "Angle scan preview")
 
     def _preview_spiral_scan(self) -> None:
+        self._pull_ui_into_config()
         points = build_spiral_scan_points(self.config, self.current_reference_steps)
         preview = self.scan_runner.build_preview(points, self.current_reference_steps)
         self._show_scan_preview(preview, "Mirror 2 spiral preview")
@@ -624,6 +798,8 @@ class LaserMirrorApp:
             if hasattr(self.signal_backend, "update_target"):
                 self.signal_backend.update_target(self.center_x_var.get(), self.center_y_var.get())
             reading = self.signal_backend.read()
+            snapshots = self.controller.motor_snapshots()
+            elapsed = time.time() - self.session_start
             if reading.ok:
                 self.signal_live_var.set(f"{reading.value:.6g}")
                 self.signal_label_var.set(reading.label)
@@ -637,7 +813,28 @@ class LaserMirrorApp:
                 self.signal_samples_var.set(str(len(self._signal_history)))
                 self.signal_last_update_var.set(time.strftime("%H:%M:%S"))
                 self._draw_signal_trace()
-            self._refresh_motor_table()
+                for snapshot in snapshots:
+                    self._motor_history[snapshot.key].append((elapsed, snapshot.rbv))
+                sample = PassiveSample(
+                    elapsed_s=elapsed,
+                    signal_label=reading.label,
+                    signal_pv=reading.pv,
+                    signal_value=reading.value,
+                    m1_horizontal=self._snapshot_value(snapshots, "m1_horizontal"),
+                    m1_vertical=self._snapshot_value(snapshots, "m1_vertical"),
+                    m2_horizontal=self._snapshot_value(snapshots, "m2_horizontal"),
+                    m2_vertical=self._snapshot_value(snapshots, "m2_vertical"),
+                    dmov_all=int(all(snapshot.dmov for snapshot in snapshots)),
+                    movn_any=int(any(snapshot.movn for snapshot in snapshots)),
+                )
+                if self._should_record_passive_sample(sample):
+                    self._passive_samples.append(sample)
+                    if self.config.controller.passive_log_enabled:
+                        self.session_recorder.record_sample(sample)
+                    self._last_passive_sample = sample
+                self._draw_passive_map()
+                self._draw_passive_trend()
+            self._refresh_motor_table(snapshots)
         except Exception as exc:  # noqa: BLE001
             self.signal_live_var.set("ERR")
             self.signal_last_update_var.set(f"Error: {exc}")
@@ -646,10 +843,30 @@ class LaserMirrorApp:
             self._draw_geometry_preview()
             self._schedule_signal_poll()
 
-    def _refresh_motor_table(self) -> None:
+    def _snapshot_value(self, snapshots, key: str) -> float:
+        for snapshot in snapshots:
+            if snapshot.key == key:
+                return snapshot.rbv
+        return math.nan
+
+    def _should_record_passive_sample(self, sample: PassiveSample) -> bool:
+        if self.config.controller.passive_log_all_samples:
+            return True
+        if self._last_passive_sample is None:
+            return True
+        signal_delta = abs(sample.signal_value - self._last_passive_sample.signal_value)
+        if signal_delta >= self.config.controller.passive_capture_min_signal_delta:
+            return True
+        for key in MOTOR_PVS:
+            if abs(getattr(sample, key) - getattr(self._last_passive_sample, key)) >= self.config.controller.passive_capture_min_motor_delta_steps:
+                return True
+        return False
+
+    def _refresh_motor_table(self, snapshots=None) -> None:
         if not hasattr(self, "controller"):
             return
-        for snapshot in self.controller.motor_snapshots():
+        snapshots = snapshots or self.controller.motor_snapshots()
+        for snapshot in snapshots:
             self.motor_tree.item(
                 snapshot.key,
                 values=(
@@ -674,7 +891,7 @@ class LaserMirrorApp:
         canvas.delete("all")
         w = int(canvas["width"])
         h = int(canvas["height"])
-        margin = 30
+        margin = 34
         canvas.create_rectangle(margin, margin, w - margin, h - margin, outline="#999999")
         if len(self._signal_trace) < 2:
             canvas.create_text(w // 2, h // 2, text="Waiting for live signal history...", fill="#666666")
@@ -695,51 +912,91 @@ class LaserMirrorApp:
             prev = (px, py)
         canvas.create_text(w // 2, 14, text=f"{self.signal_label_var.get()} over time", font=("Helvetica", 10, "bold"))
 
+    def _current_targets_from_motors(self) -> tuple[UndulatorTarget, UndulatorTarget]:
+        current = self.controller.current_steps()
+        horizontal = MirrorAngles(
+            self.geometry.steps_to_urad(current["m1_horizontal"] - self.current_reference_steps["m1_horizontal"], "x", 1),
+            self.geometry.steps_to_urad(current["m2_horizontal"] - self.current_reference_steps["m2_horizontal"], "x", 2),
+        )
+        vertical = MirrorAngles(
+            self.geometry.steps_to_urad(current["m1_vertical"] - self.current_reference_steps["m1_vertical"], "y", 1),
+            self.geometry.steps_to_urad(current["m2_vertical"] - self.current_reference_steps["m2_vertical"], "y", 2),
+        )
+        return self.geometry.to_undulator_target(horizontal, "x"), self.geometry.to_undulator_target(vertical, "y")
+
     def _draw_geometry_preview(self) -> None:
         canvas = self.geometry_canvas
         canvas.delete("all")
         w = int(canvas["width"])
         h = int(canvas["height"])
-        y_mid = h // 2
-        m1_x = 80
-        fold_x = 155
-        m2_x = 220
-        und_x = 340
-        canvas.create_line(20, y_mid, w - 20, y_mid, fill="#888888", dash=(4, 4))
-        for x, label, color in [
-            (m1_x, "Mirror 1", "#1d4ed8"),
-            (fold_x, "Fixed fold", "#64748b"),
-            (m2_x, "Mirror 2", "#0f766e"),
-            (und_x, "U125", "#c2410c"),
-        ]:
-            canvas.create_text(x, 28, text=label, font=("Helvetica", 10, "bold"))
-            if label == "U125":
-                canvas.create_oval(x - 6, y_mid - 6, x + 6, y_mid + 6, fill=color, outline="")
+        layout = default_optics_layout()
+        x_values = [component.x_mm for component in layout]
+        x_min = min(x_values)
+        x_span = max(max(x_values) - x_min, 1.0)
+        top_y = h * 0.34
+        bottom_y = h * 0.72
+        hx_target, vy_target = self._current_targets_from_motors()
+
+        def map_x(x_mm: float) -> float:
+            return 24 + (x_mm - x_min) / x_span * (w - 48)
+
+        def map_y(base_y: float, y_mm: float) -> float:
+            return base_y - y_mm * 0.18
+
+        canvas.create_text(18, 12, anchor="w", text="PoP II steering layout (ordered from source material + exact steering distances)", font=("Helvetica", 10, "bold"))
+        canvas.create_text(18, 30, anchor="w", text="Upper lane: horizontal steering plane   Lower lane: vertical steering plane", fill="#475569")
+        canvas.create_line(20, top_y, w - 20, top_y, fill="#cbd5e1", dash=(4, 4))
+        canvas.create_line(20, bottom_y, w - 20, bottom_y, fill="#cbd5e1", dash=(4, 4))
+
+        colors = {
+            "laser": "#7c3aed",
+            "optic": "#0f766e",
+            "lens": "#2563eb",
+            "mirror": "#dc2626",
+            "diagnostic": "#059669",
+            "interaction": "#ea580c",
+            "label": "#111827",
+        }
+        for component in layout:
+            px = map_x(component.x_mm)
+            py_top = map_y(top_y, component.y_mm)
+            py_bottom = map_y(bottom_y, component.y_mm)
+            color = colors.get(component.kind, "#334155")
+            if component.kind == "lens":
+                canvas.create_oval(px - 6, py_top - 14, px + 6, py_top + 14, outline=color, width=2)
+                canvas.create_oval(px - 6, py_bottom - 14, px + 6, py_bottom + 14, outline=color, width=2)
+            elif component.kind == "mirror":
+                canvas.create_rectangle(px - 5, py_top - 18, px + 5, py_top + 18, fill=color, outline="")
+                canvas.create_rectangle(px - 5, py_bottom - 18, px + 5, py_bottom + 18, fill=color, outline="")
+            elif component.kind == "interaction":
+                canvas.create_oval(px - 6, py_top - 6, px + 6, py_top + 6, fill=color, outline="")
+                canvas.create_oval(px - 6, py_bottom - 6, px + 6, py_bottom + 6, fill=color, outline="")
             else:
-                canvas.create_rectangle(x - 8, y_mid - 20, x + 8, y_mid + 20, fill=color)
-        poly = self.geometry.ray_polyline(self.center_x_var.get(), self.offset_y_var.get())
-        xs = [point[0] for point in poly]
-        ys = [point[1] for point in poly]
-        x_min = min(xs)
-        x_span = max(max(xs) - x_min, 1.0)
-        y_abs = max(max(abs(value) for value in ys), 1.0)
-        prev = None
-        for x_mm, y_mm in poly:
-            px = 20 + (x_mm - x_min) / x_span * (w - 40)
-            py = y_mid - (y_mm / y_abs) * 55
-            if prev is not None:
-                canvas.create_line(prev[0], prev[1], px, py, fill="#111827", width=2)
-            prev = (px, py)
+                canvas.create_rectangle(px - 4, py_top - 10, px + 4, py_top + 10, fill=color, outline="")
+                canvas.create_rectangle(px - 4, py_bottom - 10, px + 4, py_bottom + 10, fill=color, outline="")
+            if component.kind != "label":
+                canvas.create_text(px, py_top - 24, text=component.label, font=("Helvetica", 8), angle=0)
+        h_poly = self.geometry.ray_polyline(hx_target.angle_urad, hx_target.offset_mm)
+        v_poly = self.geometry.ray_polyline(vy_target.angle_urad, vy_target.offset_mm)
+        for poly, base_y, color in ((h_poly, top_y, "#1d4ed8"), (v_poly, bottom_y, "#16a34a")):
+            prev = None
+            y_abs = max(max(abs(value) for _, value in poly), 1.0)
+            for x_mm, y_mm in poly:
+                px = map_x(x_mm)
+                py = base_y - (y_mm / y_abs) * 42
+                if prev is not None:
+                    canvas.create_line(prev[0], prev[1], px, py, fill=color, width=2)
+                prev = (px, py)
         canvas.create_text(
             18,
-            h - 42,
+            h - 38,
             anchor="w",
             text=(
-                f"Target: offset=({self.offset_x_var.get():.3f}, {self.offset_y_var.get():.3f}) mm, "
-                f"center angle=({self.center_x_var.get():.2f}, {self.center_y_var.get():.2f}) µrad"
+                f"Live inferred target: H offset={hx_target.offset_mm:.3f} mm angle={hx_target.angle_urad:.2f} µrad | "
+                f"V offset={vy_target.offset_mm:.3f} mm angle={vy_target.angle_urad:.2f} µrad"
             ),
         )
-        canvas.create_text(18, h - 22, anchor="w", text="Schematic only: one static fold mirror is included for visual context.")
+        canvas.create_text(18, h - 20, anchor="w", text="Critical distances are exact; upstream optics positions are schematic but ordered from the PoP II layout.")
 
     def _draw_angle_heatmap(self) -> None:
         canvas = self.heatmap_canvas
@@ -825,6 +1082,252 @@ class LaserMirrorApp:
             canvas.create_oval(px - 4, py - 4, px + 4, py + 4, fill=color, outline="")
         canvas.create_text(w // 2, 18, text=f"{self.signal_label_var.get()} vs mirror 2 position", font=("Helvetica", 11, "bold"))
 
+    def _draw_passive_map(self) -> None:
+        canvas = self.passive_map_canvas
+        canvas.delete("all")
+        w = int(canvas["width"])
+        h = int(canvas["height"])
+        margin = 48
+        canvas.create_rectangle(margin, margin, w - margin, h - margin, outline="#999999")
+        samples = list(self._passive_samples)
+        if len(samples) < 2:
+            canvas.create_text(w // 2, h // 2, text="Waiting for passive motor/signal history...", fill="#666666")
+            return
+        x_key = self.passive_x_motor_var.get()
+        y_key = self.passive_y_motor_var.get()
+        xs = [getattr(sample, x_key) for sample in samples]
+        ys = [getattr(sample, y_key) for sample in samples]
+        values = [sample.signal_value for sample in samples]
+        x_span = max(max(xs) - min(xs), 1e-6)
+        y_span = max(max(ys) - min(ys), 1e-6)
+        lo = min(values)
+        hi = max(values)
+        v_span = max(hi - lo, 1e-9)
+        best = max(samples, key=lambda row: row.signal_value)
+        for sample in samples:
+            px = margin + (getattr(sample, x_key) - min(xs)) / x_span * (w - 2 * margin)
+            py = h - margin - (getattr(sample, y_key) - min(ys)) / y_span * (h - 2 * margin)
+            color = self._color_for_value((sample.signal_value - lo) / v_span)
+            canvas.create_oval(px - 3, py - 3, px + 3, py + 3, fill=color, outline="")
+        best_x = margin + (getattr(best, x_key) - min(xs)) / x_span * (w - 2 * margin)
+        best_y = h - margin - (getattr(best, y_key) - min(ys)) / y_span * (h - 2 * margin)
+        canvas.create_line(best_x - 8, best_y, best_x + 8, best_y, fill="#111827", width=2)
+        canvas.create_line(best_x, best_y - 8, best_x, best_y + 8, fill="#111827", width=2)
+        self.passive_status_var.set(
+            f"Passive reconstruction: {len(samples)} samples | best {best.signal_label}={best.signal_value:.6g} "
+            f"at {x_key}={getattr(best, x_key):.2f}, {y_key}={getattr(best, y_key):.2f}"
+        )
+        canvas.create_text(w // 2, 18, text=f"Passive {self.signal_label_var.get()} map from observed mirror motion", font=("Helvetica", 11, "bold"))
+        canvas.create_text(w // 2, h - 18, text=f"{x_key} [steps]")
+        canvas.create_text(18, h // 2, text=f"{y_key} [steps]", angle=90)
+
+    def _draw_passive_trend(self) -> None:
+        canvas = self.passive_trend_canvas
+        canvas.delete("all")
+        w = int(canvas["width"])
+        h = int(canvas["height"])
+        margin = 40
+        canvas.create_rectangle(margin, margin, w - margin, h - margin, outline="#999999")
+        samples = list(self._passive_samples)
+        if len(samples) < 2:
+            canvas.create_text(w // 2, h // 2, text="Waiting for passive trend history...", fill="#666666")
+            return
+        x_key = self.passive_x_motor_var.get()
+        y_key = self.passive_y_motor_var.get()
+        series = [
+            ("signal", [sample.signal_value for sample in samples], "#1d4ed8"),
+            (x_key, [getattr(sample, x_key) for sample in samples], "#dc2626"),
+            (y_key, [getattr(sample, y_key) for sample in samples], "#16a34a"),
+        ]
+        for label, values, color in series:
+            lo = min(values)
+            hi = max(values)
+            span = max(hi - lo, 1e-9)
+            prev = None
+            for idx, value in enumerate(values):
+                px = margin + idx / max(len(values) - 1, 1) * (w - 2 * margin)
+                py = h - margin - (value - lo) / span * (h - 2 * margin)
+                if prev is not None:
+                    canvas.create_line(prev[0], prev[1], px, py, fill=color, width=2)
+                prev = (px, py)
+            canvas.create_text(w - 140, 18 + 16 * series.index((label, values, color)), anchor="w", text=label, fill=color)
+        canvas.create_text(w // 2, 18, text="Passive signal + motor traces (each trace scaled to its own range)", font=("Helvetica", 11, "bold"))
+
+    def _clear_passive_buffer(self) -> None:
+        self._passive_samples.clear()
+        for history in self._motor_history.values():
+            history.clear()
+        self._signal_trace.clear()
+        self._signal_history.clear()
+        self.passive_status_var.set("Passive buffer cleared.")
+        self._draw_passive_map()
+        self._draw_passive_trend()
+        self._draw_signal_trace()
+
+    def _preview_pen_test(self) -> None:
+        sequence = self._build_pen_test_plan()
+        if not sequence:
+            messagebox.showinfo("Pen test", "No pen-test points generated.")
+            return
+        lines = [
+            f"#{point.index} {point.motor_key} -> {point.target_steps:.2f} steps "
+            f"(amp={point.amplitude_steps:.2f}, dwell={point.dwell_s:.2f}s, {point.note})"
+            for point in sequence[:36]
+        ]
+        if len(sequence) > 36:
+            lines.append(f"... {len(sequence) - 36} more steps omitted")
+        messagebox.showinfo("Pen test preview", "\n".join(lines))
+
+    def _build_pen_test_plan(self) -> list[PenTestPoint]:
+        current = self.controller.current_steps()
+        reference = current.get(self.pen_motor_var.get(), 0.0)
+        return build_pen_test_sequence(
+            self.pen_motor_var.get(),
+            reference,
+            self.pen_start_var.get(),
+            self.pen_stop_var.get(),
+            self.pen_increment_var.get(),
+            self.pen_cycles_var.get(),
+            self.pen_pause_var.get(),
+        )
+
+    def _start_pen_test(self) -> None:
+        if self.scan_runner.is_running():
+            messagebox.showinfo("Scan running", "Stop the running scan first.")
+            return
+        if self._pen_test_thread is not None and self._pen_test_thread.is_alive():
+            messagebox.showinfo("Pen test running", "A pen test is already running.")
+            return
+        sequence = self._build_pen_test_plan()
+        if not sequence:
+            messagebox.showinfo("Pen test", "No pen-test points generated.")
+            return
+        preview = "\n".join(
+            f"#{point.index} {point.motor_key} -> {point.target_steps:.2f} steps ({point.note})"
+            for point in sequence[:24]
+        )
+        if not messagebox.askokcancel(
+            "Approve pen test",
+            preview + ("\n..." if len(sequence) > 24 else "") + "\n\nProceed with this cautious sequence?",
+        ):
+            return
+        self.pen_test_rows.clear()
+        self._pen_test_stop.clear()
+        self.pen_status_var.set("Pen test running...")
+        self._save_motor_recovery()
+        self._pen_test_thread = threading.Thread(target=self._run_pen_test, args=(sequence,), daemon=True)
+        self._pen_test_thread.start()
+
+    def _stop_pen_test(self) -> None:
+        self._pen_test_stop.set()
+        self.pen_status_var.set("Pen-test stop requested.")
+
+    def _run_pen_test(self, sequence: list[PenTestPoint]) -> None:
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        session_dir = self.output_root / f"laser_mirror_pen_test_{stamp}"
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / "plan.json").write_text(json.dumps([point.__dict__ for point in sequence], indent=2))
+        csv_path = session_dir / "pen_test.csv"
+        with csv_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=[
+                    "timestamp_iso",
+                    "index",
+                    "motor_key",
+                    "amplitude_steps",
+                    "target_steps",
+                    "dwell_s",
+                    "signal_value",
+                    "rbv_after",
+                    "dmov",
+                    "movn",
+                    "stat",
+                    "sevr",
+                    "note",
+                ],
+            )
+            writer.writeheader()
+            for point in sequence:
+                if self._pen_test_stop.is_set():
+                    break
+                current = self.controller.current_steps()
+                targets = dict(current)
+                targets[point.motor_key] = point.target_steps
+                try:
+                    self.controller.move_absolute_group(
+                        targets,
+                        request_stop=self._pen_test_stop.is_set,
+                        command_logger=self._append_command_record,
+                        command_path=self.last_command_path,
+                    )
+                    time.sleep(point.dwell_s)
+                    reading = self.signal_backend.read()
+                    snapshot = next(snapshot for snapshot in self.controller.motor_snapshots() if snapshot.key == point.motor_key)
+                    row = {
+                        "timestamp_iso": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "index": point.index,
+                        "motor_key": point.motor_key,
+                        "amplitude_steps": point.amplitude_steps,
+                        "target_steps": point.target_steps,
+                        "dwell_s": point.dwell_s,
+                        "signal_value": reading.value if reading.ok else math.nan,
+                        "rbv_after": snapshot.rbv,
+                        "dmov": snapshot.dmov,
+                        "movn": snapshot.movn,
+                        "stat": snapshot.stat,
+                        "sevr": snapshot.sevr,
+                        "note": point.note,
+                    }
+                    writer.writerow(row)
+                    handle.flush()
+                    self.pen_test_rows.append(row)
+                    self.root.after(0, self._draw_pen_test_plot)
+                    self.root.after(0, lambda msg=f"Pen test point {point.index + 1}/{len(sequence)} complete": self.pen_status_var.set(msg))
+                except Exception as exc:  # noqa: BLE001
+                    self.root.after(0, lambda exc=exc: self.pen_status_var.set(f"Pen test failed: {exc}"))
+                    self._log(f"Pen test failed: {exc}")
+                    break
+        self.root.after(0, lambda: self.pen_status_var.set(f"Pen test finished. Saved to {session_dir}"))
+        self._log(f"Pen test finished. Saved to {session_dir}")
+
+    def _draw_pen_test_plot(self) -> None:
+        canvas = self.pen_canvas
+        canvas.delete("all")
+        w = int(canvas["width"])
+        h = int(canvas["height"])
+        margin = 40
+        canvas.create_rectangle(margin, margin, w - margin, h - margin, outline="#999999")
+        if not self.pen_test_rows:
+            canvas.create_text(w // 2, h // 2, text="No pen-test data yet", fill="#666666")
+            return
+        values = [float(row["signal_value"]) for row in self.pen_test_rows if row["signal_value"] == row["signal_value"]]
+        lo = min(values) if values else 0.0
+        hi = max(values) if values else 1.0
+        span = max(hi - lo, 1e-9)
+        prev = None
+        for idx, row in enumerate(self.pen_test_rows):
+            px = margin + idx / max(len(self.pen_test_rows) - 1, 1) * (w - 2 * margin)
+            py = h - margin - (float(row["signal_value"]) - lo) / span * (h - 2 * margin)
+            if prev is not None:
+                canvas.create_line(prev[0], prev[1], px, py, fill="#7c3aed", width=2)
+            canvas.create_oval(px - 3, py - 3, px + 3, py + 3, fill="#ea580c", outline="")
+            prev = (px, py)
+        canvas.create_text(w // 2, 18, text="Pen-test signal response", font=("Helvetica", 11, "bold"))
+
+    def _save_canvas_postscript(self, canvas: tk.Canvas, default_name: str) -> None:
+        path = filedialog.asksaveasfilename(
+            title="Save plot",
+            initialdir=str(self.output_root),
+            initialfile=default_name,
+            defaultextension=".ps",
+            filetypes=[("PostScript", "*.ps"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        canvas.postscript(file=path, colormode="color")
+        self._log(f"Saved plot to {path}")
+
     def _color_for_value(self, value: float) -> str:
         value = max(0.0, min(1.0, float(value)))
         r = int(255 * value)
@@ -834,8 +1337,11 @@ class LaserMirrorApp:
 
     def _log(self, message: str) -> None:
         timestamp = time.strftime("%H:%M:%S")
-        self.debug_text.insert("end", f"[{timestamp}] {message}\n")
-        self.debug_text.see("end")
+        if hasattr(self, "debug_text"):
+            self.debug_text.insert("end", f"[{timestamp}] {message}\n")
+            self.debug_text.see("end")
+        if hasattr(self, "session_recorder"):
+            self.session_recorder.log(message)
 
     def on_close(self) -> None:
         if self._poll_after_id is not None:
@@ -846,10 +1352,25 @@ class LaserMirrorApp:
                 return
             self.scan_runner.request_stop()
             self.scan_runner.join(timeout=5.0)
+        if self._pen_test_thread is not None and self._pen_test_thread.is_alive():
+            self._pen_test_stop.set()
+            self._pen_test_thread.join(timeout=5.0)
         try:
             self._save_motor_recovery()
             self._save_legacy_state()
             self._save_config()
+            self.session_recorder.write_summary(
+                {
+                    "closed_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "output_root": str(self.output_root),
+                    "passive_samples_recorded": len(self._passive_samples),
+                    "scan_measurements": len(self.measurements),
+                    "pen_test_rows": len(self.pen_test_rows),
+                    "safe_mode": self.safe_mode_var.get(),
+                    "write_mode": self.write_mode_var.get(),
+                }
+            )
+            self.session_recorder.close()
         finally:
             self.root.destroy()
 

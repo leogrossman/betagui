@@ -20,6 +20,7 @@ class GeometryConfig:
 class ControllerConfig:
     safe_mode: bool = False
     write_mode: bool = False
+    output_root: str = "laser_mirror_runs"
     state_file_path: str = "src_materials/MirrorControl/mirror_state.ini"
     motor_recovery_path: str = "laser_mirror_motor_state.json"
     last_command_path: str = "laser_mirror_last_command.json"
@@ -39,6 +40,16 @@ class ControllerConfig:
     max_absolute_move_steps: float = 1200.0
     preview_required: bool = True
     alarm_lockout: bool = True
+    passive_log_enabled: bool = True
+    passive_log_all_samples: bool = True
+    passive_capture_min_signal_delta: float = 0.0
+    passive_capture_min_motor_delta_steps: float = 0.05
+    motor_history_points: int = 600
+    pen_test_start_steps: float = 2.0
+    pen_test_stop_steps: float = 12.0
+    pen_test_step_increment: float = 2.0
+    pen_test_cycles_per_level: int = 2
+    pen_test_pause_s: float = 1.0
 
 
 @dataclass
