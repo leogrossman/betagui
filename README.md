@@ -25,6 +25,22 @@ python3 control_room/betagui_cli.py --safe
 python3 control_room/betagui.py
 ```
 
+For the richer SSMB study workflow used in this repo, switch to the
+experimental branch and launch the isolated experiment copy:
+
+```bash
+git checkout codex/ssmb-experiment-tooling
+cd SSMB_experiment
+export MPLCONFIGDIR="$PWD/.ssmb_local/mplconfig"
+~/.pyenv/versions/betagui/bin/python ssmb_experiment_gui.py
+```
+
+For write-capable RF sweeps:
+
+```bash
+~/.pyenv/versions/betagui/bin/python ssmb_experiment_gui.py --allow-writes
+```
+
 `--safe` means live EPICS reads are allowed but machine writes are suppressed.
 Without `--safe`, both files behave like the legacy script and are write-capable
 by default.
