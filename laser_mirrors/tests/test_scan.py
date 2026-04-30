@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from laser_mirrors_app.config import AppConfig
 from laser_mirrors_app.geometry import LaserMirrorGeometry
-from laser_mirrors_app.hardware import SimulatedMirrorBackend, SimulatedP1Backend
-from laser_mirrors_app.models import MirrorAngles, UndulatorTarget
-from laser_mirrors_app.scan import ScanContext, ScanRunner, build_scan_grid
+from laser_mirrors_app.hardware import MirrorController, PVFactory, build_signal_backend
+from laser_mirrors_app.scan import ScanContext, ScanRunner, build_angle_scan_points, choose_best_point
 
 
 class ScanTests(unittest.TestCase):
@@ -16,7 +18,10 @@ class ScanTests(unittest.TestCase):
         config = AppConfig()
         config.scan.points_x = 5
         config.scan.points_y = 4
-        points = build_scan_grid(config, 0.0, 0.0)
+        geometry = LaserMirrorGeometry(config.geometry)
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        points = build_angle_scan_points(config, geometry, controller.capture_reference())
         self.assertEqual(len(points), 20)
 
     def test_runner_collects_measurements(self) -> None:
@@ -25,23 +30,20 @@ class ScanTests(unittest.TestCase):
         config.scan.points_y = 2
         config.scan.dwell_s = 0.0
         config.scan.p1_samples_per_point = 1
+        config.controller.inter_put_delay_s = 0.0
+        config.controller.settle_s = 0.0
+        config.controller.max_step_per_put = 1000.0
         geometry = LaserMirrorGeometry(config.geometry)
-        mirror = SimulatedMirrorBackend()
-        p1 = SimulatedP1Backend()
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        signal = build_signal_backend(True, "p1_h1_avg", None, factory)
         out = Path(tempfile.mkdtemp())
-        runner = ScanRunner(config, geometry, mirror, p1, lambda msg: None, out)
+        runner = ScanRunner(config, geometry, controller, signal, lambda msg: None, out)
         seen = []
         finished = []
-        ctx = ScanContext(
-            angles_x=MirrorAngles(0.0, 0.0),
-            angles_y=MirrorAngles(0.0, 0.0),
-            offset_x_mm=0.0,
-            offset_y_mm=0.0,
-            requested_x=UndulatorTarget(offset_mm=0.0, angle_urad=0.0),
-            requested_y=UndulatorTarget(offset_mm=0.0, angle_urad=0.0),
-        )
-        runner.start(ctx, on_measurement=seen.append, on_finish=finished.append)
-        runner._thread.join(timeout=5.0)
+        ctx = ScanContext(reference_steps=controller.capture_reference(), signal_label="P1 avg", signal_pv="simulated")
+        runner.start("angle", ctx, on_measurement=seen.append, on_finish=lambda path, best: finished.append((path, best)))
+        runner.join(timeout=5.0)
         self.assertEqual(len(seen), 4)
         self.assertEqual(len(runner.measurements), 4)
         self.assertTrue(finished)
@@ -52,29 +54,43 @@ class ScanTests(unittest.TestCase):
         config.scan.points_y = 1
         config.scan.dwell_s = 0.0
         config.scan.p1_samples_per_point = 1
+        config.controller.inter_put_delay_s = 0.0
+        config.controller.settle_s = 0.0
+        config.controller.max_step_per_put = 1000.0
         config.scan.solve_mode = "mirror1_primary"
         config.scan.center_angle_x_urad = 100.0
         config.scan.span_angle_x_urad = 20.0
+        config.scan.offset_x_mm = 0.25
         geometry = LaserMirrorGeometry(config.geometry)
-        mirror = SimulatedMirrorBackend()
-        p1 = SimulatedP1Backend()
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        signal = build_signal_backend(True, "p1_h1_avg", None, factory)
         out = Path(tempfile.mkdtemp())
-        runner = ScanRunner(config, geometry, mirror, p1, lambda msg: None, out)
+        runner = ScanRunner(config, geometry, controller, signal, lambda msg: None, out)
         seen = []
-        finished = []
-        ctx = ScanContext(
-            angles_x=MirrorAngles(0.0, 0.0),
-            angles_y=MirrorAngles(0.0, 0.0),
-            offset_x_mm=0.25,
-            offset_y_mm=0.0,
-            requested_x=UndulatorTarget(offset_mm=0.25, angle_urad=0.0),
-            requested_y=UndulatorTarget(offset_mm=0.0, angle_urad=0.0),
-        )
-        runner.start(ctx, on_measurement=seen.append, on_finish=finished.append)
+        ctx = ScanContext(reference_steps=controller.capture_reference(), signal_label="P1 avg", signal_pv="simulated")
+        runner.start("angle", ctx, on_measurement=seen.append, on_finish=lambda path, best: None)
         runner.join(timeout=5.0)
         self.assertTrue(seen)
         for measurement in seen:
             self.assertAlmostEqual(measurement.offset_x_mm, 0.25, places=6)
+
+    def test_choose_best_point_max(self) -> None:
+        config = AppConfig()
+        config.controller.inter_put_delay_s = 0.0
+        config.controller.settle_s = 0.0
+        config.controller.max_step_per_put = 1000.0
+        geometry = LaserMirrorGeometry(config.geometry)
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        signal = build_signal_backend(True, "p1_h1_avg", None, factory)
+        out = Path(tempfile.mkdtemp())
+        runner = ScanRunner(config, geometry, controller, signal, lambda msg: None, out)
+        ctx = ScanContext(reference_steps=controller.capture_reference(), signal_label="P1 avg", signal_pv="simulated")
+        runner.start("angle", ctx, on_measurement=lambda row: None, on_finish=lambda path, best: None)
+        runner.join(timeout=5.0)
+        best = choose_best_point(runner.measurements, "max")
+        self.assertIsNotNone(best)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from laser_mirrors_app.config import GeometryConfig
 from laser_mirrors_app.geometry import LaserMirrorGeometry

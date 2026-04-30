@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import sys
 import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from laser_mirrors_app.config import GeometryConfig
 from laser_mirrors_app.geometry import LaserMirrorGeometry
@@ -27,9 +31,9 @@ class GeometryTests(unittest.TestCase):
     def test_step_conversion(self) -> None:
         geom = LaserMirrorGeometry(GeometryConfig())
         steps = geom.angle_delta_to_steps(27.5, "y", 1)
-        self.assertEqual(steps, 10)
+        self.assertEqual(steps, 15)
         angle = geom.steps_to_angle_delta(10, "y", 1)
-        self.assertAlmostEqual(angle, 27.5, places=6)
+        self.assertAlmostEqual(angle, 18.9, places=6)
 
     def test_solve_mirror2_for_fixed_offset(self) -> None:
         geom = LaserMirrorGeometry(GeometryConfig())

@@ -5,51 +5,111 @@ from datetime import datetime
 from typing import Any
 
 
-@dataclass
+@dataclass(frozen=True)
 class MirrorAngles:
-    """Angular state of both mirrors in one plane, in microradians."""
+    """Angular state of both movable mirrors in one steering plane."""
 
     mirror1_urad: float
     mirror2_urad: float
 
 
-@dataclass
+@dataclass(frozen=True)
 class UndulatorTarget:
-    """Desired laser state at the undulator center for one plane."""
+    """Desired beam offset and interaction angle at the undulator center."""
 
     offset_mm: float
     angle_urad: float
 
 
-@dataclass
+@dataclass(frozen=True)
+class MotorTargets:
+    """Absolute EPICS motor targets in controller step units."""
+
+    m1_horizontal: float
+    m1_vertical: float
+    m2_horizontal: float
+    m2_vertical: float
+
+    def as_dict(self) -> dict[str, float]:
+        return {
+            "m1_horizontal": self.m1_horizontal,
+            "m1_vertical": self.m1_vertical,
+            "m2_horizontal": self.m2_horizontal,
+            "m2_vertical": self.m2_vertical,
+        }
+
+
+@dataclass(frozen=True)
 class CommandRecord:
     timestamp: str
-    backend: str
     action: str
     payload: dict[str, Any]
 
 
-@dataclass
+@dataclass(frozen=True)
+class SignalReading:
+    label: str
+    pv: str
+    value: float
+    ok: bool
+    timestamp_iso: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
+
+
+@dataclass(frozen=True)
+class PreviewCommand:
+    motor_key: str
+    start_rbv: float
+    target_val: float
+    ramp_values: tuple[float, ...]
+    wait_for_dmov: bool
+    settle_s: float
+
+
+@dataclass(frozen=True)
 class ScanPoint:
     index: int
-    target_x: UndulatorTarget
-    target_y: UndulatorTarget
-    note: str = ""
+    mode: str
+    angle_x_urad: float
+    angle_y_urad: float
+    offset_x_mm: float
+    offset_y_mm: float
+    targets: MotorTargets
 
 
 @dataclass
 class MeasurementRecord:
     point_index: int
+    mode: str
     elapsed_s: float
     angle_x_urad: float
     angle_y_urad: float
     offset_x_mm: float
     offset_y_mm: float
-    p1_value: float
+    signal_label: str
+    signal_pv: str
+    signal_value: float
+    signal_average: float
+    signal_std: float
     samples_used: int
-    mirror1_x_urad: float
-    mirror2_x_urad: float
-    mirror1_y_urad: float
-    mirror2_y_urad: float
-    command_batch_id: str
+    commanded_m1_horizontal: float
+    commanded_m1_vertical: float
+    commanded_m2_horizontal: float
+    commanded_m2_vertical: float
+    rbv_m1_horizontal: float
+    rbv_m1_vertical: float
+    rbv_m2_horizontal: float
+    rbv_m2_vertical: float
     timestamp_iso: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
+
+
+@dataclass
+class BestPointRecommendation:
+    objective: str
+    signal_label: str
+    signal_value: float
+    point_index: int
+    angle_x_urad: float
+    angle_y_urad: float
+    offset_x_mm: float
+    offset_y_mm: float
+    targets: MotorTargets
