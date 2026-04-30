@@ -39,6 +39,45 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+class ToolTip:
+    """Small hover tooltip for compact control-room explanations."""
+
+    def __init__(self, widget: tk.Widget, text: str):
+        self.widget = widget
+        self.text = text
+        self._window: tk.Toplevel | None = None
+        widget.bind("<Enter>", self._show)
+        widget.bind("<Leave>", self._hide)
+        widget.bind("<ButtonPress>", self._hide)
+
+    def _show(self, _event=None) -> None:
+        if self._window is not None:
+            return
+        x = self.widget.winfo_rootx() + 16
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 8
+        win = tk.Toplevel(self.widget)
+        win.wm_overrideredirect(True)
+        win.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(
+            win,
+            text=self.text,
+            justify="left",
+            background="#fff7d6",
+            relief="solid",
+            borderwidth=1,
+            wraplength=320,
+            padx=8,
+            pady=6,
+        )
+        label.pack()
+        self._window = win
+
+    def _hide(self, _event=None) -> None:
+        if self._window is not None:
+            self._window.destroy()
+            self._window = None
+
+
 class LaserMirrorApp:
     """Control-room UI for mirror steering, passive monitoring, and diagnostics.
 
@@ -205,6 +244,13 @@ class LaserMirrorApp:
         ttk.Button(output_row, text="Browse…", command=self._browse_output_root).pack(side="left", padx=(6, 0))
         ttk.Button(top, text="Reconnect backends", command=self._connect_backends).grid(row=12, column=0, pady=(8, 0), sticky="w")
         ttk.Button(top, text="Save config", command=self._save_config).grid(row=12, column=1, pady=(8, 0), sticky="e")
+        self._add_help_button(
+            top,
+            12,
+            "The selected signal preset is what all live plots and scans color by.\n"
+            "In read-only mode the GUI never sends motion commands.\n"
+            "In write mode every move still goes through the same ramped, DMOV-waiting safety path.",
+        )
 
         target = ttk.LabelFrame(left, text="Undulator-space target", padding=10)
         target.pack(fill="x", pady=(10, 0))
@@ -215,6 +261,12 @@ class LaserMirrorApp:
         ttk.Button(target, text="Return to saved motor state", command=self._return_to_recovery_state).grid(row=3, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(target, text="Capture current RBV as reference", command=self._capture_reference).grid(row=3, column=1, sticky="ew", pady=(8, 0))
         ttk.Label(target, textvariable=self.reference_var, wraplength=580, justify="left").grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self._add_help_button(
+            target,
+            4,
+            "Reference RBV is the anchor for all computed angle-scan targets.\n"
+            "Always capture a fresh reference when the controller has been restarted or when you are unsure whether the saved center is still valid.",
+        )
 
         self.motor_tree = ttk.Treeview(
             left,
@@ -261,6 +313,12 @@ class LaserMirrorApp:
         schematic.pack(fill="both", expand=True, pady=(10, 0))
         self.geometry_canvas = tk.Canvas(schematic, width=520, height=360, bg="white", highlightthickness=1, highlightbackground="#cccccc")
         self.geometry_canvas.pack(fill="both", expand=True)
+        self._attach_tooltip(
+            self.geometry_canvas,
+            "This is the ordered PoP II steering schematic.\n"
+            "The exact steering distances are preserved for Mirror 1 → Mirror 2 → undulator.\n"
+            "Upstream optics are drawn in documented order for faithful context, but not as surveyed CAD coordinates.",
+        )
 
     def _build_manual(self) -> None:
         left = ttk.Frame(self.manual_frame)
@@ -289,6 +347,11 @@ class LaserMirrorApp:
             wraplength=420,
             justify="left",
         ).pack(anchor="w")
+        self._attach_tooltip(
+            box,
+            "Manual moves use the same safe ramped `.VAL` logic as scans.\n"
+            "That means the controller sees small step layers with DMOV waits instead of one violent jump.",
+        )
 
     def _build_angle(self) -> None:
         controls = ttk.LabelFrame(self.angle_frame, text="Carsten angle scan", padding=10)
@@ -318,11 +381,34 @@ class LaserMirrorApp:
         ttk.Label(controls, textvariable=self.best_var, wraplength=340, justify="left").grid(row=16, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Label(controls, textvariable=self.last_export_var, wraplength=340, justify="left").grid(row=17, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Button(controls, text="Save angle plot (.ps)", command=lambda: self._save_canvas_postscript(self.heatmap_canvas, "angle_scan_map.ps")).grid(row=18, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self._add_help_button(
+            controls,
+            18,
+            "2D angle map meaning:\n"
+            "• each dot = one actually measured scan point\n"
+            "• x/y coordinates = requested interaction-angle coordinates at the undulator\n"
+            "• color = average of the selected signal over the samples-per-point window\n"
+            "• cross marker = current recommended best point (max or min)\n\n"
+            "This matches the intended TUP70-style scan logic: build a response map in angle space and identify the optimum.",
+        )
 
         self.heatmap_canvas = tk.Canvas(plots, width=760, height=380, bg="white", highlightthickness=1, highlightbackground="#cccccc")
         self.heatmap_canvas.pack(fill="both", expand=True)
         self.progress_canvas = tk.Canvas(plots, width=760, height=240, bg="white", highlightthickness=1, highlightbackground="#cccccc")
         self.progress_canvas.pack(fill="x", pady=(10, 0))
+        self._attach_tooltip(
+            self.heatmap_canvas,
+            "Angle heatmap:\n"
+            "The plotted points are the measured scan samples.\n"
+            "Colors encode the average selected signal at each point.\n"
+            "This is not an interpolated field yet; it is the directly measured point cloud.",
+        )
+        self._attach_tooltip(
+            self.progress_canvas,
+            "Progress trace:\n"
+            "Signal average vs scan index in acquisition order.\n"
+            "Useful for spotting drift, hysteresis, or a time trend during the scan.",
+        )
 
     def _build_spiral(self) -> None:
         controls = ttk.LabelFrame(self.spiral_frame, text="Mirror 2 spiral", padding=10)
@@ -338,8 +424,20 @@ class LaserMirrorApp:
         ttk.Button(controls, text="Start spiral", command=self._start_spiral_scan).grid(row=3, column=1, sticky="ew", pady=(8, 0))
         ttk.Button(controls, text="Request stop", command=self._stop_scan).grid(row=4, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(controls, text="Save spiral plot (.ps)", command=lambda: self._save_canvas_postscript(self.spiral_canvas, "mirror2_spiral_map.ps")).grid(row=4, column=1, sticky="ew", pady=(8, 0))
+        self._add_help_button(
+            controls,
+            4,
+            "Legacy spiral:\n"
+            "Mirror 2 horizontal and vertical motors follow the old rectangular spiral pattern.\n"
+            "This is mainly for comparison with the historical mirror scripts and quick local searches.",
+        )
         self.spiral_canvas = tk.Canvas(plots, width=760, height=440, bg="white", highlightthickness=1, highlightbackground="#cccccc")
         self.spiral_canvas.pack(fill="both", expand=True)
+        self._attach_tooltip(
+            self.spiral_canvas,
+            "Spiral map:\n"
+            "Each point is plotted at the commanded Mirror 2 step position and colored by the measured signal average.",
+        )
 
     def _build_passive(self) -> None:
         controls = ttk.LabelFrame(self.passive_frame, text="Passive monitor / reconstruction", padding=10)
@@ -362,6 +460,12 @@ class LaserMirrorApp:
             wraplength=340,
             justify="left",
         ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self._add_help_button(
+            controls,
+            5,
+            "Passive mode does not need this GUI to move the mirrors.\n"
+            "It simply records motor RBVs plus the selected signal every poll and turns the observed motion into a parameter-space plot.",
+        )
 
         map_box = ttk.LabelFrame(plots, text="Observed parameter-space map", padding=10)
         map_box.pack(fill="both", expand=True)
@@ -371,6 +475,13 @@ class LaserMirrorApp:
         trend_box.pack(fill="both", expand=True, pady=(10, 0))
         self.passive_trend_canvas = tk.Canvas(trend_box, width=760, height=260, bg="white", highlightthickness=1, highlightbackground="#cccccc")
         self.passive_trend_canvas.pack(fill="both", expand=True)
+        self._attach_tooltip(
+            self.passive_map_canvas,
+            "Passive map:\n"
+            "x/y axes are whichever two motor RBVs you selected.\n"
+            "Color is the observed signal value.\n"
+            "This is useful when an external mirror-control program is driving the sweep.",
+        )
 
     def _build_pen_test(self) -> None:
         controls = ttk.LabelFrame(self.pen_frame, text="Experimental controller pen test", padding=10)
@@ -400,9 +511,22 @@ class LaserMirrorApp:
             wraplength=340,
             justify="left",
         ).grid(row=9, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self._add_help_button(
+            controls,
+            9,
+            "Pen test:\n"
+            "A very cautious stress probe for the motor controller.\n"
+            "It moves one motor by small amplitudes around the current reference, returns to center after each level, and logs alarm/state behavior.",
+        )
 
         self.pen_canvas = tk.Canvas(plots, width=760, height=420, bg="white", highlightthickness=1, highlightbackground="#cccccc")
         self.pen_canvas.pack(fill="both", expand=True)
+        self._attach_tooltip(
+            self.pen_canvas,
+            "Pen-test trace:\n"
+            "Signal response over the commanded diagnostic sequence.\n"
+            "Use it together with the logged alarm and DMOV/MOVN state to understand controller limits.",
+        )
 
     def _build_debug(self) -> None:
         ttk.Label(self.debug_frame, text="Diagnostics, planned commands, and runtime logs.").pack(anchor="w")
@@ -412,6 +536,14 @@ class LaserMirrorApp:
         ttk.Button(row, text="Export diagnostics JSON", command=self._export_diagnostics).pack(side="left", padx=6)
         self.debug_text = tk.Text(self.debug_frame, width=140, height=32)
         self.debug_text.pack(fill="both", expand=True)
+
+    def _attach_tooltip(self, widget: tk.Widget, text: str) -> None:
+        ToolTip(widget, text)
+
+    def _add_help_button(self, parent: ttk.Widget, row: int, text: str) -> None:
+        button = ttk.Button(parent, text="?", width=2, command=lambda: messagebox.showinfo("Help", text))
+        button.grid(row=row, column=2, padx=(6, 0), sticky="w")
+        self._attach_tooltip(button, text)
 
     def _add_labeled_entry(self, parent: ttk.Widget, label: str, variable: tk.Variable, row: int, width: int = 14) -> None:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=2)
