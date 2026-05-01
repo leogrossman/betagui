@@ -19,6 +19,18 @@ Carsten's measurement idea is:
 - find a recommended best point
 - move back to that point safely
 
+The tool is organized around two standard jobs:
+
+1. **Find the best laser position**
+   - use the `Position search` tab
+   - coarse spiral on mirror 1 or mirror 2
+   - inspect the best point
+   - optionally run `local refine` around that best point
+2. **Find the best interaction angle while holding position fixed**
+   - use the `Angle scan` tab
+   - run a vertical-only or horizontal-only compensated scan
+   - use the best position from step 1 as your center/reference
+
 The tool also includes:
 
 - normal manual mirror control
@@ -57,8 +69,10 @@ Recommended commissioning pattern:
 3. capture current RBV as reference
 4. preview scan commands
 5. only then enable `--write-mode`
-6. start with a small `vertical_only` scan in a primary solve mode
-7. check the `Optics / Geometry` tab for the step-scale estimate before committing to a larger span
+6. use `Position search` first to find the best mirror position
+7. use `local refine` if needed to tighten around the best point
+8. then start with a small `vertical_only` scan in a primary solve mode
+9. check the `Optics / Geometry` tab for the step-scale estimate before committing to a larger span
 
 ## Launch modes
 
@@ -252,6 +266,23 @@ The 2D mode is still useful, but it is better understood as an extension:
 
 - use it when you want the full 2D response landscape
 - not when you want the strictest reading of Carsten's original request
+
+### Recommended tab sequence in the control room
+
+1. `Overview`
+   - confirm live PVs, signal, alarms, and reference
+2. `Position search`
+   - choose mirror 1 or mirror 2
+   - run coarse spiral
+   - inspect the best measured point
+   - optionally run local refine
+3. `Angle scan`
+   - keep the beam position fixed
+   - scan vertical or horizontal angle
+4. `Advanced scans`
+   - only when you explicitly want the broader 2D angle map or direct target-space solve
+5. `Optics / Geometry`
+   - confirm the live steering picture and step/angle scale
 
 ### What “best point” means
 

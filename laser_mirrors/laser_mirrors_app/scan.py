@@ -83,20 +83,32 @@ def build_angle_scan_points(config: AppConfig, geometry: LaserMirrorGeometry, re
     return points
 
 
-def build_spiral_scan_points(config: AppConfig, reference_steps: dict[str, float]) -> list[ScanPoint]:
+def build_spiral_scan_points(
+    config: AppConfig,
+    reference_steps: dict[str, float],
+    target_pair: str | None = None,
+    center_targets: MotorTargets | None = None,
+    step_scale: float = 1.0,
+) -> list[ScanPoint]:
     coords = rectangular_spiral(config.scan.spiral_step_x, config.scan.spiral_step_y, config.scan.spiral_turns)
+    target_pair = target_pair or config.scan.spiral_target
+    center = center_targets.as_dict() if center_targets is not None else dict(reference_steps)
     points: list[ScanPoint] = []
     for index, (dx, dy) in enumerate(coords):
-        targets = MotorTargets(
-            m1_horizontal=reference_steps["m1_horizontal"],
-            m1_vertical=reference_steps["m1_vertical"],
-            m2_horizontal=reference_steps["m2_horizontal"] + dx,
-            m2_vertical=reference_steps["m2_vertical"] + dy,
-        )
+        dx *= step_scale
+        dy *= step_scale
+        targets_dict = dict(center)
+        if target_pair == "mirror1":
+            targets_dict["m1_horizontal"] = center["m1_horizontal"] + dx
+            targets_dict["m1_vertical"] = center["m1_vertical"] + dy
+        else:
+            targets_dict["m2_horizontal"] = center["m2_horizontal"] + dx
+            targets_dict["m2_vertical"] = center["m2_vertical"] + dy
+        targets = MotorTargets(**targets_dict)
         points.append(
             ScanPoint(
                 index=index,
-                mode="mirror2_spiral",
+                mode=f"{target_pair}_spiral",
                 angle_x_urad=math.nan,
                 angle_y_urad=math.nan,
                 offset_x_mm=math.nan,
@@ -234,7 +246,34 @@ class ScanRunner:
         run_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
         self.session_dir = self.output_root / ("laser_mirror_" + mode + "_" + run_id)
         self.session_dir.mkdir(parents=True, exist_ok=True)
-        points = build_angle_scan_points(self.config, self.geometry, context.reference_steps) if mode == "angle" else build_spiral_scan_points(self.config, context.reference_steps)
+        if mode == "angle":
+            points = build_angle_scan_points(self.config, self.geometry, context.reference_steps)
+        else:
+            points = build_spiral_scan_points(self.config, context.reference_steps)
+        self._thread = threading.Thread(
+            target=self._run,
+            args=(points, context, on_measurement, on_finish),
+            daemon=True,
+        )
+        self._thread.start()
+
+    def start_custom(
+        self,
+        mode: str,
+        points: list[ScanPoint],
+        context: ScanContext,
+        on_measurement: Callable[[MeasurementRecord], None],
+        on_finish: Callable[[Path, BestPointRecommendation | None], None],
+    ) -> None:
+        if self.is_running():
+            raise RuntimeError("Scan already running")
+        self.measurements.clear()
+        self.command_log.clear()
+        self.last_error = None
+        self.clear_stop()
+        run_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
+        self.session_dir = self.output_root / ("laser_mirror_" + mode + "_" + run_id)
+        self.session_dir.mkdir(parents=True, exist_ok=True)
         self._thread = threading.Thread(
             target=self._run,
             args=(points, context, on_measurement, on_finish),

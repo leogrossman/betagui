@@ -183,6 +183,8 @@ class LaserMirrorApp:
         self.spiral_step_x_var = tk.DoubleVar(value=self.config.scan.spiral_step_x)
         self.spiral_step_y_var = tk.DoubleVar(value=self.config.scan.spiral_step_y)
         self.spiral_turns_var = tk.IntVar(value=self.config.scan.spiral_turns)
+        self.spiral_target_var = tk.StringVar(value=self.config.scan.spiral_target)
+        self.spiral_strategy_var = tk.StringVar(value=self.config.scan.spiral_strategy)
         self.manual_motor_var = tk.StringVar(value="m2_horizontal")
         self.manual_delta_var = tk.DoubleVar(value=1.0)
         self.manual_absolute_var = tk.DoubleVar(value=0.0)
@@ -202,6 +204,7 @@ class LaserMirrorApp:
         self.runtime_var = tk.StringVar(value="Backends not connected yet.")
         self.best_var = tk.StringVar(value="No best point yet.")
         self.last_export_var = tk.StringVar(value="No scan saved yet.")
+        self.search_status_var = tk.StringVar(value="No position search run yet.")
         self.signal_live_var = tk.StringVar(value="—")
         self.signal_avg_var = tk.StringVar(value="—")
         self.signal_std_var = tk.StringVar(value="—")
@@ -210,6 +213,7 @@ class LaserMirrorApp:
         self.reference_var = tk.StringVar(value="Reference not captured yet.")
         self.state_path_var = tk.StringVar(value=self.config.controller.state_file_path)
         self.current_reference_steps: dict[str, float] = {key: 0.0 for key in MOTOR_PVS}
+        self.pending_refine_preview: list[ScanPoint] = []
         self.legacy_state_path = (self.config_path.parent / self.config.controller.state_file_path).resolve()
         self.motor_recovery_path = (self.config_path.parent / self.config.controller.motor_recovery_path).resolve()
         self.last_command_path = (self.config_path.parent / self.config.controller.last_command_path).resolve()
@@ -220,6 +224,7 @@ class LaserMirrorApp:
         self.overview_frame = ttk.Frame(notebook, padding=10)
         self.manual_frame = ttk.Frame(notebook, padding=10)
         self.angle_frame = ttk.Frame(notebook, padding=10)
+        self.advanced_frame = ttk.Frame(notebook, padding=10)
         self.spiral_frame = ttk.Frame(notebook, padding=10)
         self.optics_frame = ttk.Frame(notebook, padding=10)
         self.passive_frame = ttk.Frame(notebook, padding=10)
@@ -228,7 +233,8 @@ class LaserMirrorApp:
         notebook.add(self.overview_frame, text="Overview")
         notebook.add(self.manual_frame, text="Manual control")
         notebook.add(self.angle_frame, text="Angle scan")
-        notebook.add(self.spiral_frame, text="Mirror 2 spiral")
+        notebook.add(self.advanced_frame, text="Advanced scans")
+        notebook.add(self.spiral_frame, text="Position search")
         notebook.add(self.optics_frame, text="Optics / Geometry")
         notebook.add(self.passive_frame, text="Passive monitor")
         notebook.add(self.pen_frame, text="Controller pen test")
@@ -236,6 +242,7 @@ class LaserMirrorApp:
         self._build_overview()
         self._build_manual()
         self._build_angle()
+        self._build_advanced()
         self._build_spiral()
         self._build_optics()
         self._build_passive()
@@ -371,7 +378,7 @@ class LaserMirrorApp:
         )
 
     def _build_angle(self) -> None:
-        controls = ttk.LabelFrame(self.angle_frame, text="Standard angle scan", padding=10)
+        controls = ttk.LabelFrame(self.angle_frame, text="Standard fixed-position angle scan", padding=10)
         controls.grid(row=0, column=0, sticky="nsew")
         plots = ttk.LabelFrame(self.angle_frame, text="Live scan maps", padding=10)
         plots.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
@@ -385,8 +392,8 @@ class LaserMirrorApp:
         self._add_labeled_entry(controls, "Points Y", self.points_y_var, 5)
         self._add_labeled_entry(controls, "Dwell [s]", self.dwell_var, 6)
         self._add_labeled_entry(controls, "Samples / point", self.samples_var, 7)
-        self._add_labeled_combo(controls, "Sweep mode", self.scan_mode_var, ["vertical_only", "horizontal_only", "both_2d"], 8)
-        self._add_labeled_combo(controls, "Solve mode", self.solve_mode_var, ["two_mirror_target", "mirror1_primary", "mirror2_primary"], 9)
+        self._add_labeled_combo(controls, "Sweep plane", self.scan_mode_var, ["vertical_only", "horizontal_only"], 8)
+        self._add_labeled_combo(controls, "Compensation mode", self.solve_mode_var, ["mirror1_primary", "mirror2_primary"], 9)
         self._add_labeled_combo(controls, "Objective", self.objective_var, ["max", "min"], 10)
         ttk.Checkbutton(controls, text="Interpolated background", variable=self.interpolate_angle_map_var, command=self._refresh_plots).grid(row=11, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Button(controls, text="Explain scan modes", command=self._show_scan_mode_help).grid(row=12, column=0, sticky="ew", pady=(8, 0))
@@ -406,10 +413,11 @@ class LaserMirrorApp:
             20,
             "2D angle map meaning:\n"
             "• each dot = one actually measured scan point\n"
+            "• the active scan plane changes while the orthogonal plane stays fixed\n"
             "• x/y coordinates = requested interaction-angle coordinates at the undulator, not raw motor coordinates\n"
             "• color = average of the selected signal over the samples-per-point window\n"
             "• cross marker = current recommended best point (max or min)\n\n"
-            "This matches the intended TUP70-style scan logic: build a response map in angle space and identify the optimum."
+            "This is the standard workflow after you already found a good laser position: keep the hit position fixed, vary angle, and identify the optimum."
             "\nOptional interpolation only paints a visual background between measured points; the dots remain the ground truth.",
         )
 
@@ -431,6 +439,33 @@ class LaserMirrorApp:
             "Signal average vs scan index in acquisition order.\n"
             "Useful for spotting drift, hysteresis, or a time trend during the scan.",
         )
+
+    def _build_advanced(self) -> None:
+        info = ttk.LabelFrame(self.advanced_frame, text="Experimental / advanced scan modes", padding=10)
+        info.pack(fill="x")
+        ttk.Label(
+            info,
+            text=(
+                "Use this tab when you want broader exploratory scans rather than the standard one-plane fixed-position angle scan.\n"
+                "The controls below still drive the same scan engine and the same saved output files."
+            ),
+            wraplength=820,
+            justify="left",
+        ).pack(anchor="w")
+
+        controls = ttk.LabelFrame(self.advanced_frame, text="Advanced angle presets", padding=10)
+        controls.pack(fill="x", pady=(10, 0))
+        ttk.Button(controls, text="Set 2D angle map", command=self._configure_advanced_2d).grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        ttk.Button(controls, text="Set direct two-mirror solve", command=self._configure_direct_target_mode).grid(row=0, column=1, sticky="ew")
+        ttk.Label(
+            controls,
+            text=(
+                "2D angle map: scans horizontal and vertical angle together.\n"
+                "Direct two-mirror solve: both mirrors are solved from the requested undulator-space target instead of using one primary mirror plus a compensator."
+            ),
+            wraplength=820,
+            justify="left",
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
     def _build_optics(self) -> None:
         left = ttk.Frame(self.optics_frame)
@@ -482,32 +517,39 @@ class LaserMirrorApp:
         ).pack(anchor="w")
 
     def _build_spiral(self) -> None:
-        controls = ttk.LabelFrame(self.spiral_frame, text="Mirror 2 spiral", padding=10)
+        controls = ttk.LabelFrame(self.spiral_frame, text="Best-position finder", padding=10)
         controls.grid(row=0, column=0, sticky="nsew")
-        plots = ttk.LabelFrame(self.spiral_frame, text="Mirror 2 signal map", padding=10)
+        plots = ttk.LabelFrame(self.spiral_frame, text="Position-search map", padding=10)
         plots.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
         self.spiral_frame.columnconfigure(1, weight=1)
         self.spiral_frame.rowconfigure(0, weight=1)
-        self._add_labeled_entry(controls, "Step X [steps]", self.spiral_step_x_var, 0)
-        self._add_labeled_entry(controls, "Step Y [steps]", self.spiral_step_y_var, 1)
-        self._add_labeled_entry(controls, "Turns", self.spiral_turns_var, 2)
-        ttk.Button(controls, text="Preview commands", command=self._preview_spiral_scan).grid(row=3, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Start spiral", command=self._start_spiral_scan).grid(row=3, column=1, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Request stop", command=self._stop_scan).grid(row=4, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Save spiral plot (.ps)", command=lambda: self._save_canvas_postscript(self.spiral_canvas, "mirror2_spiral_map.ps")).grid(row=4, column=1, sticky="ew", pady=(8, 0))
+        self._add_labeled_combo(controls, "Moving mirror pair", self.spiral_target_var, ["mirror2", "mirror1"], 0)
+        self._add_labeled_combo(controls, "Search strategy", self.spiral_strategy_var, ["classic_spiral", "local_refine"], 1)
+        self._add_labeled_entry(controls, "Step X [steps]", self.spiral_step_x_var, 2)
+        self._add_labeled_entry(controls, "Step Y [steps]", self.spiral_step_y_var, 3)
+        self._add_labeled_entry(controls, "Turns", self.spiral_turns_var, 4)
+        ttk.Button(controls, text="Preview commands", command=self._preview_spiral_scan).grid(row=5, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Start search", command=self._start_spiral_scan).grid(row=5, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Preview local refine", command=self._preview_local_refine).grid(row=6, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Start local refine", command=self._start_local_refine).grid(row=6, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Move to best point", command=self._move_to_best_point).grid(row=7, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Request stop", command=self._stop_scan).grid(row=7, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Save search plot (.ps)", command=lambda: self._save_canvas_postscript(self.spiral_canvas, "position_search_map.ps")).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.search_status_var, wraplength=340, justify="left").grid(row=9, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self._add_help_button(
             controls,
-            4,
-            "Legacy spiral:\n"
-            "Mirror 2 horizontal and vertical motors follow the old rectangular spiral pattern.\n"
-            "This is mainly for comparison with the historical mirror scripts and quick local searches.",
+            9,
+            "Position finder:\n"
+            "This is the first step of the workflow. Search for the best laser position using one mirror pair, then use that result as the center for the fixed-position angle scan.\n"
+            "Classic spiral does a coarse search. Local refine uses the current best point as the center and searches a tighter neighborhood.",
         )
         self.spiral_canvas = tk.Canvas(plots, width=760, height=440, bg="white", highlightthickness=1, highlightbackground="#cccccc")
         self.spiral_canvas.pack(fill="both", expand=True)
         self._attach_tooltip(
             self.spiral_canvas,
-            "Spiral map:\n"
-            "Each point is plotted at the commanded Mirror 2 step position and colored by the measured signal average.",
+            "Position-search map:\n"
+            "Each point is plotted at the commanded mirror-pair step position and colored by the measured signal average.\n"
+            "The black cross is the current best measured point. Blue hollow markers indicate the next suggested local-refine region.",
         )
 
     def _build_passive(self) -> None:
@@ -663,6 +705,22 @@ class LaserMirrorApp:
             ),
         )
 
+    def _configure_advanced_2d(self) -> None:
+        self.scan_mode_var.set("both_2d")
+        self.mode_help_var.set(
+            "Advanced 2D map enabled. This scans both horizontal and vertical angle together.\n"
+            "Use it after the 1D scans are behaving well."
+        )
+        self._refresh_plots()
+
+    def _configure_direct_target_mode(self) -> None:
+        self.solve_mode_var.set("two_mirror_target")
+        self.mode_help_var.set(
+            "Direct target solve enabled. Both mirrors are solved directly from the requested undulator-space target.\n"
+            "This is useful for experimentation, but less close to the standard compensating one-plane scan."
+        )
+        self._refresh_plots()
+
     def _show_angle_theory(self) -> None:
         messagebox.showinfo(
             "Why this angle scan exists",
@@ -672,7 +730,7 @@ class LaserMirrorApp:
                 "That is why two mirrors matter:\n"
                 "• one mirror is the deliberate steering mirror\n"
                 "• the other mirror counter-steers so the beam still hits the same interaction point\n\n"
-                "What Carsten most likely meant operationally:\n"
+                "Standard operating interpretation:\n"
                 "• do a horizontal-only scan when you want to study horizontal crossing-angle sensitivity\n"
                 "• do a vertical-only scan when you want to study vertical crossing-angle sensitivity\n"
                 "• use both_2d only when you explicitly want the full 2D landscape\n\n"
@@ -735,6 +793,8 @@ class LaserMirrorApp:
         self.config.scan.spiral_step_x = float(self.spiral_step_x_var.get())
         self.config.scan.spiral_step_y = float(self.spiral_step_y_var.get())
         self.config.scan.spiral_turns = max(1, int(self.spiral_turns_var.get()))
+        self.config.scan.spiral_target = self.spiral_target_var.get()
+        self.config.scan.spiral_strategy = self.spiral_strategy_var.get()
         self._update_scale_summary()
 
     def _save_config(self) -> None:
@@ -957,9 +1017,9 @@ class LaserMirrorApp:
 
     def _preview_spiral_scan(self) -> None:
         self._pull_ui_into_config()
-        points = build_spiral_scan_points(self.config, self.current_reference_steps)
+        points = build_spiral_scan_points(self.config, self.current_reference_steps, target_pair=self.spiral_target_var.get())
         preview = self.scan_runner.build_preview(points, self.current_reference_steps)
-        self._show_scan_preview(preview, "Mirror 2 spiral preview")
+        self._show_scan_preview(preview, "Position search preview")
 
     def _show_scan_preview(self, preview_rows: list[dict[str, object]], title: str) -> bool:
         if not preview_rows:
@@ -996,11 +1056,42 @@ class LaserMirrorApp:
 
     def _start_spiral_scan(self) -> None:
         self._pull_ui_into_config()
-        points = build_spiral_scan_points(self.config, self.current_reference_steps)
+        points = build_spiral_scan_points(self.config, self.current_reference_steps, target_pair=self.spiral_target_var.get())
         preview = self.scan_runner.build_preview(points, self.current_reference_steps)
-        if self.config.controller.preview_required and not self._show_scan_preview(preview, "Approve mirror 2 spiral"):
+        if self.config.controller.preview_required and not self._show_scan_preview(preview, "Approve position search"):
             return
+        self.pending_refine_preview = []
+        self.search_status_var.set("Position search running...")
         self._start_scan_common("spiral")
+
+    def _preview_local_refine(self) -> None:
+        points = self._build_local_refine_points()
+        if points is None:
+            return
+        preview = self.scan_runner.build_preview(points, self.current_reference_steps)
+        self.pending_refine_preview = points
+        self._draw_spiral_map()
+        self._show_scan_preview(preview, "Local refine preview")
+
+    def _start_local_refine(self) -> None:
+        points = self._build_local_refine_points()
+        if points is None:
+            return
+        preview = self.scan_runner.build_preview(points, self.current_reference_steps)
+        if self.config.controller.preview_required and not self._show_scan_preview(preview, "Approve local refine"):
+            return
+        self.pending_refine_preview = points
+        self.measurements.clear()
+        self.best_point = None
+        self.best_var.set("Best point pending...")
+        context = ScanContext(
+            reference_steps=dict(self.current_reference_steps),
+            signal_label=self.signal_label_var.get(),
+            signal_pv=self.signal_pv_var.get(),
+        )
+        self.status_var.set("Local refine running...")
+        self.search_status_var.set("Local refine running around current best point...")
+        self.scan_runner.start_custom("position_refine", points, context, self._on_measurement_thread, self._on_finish_thread)
 
     def _start_scan_common(self, mode: str) -> None:
         if self.scan_runner.is_running():
@@ -1016,6 +1107,39 @@ class LaserMirrorApp:
         )
         self.status_var.set("Scan running...")
         self.scan_runner.start(mode, context, self._on_measurement_thread, self._on_finish_thread)
+
+    def _build_local_refine_points(self) -> list[ScanPoint] | None:
+        if self.best_point is None:
+            messagebox.showinfo("No best point", "Run a position search first.")
+            return None
+        step_x = max(1.0, float(self.spiral_step_x_var.get()) / 2.0)
+        step_y = max(1.0, float(self.spiral_step_y_var.get()) / 2.0)
+        target_pair = self.spiral_target_var.get()
+        center_targets = self.best_point.targets
+        points: list[ScanPoint] = []
+        index = 0
+        for dy in (-step_y, 0.0, step_y):
+            for dx in (-step_x, 0.0, step_x):
+                targets_dict = center_targets.as_dict()
+                if target_pair == "mirror1":
+                    targets_dict["m1_horizontal"] += dx
+                    targets_dict["m1_vertical"] += dy
+                else:
+                    targets_dict["m2_horizontal"] += dx
+                    targets_dict["m2_vertical"] += dy
+                points.append(
+                    ScanPoint(
+                        index=index,
+                        mode=f"{target_pair}_refine",
+                        angle_x_urad=math.nan,
+                        angle_y_urad=math.nan,
+                        offset_x_mm=math.nan,
+                        offset_y_mm=math.nan,
+                        targets=MotorTargets(**targets_dict),
+                    )
+                )
+                index += 1
+        return points
 
     def _stop_scan(self) -> None:
         self.scan_runner.request_stop()
@@ -1058,6 +1182,11 @@ class LaserMirrorApp:
             self.status_var.set("Scan finished with warning/error.")
         else:
             self.status_var.set("Scan finished.")
+        if best_point is not None and any(mode in ("mirror1_spiral", "mirror2_spiral", "mirror1_refine", "mirror2_refine") for mode in {row.mode for row in self.measurements}):
+            self.search_status_var.set(
+                f"Best measured point: {best_point.signal_label}={best_point.signal_value:.6g}. "
+                "Use local refine for a tighter search around this point."
+            )
         self._save_legacy_state()
         self._save_motor_recovery()
         self._log(f"Scan finished. Saved to {session_dir}")
@@ -1538,12 +1667,19 @@ class LaserMirrorApp:
         h = int(canvas["height"])
         margin = 48
         canvas.create_rectangle(margin, margin, w - margin, h - margin, outline="#999999")
-        relevant = [row for row in self.measurements if row.mode == "mirror2_spiral"]
+        relevant = [
+            row
+            for row in self.measurements
+            if row.mode in ("mirror1_spiral", "mirror2_spiral", "mirror1_refine", "mirror2_refine")
+        ]
         if not relevant:
-            canvas.create_text(w // 2, h // 2, text="No spiral scan data yet", fill="#666666")
+            canvas.create_text(w // 2, h // 2, text="No position-search data yet", fill="#666666")
             return
-        xs = [row.commanded_m2_horizontal for row in relevant]
-        ys = [row.commanded_m2_vertical for row in relevant]
+        pair = "mirror1" if any(row.mode.startswith("mirror1") for row in relevant) else "mirror2"
+        x_attr = "commanded_m1_horizontal" if pair == "mirror1" else "commanded_m2_horizontal"
+        y_attr = "commanded_m1_vertical" if pair == "mirror1" else "commanded_m2_vertical"
+        xs = [getattr(row, x_attr) for row in relevant]
+        ys = [getattr(row, y_attr) for row in relevant]
         vx = max(max(xs) - min(xs), 1e-6)
         vy = max(max(ys) - min(ys), 1e-6)
         values = [row.signal_average for row in relevant if row.signal_average == row.signal_average]
@@ -1551,11 +1687,27 @@ class LaserMirrorApp:
         hi = max(values) if values else 1.0
         span = max(hi - lo, 1e-9)
         for row in relevant:
-            px = margin + (row.commanded_m2_horizontal - min(xs)) / vx * (w - 2 * margin)
-            py = h - margin - (row.commanded_m2_vertical - min(ys)) / vy * (h - 2 * margin)
+            px = margin + (getattr(row, x_attr) - min(xs)) / vx * (w - 2 * margin)
+            py = h - margin - (getattr(row, y_attr) - min(ys)) / vy * (h - 2 * margin)
             color = self._color_for_value((row.signal_average - lo) / span if row.signal_average == row.signal_average else 0.0)
             canvas.create_oval(px - 4, py - 4, px + 4, py + 4, fill=color, outline="")
-        canvas.create_text(w // 2, 18, text=f"{self.signal_label_var.get()} vs mirror 2 position", font=("Helvetica", 11, "bold"))
+        if self.best_point is not None:
+            best_x = self.best_point.targets.m1_horizontal if pair == "mirror1" else self.best_point.targets.m2_horizontal
+            best_y = self.best_point.targets.m1_vertical if pair == "mirror1" else self.best_point.targets.m2_vertical
+            px = margin + (best_x - min(xs)) / vx * (w - 2 * margin)
+            py = h - margin - (best_y - min(ys)) / vy * (h - 2 * margin)
+            canvas.create_line(px - 8, py, px + 8, py, fill="#111827", width=2)
+            canvas.create_line(px, py - 8, px, py + 8, fill="#111827", width=2)
+        for point in self.pending_refine_preview:
+            preview_x = point.targets.m1_horizontal if pair == "mirror1" else point.targets.m2_horizontal
+            preview_y = point.targets.m1_vertical if pair == "mirror1" else point.targets.m2_vertical
+            px = margin + (preview_x - min(xs)) / vx * (w - 2 * margin)
+            py = h - margin - (preview_y - min(ys)) / vy * (h - 2 * margin)
+            canvas.create_oval(px - 6, py - 6, px + 6, py + 6, outline="#2563eb", width=2)
+        label = "mirror 1" if pair == "mirror1" else "mirror 2"
+        canvas.create_text(w // 2, 18, text=f"{self.signal_label_var.get()} vs {label} position", font=("Helvetica", 11, "bold"))
+        canvas.create_text(w // 2, h - 18, text=f"{label} horizontal [steps]")
+        canvas.create_text(18, h // 2, text=f"{label} vertical [steps]", angle=90)
 
     def _draw_passive_map(self) -> None:
         canvas = self.passive_map_canvas

@@ -72,6 +72,8 @@ class ScanConfig:
     spiral_step_x: float = 6.0
     spiral_step_y: float = 8.0
     spiral_turns: int = 20
+    spiral_target: str = "mirror2"
+    spiral_strategy: str = "classic_spiral"
 
 
 @dataclass

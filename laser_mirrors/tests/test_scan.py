@@ -10,10 +10,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from laser_mirrors_app.config import AppConfig
 from laser_mirrors_app.geometry import LaserMirrorGeometry
 from laser_mirrors_app.hardware import MirrorController, PVFactory, build_signal_backend
-from laser_mirrors_app.scan import ScanContext, ScanRunner, build_angle_scan_points, choose_best_point
+from laser_mirrors_app.scan import ScanContext, ScanRunner, build_angle_scan_points, build_spiral_scan_points, choose_best_point
 
 
 class ScanTests(unittest.TestCase):
+    def test_spiral_points_can_target_mirror1(self) -> None:
+        config = AppConfig()
+        geometry = LaserMirrorGeometry(config.geometry)
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        points = build_spiral_scan_points(config, controller.capture_reference(), target_pair="mirror1")
+        self.assertTrue(points)
+        self.assertEqual(points[0].mode, "mirror1_spiral")
+        self.assertEqual(points[0].targets.m2_horizontal, controller.capture_reference()["m2_horizontal"])
+
     def test_build_scan_grid_count(self) -> None:
         config = AppConfig()
         config.scan.mode = "both_2d"
