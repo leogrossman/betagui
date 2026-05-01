@@ -8,7 +8,7 @@ This folder lives next to `SSMB_experiment/` on purpose. The goal is one `git pu
 
 Carsten's measurement idea is:
 
-- vary the **interaction angle** of the laser at the undulator
+- vary the **interaction angle** of the laser at the undulator, usually in one plane at a time
 - hold the **interaction point in space** as fixed as possible with the second mirror
 - observe a live response signal:
   - `P1`
@@ -148,6 +148,14 @@ and the qualitative Fig. 7 style idea: build a response landscape in angle space
 The optional interpolated background in the GUI is only a visual guide.
 The measured dots remain the ground truth.
 
+For 1D scan modes the GUI adapts automatically:
+
+- `horizontal_only` becomes a proper signal-vs-horizontal-angle plot
+- `vertical_only` becomes a proper signal-vs-vertical-angle plot
+- `both_2d` stays a 2D angle map
+
+So the plotting style now matches the actual sweep type instead of forcing every scan into a 2D interpretation.
+
 ### Solve modes
 
 The angle scan supports three solve modes:
@@ -187,6 +195,27 @@ So the real commissioning question is:
 
 The GUI defaults to `mirror1_primary`, but this is still a commissioning choice, not
 an established physics truth.
+
+### What sweep probably comes first in the control room
+
+In practice, Carsten's email most naturally suggests **1D scans**:
+
+- a **horizontal-only** angle sweep
+- or a **vertical-only** angle sweep
+
+with one mirror acting as the scanned mirror and the other acting as the compensator.
+
+That means the most likely first commissioning settings are:
+
+- `horizontal_only + mirror1_primary`
+- `horizontal_only + mirror2_primary`
+- `vertical_only + mirror1_primary`
+- `vertical_only + mirror2_primary`
+
+The 2D mode is still useful, but it is better understood as an extension:
+
+- use it when you want the full 2D response landscape
+- not when you want the strictest reading of Carsten's original request
 
 ### What “best point” means
 

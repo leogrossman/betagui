@@ -569,8 +569,8 @@ class LaserMirrorApp:
 
     def _scan_mode_help_text(self) -> str:
         return (
-            "Carsten mainly wants a PRIMARY solve mode: vary one mirror angle and let the other counter-steer\n"
-            "to keep the same interaction point.\n"
+            "Carsten most likely wants a 1D PRIMARY scan in one plane at a time: horizontal-only or vertical-only,\n"
+            "with one mirror driving and the other counter-steering to keep the same interaction point.\n"
             "Start with mirror1_primary if mirror 1 should be the driving mirror and mirror 2 should hold the point.\n"
             "Use mirror2_primary if commissioning shows the opposite is more stable. two_mirror_target is a direct\n"
             "undulator-space solve and is less close to the original request."
@@ -581,17 +581,18 @@ class LaserMirrorApp:
             "Scan modes",
             (
                 "Sweep modes:\n"
-                "• both_2d: 2D map in horizontal and vertical interaction-angle coordinates.\n"
-                "• horizontal_only: scan horizontal angle with the vertical angle fixed.\n"
-                "• vertical_only: scan vertical angle with the horizontal angle fixed.\n\n"
+                "• horizontal_only: most literal horizontal Carsten scan. Change horizontal interaction angle, keep vertical fixed.\n"
+                "• vertical_only: most literal vertical Carsten scan. Change vertical interaction angle, keep horizontal fixed.\n"
+                "• both_2d: 2D extension when you want a full angle map instead of a single-plane line scan.\n\n"
                 "Solve modes:\n"
                 "• two_mirror_target: solve both mirrors directly from the desired undulator offset + angle.\n"
                 "  Good for target-space scans, but not the most literal implementation of Carsten's request.\n"
                 "• mirror1_primary: sweep mirror 1, analytically solve mirror 2 to keep the point fixed.\n"
                 "• mirror2_primary: sweep mirror 2, analytically solve mirror 1 to keep the point fixed.\n\n"
                 "Closest to Carsten's idea:\n"
-                "Use one of the PRIMARY modes. The right default depends on which mirror you trust more as the\n"
-                "driving mirror in the control room. This app defaults to mirror1_primary."
+                "Use one of the PRIMARY modes together with horizontal_only or vertical_only.\n"
+                "The right default depends on which mirror you trust more as the driving mirror in the control room.\n"
+                "This app defaults to mirror1_primary."
             ),
         )
 
@@ -604,14 +605,20 @@ class LaserMirrorApp:
                 "That is why two mirrors matter:\n"
                 "• one mirror is the deliberate steering mirror\n"
                 "• the other mirror counter-steers so the beam still hits the same interaction point\n\n"
+                "What Carsten most likely meant operationally:\n"
+                "• do a horizontal-only scan when you want to study horizontal crossing-angle sensitivity\n"
+                "• do a vertical-only scan when you want to study vertical crossing-angle sensitivity\n"
+                "• use both_2d only when you explicitly want the full 2D landscape\n\n"
                 "Physics meaning of the plot:\n"
-                "• x-axis = horizontal interaction angle at the undulator [µrad]\n"
-                "• y-axis = vertical interaction angle at the undulator [µrad]\n"
-                "• color = measured response such as P1, P3, sigmaX, or sigmaY\n\n"
+                "• in both_2d: x/y axes are the horizontal/vertical interaction angles and color is the measured response\n"
+                "• in horizontal_only or vertical_only: the plot becomes a proper 1D signal-vs-angle scan in the active plane\n\n"
                 "Why not plot only motor steps?\n"
                 "• motor coordinates are implementation details\n"
                 "• the experiment cares about overlap and modulation versus interaction angle\n"
                 "• therefore angle space is the physics-facing map, while the exact motor targets are still saved in the session files\n\n"
+                "What can be optimized:\n"
+                "• P1 or P3 if you want a physics-facing overlap / modulation metric\n"
+                "• QPD sigmaX / sigmaY / centerX if you want a transport or beam-shape diagnostic instead\n\n"
                 "Solve modes:\n"
                 "• two_mirror_target: solve both mirrors from the requested undulator-space target directly\n"
                 "• mirror1_primary: mirror 1 is the scanned mirror, mirror 2 counter-steers to hold point\n"
@@ -1178,9 +1185,17 @@ class LaserMirrorApp:
         lo = min(values) if values else 0.0
         hi = max(values) if values else 1.0
         span = max(hi - lo, 1e-9)
+        unique_x = sorted({row.angle_x_urad for row in relevant if row.angle_x_urad == row.angle_x_urad})
+        unique_y = sorted({row.angle_y_urad for row in relevant if row.angle_y_urad == row.angle_y_urad})
+        if len(unique_y) == 1 and len(unique_x) >= 1:
+            self._draw_angle_line_plot(canvas, relevant, margin, w, h, lo, span, "horizontal")
+            return
+        if len(unique_x) == 1 and len(unique_y) >= 1:
+            self._draw_angle_line_plot(canvas, relevant, margin, w, h, lo, span, "vertical")
+            return
         if self.interpolate_angle_map_var.get():
-            x_values = sorted({row.angle_x_urad for row in relevant if row.angle_x_urad == row.angle_x_urad})
-            y_values = sorted({row.angle_y_urad for row in relevant if row.angle_y_urad == row.angle_y_urad})
+            x_values = unique_x
+            y_values = unique_y
             if len(x_values) >= 2 and len(y_values) >= 2:
                 x_edges = self._midpoint_edges(x_values)
                 y_edges = self._midpoint_edges(y_values)
@@ -1210,6 +1225,45 @@ class LaserMirrorApp:
         canvas.create_text(w // 2, 18, text=f"{self.signal_label_var.get()} vs interaction angle", font=("Helvetica", 11, "bold"))
         canvas.create_text(w // 2, h - 18, text="Angle X [µrad]")
         canvas.create_text(18, h // 2, text="Angle Y [µrad]", angle=90)
+
+    def _draw_angle_line_plot(
+        self,
+        canvas: tk.Canvas,
+        rows: list[MeasurementRecord],
+        margin: int,
+        width: int,
+        height: int,
+        lo: float,
+        span: float,
+        axis: str,
+    ) -> None:
+        sorted_rows = sorted(rows, key=lambda row: row.angle_x_urad if axis == "horizontal" else row.angle_y_urad)
+        x_values = [row.angle_x_urad if axis == "horizontal" else row.angle_y_urad for row in sorted_rows]
+        x_lo = min(x_values)
+        x_hi = max(x_values)
+        x_span = max(x_hi - x_lo, 1e-9)
+        prev = None
+        for row, x_value in zip(sorted_rows, x_values):
+            px = margin + (x_value - x_lo) / x_span * (width - 2 * margin)
+            py = height - margin - (row.signal_average - lo) / span * (height - 2 * margin)
+            if prev is not None:
+                canvas.create_line(prev[0], prev[1], px, py, fill="#1d4ed8", width=2)
+            color = self._color_for_value((row.signal_average - lo) / span if row.signal_average == row.signal_average else 0.0)
+            canvas.create_oval(px - 5, py - 5, px + 5, py + 5, fill=color, outline="")
+            prev = (px, py)
+        if self.best_point is not None:
+            best_x = self.best_point.angle_x_urad if axis == "horizontal" else self.best_point.angle_y_urad
+            px = margin + (best_x - x_lo) / x_span * (width - 2 * margin)
+            best_y = self.best_point.signal_value
+            py = height - margin - (best_y - lo) / span * (height - 2 * margin)
+            canvas.create_line(px - 8, py, px + 8, py, fill="#111827", width=2)
+            canvas.create_line(px, py - 8, px, py + 8, fill="#111827", width=2)
+        axis_label = "Angle X [µrad]" if axis == "horizontal" else "Angle Y [µrad]"
+        fixed_label = "Angle Y fixed" if axis == "horizontal" else "Angle X fixed"
+        canvas.create_text(width // 2, 18, text=f"{self.signal_label_var.get()} vs {axis_label}", font=("Helvetica", 11, "bold"))
+        canvas.create_text(width // 2, height - 18, text=axis_label)
+        canvas.create_text(18, height // 2, text=self.signal_label_var.get(), angle=90)
+        canvas.create_text(width - 18, 20, anchor="e", text=fixed_label, fill="#475569")
 
     @staticmethod
     def _midpoint_edges(values: list[float]) -> list[float]:
