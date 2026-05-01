@@ -14,7 +14,15 @@ from tkinter import filedialog, messagebox, ttk
 
 from .config import AppConfig
 from .geometry import LaserMirrorGeometry
-from .hardware import MOTOR_PVS, PVFactory, SIGNAL_PRESETS, MirrorController, build_signal_backend
+from .hardware import (
+    MOTOR_PVS,
+    PVFactory,
+    SIGNAL_PRESETS,
+    DisconnectedController,
+    DisconnectedSignalBackend,
+    MirrorController,
+    build_signal_backend,
+)
 from .layout import default_optics_layout
 from .models import (
     BestPointRecommendation,
@@ -697,11 +705,11 @@ class LaserMirrorApp:
         self.output_root.mkdir(parents=True, exist_ok=True)
         self.geometry = LaserMirrorGeometry(self.config.geometry)
         try:
-            self.factory = PVFactory(self.config.controller.safe_mode)
+            self.factory = PVFactory(False)
             self.controller = MirrorController(self.config.controller, self.factory, self._log)
             self.current_reference_steps = self.controller.capture_reference()
             self.signal_backend = build_signal_backend(
-                self.config.controller.safe_mode,
+                False,
                 self.signal_preset_var.get(),
                 self.signal_pv_var.get(),
                 self.factory,
@@ -721,17 +729,20 @@ class LaserMirrorApp:
             self.reference_var.set("Reference RBV: " + ", ".join(f"{key}={value:.2f}" for key, value in self.current_reference_steps.items()))
             self._refresh_motor_table()
         except Exception as exc:  # noqa: BLE001
-            self.safe_mode_var.set(True)
-            self.write_mode_var.set(False)
-            self._pull_ui_into_config()
-            self.factory = PVFactory(True)
-            self.controller = MirrorController(self.config.controller, self.factory, self._log)
+            self.factory = None
+            self.controller = DisconnectedController(self.config.controller, str(exc), self._log)
             self.current_reference_steps = self.controller.capture_reference()
-            self.signal_backend = build_signal_backend(True, self.signal_preset_var.get(), None, self.factory)
+            self.signal_backend = DisconnectedSignalBackend(
+                self.signal_label_var.get() or "Signal",
+                self.signal_pv_var.get() or "disconnected",
+                str(exc),
+            )
             self.scan_runner = ScanRunner(self.config, self.geometry, self.controller, self.signal_backend, self._log, self.output_root)
-            self.runtime_var.set(f"Backend connection failed; fell back to safe mode.\nReason: {exc}")
-            self.status_var.set("Using safe mode after backend failure.")
-            self._log(f"Backend connection failed, using safe mode: {exc}")
+            self.runtime_var.set(f"Backend connection failed; UI kept in disconnected read-only state.\nReason: {exc}")
+            self.status_var.set("Disconnected / read-only.")
+            self.reference_var.set("Reference RBV unavailable: EPICS disconnected.")
+            self._refresh_motor_table()
+            self._log(f"Backend connection failed; using disconnected read-only state: {exc}")
 
     def _restore_legacy_state(self) -> None:
         snapshot = load_state(self.legacy_state_path)

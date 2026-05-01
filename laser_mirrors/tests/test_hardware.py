@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from laser_mirrors_app.config import ControllerConfig
-from laser_mirrors_app.hardware import MirrorController, PVFactory
+from laser_mirrors_app.hardware import MirrorController, PVFactory, SignalBackend, build_signal_backend
 
 
 class HardwareTests(unittest.TestCase):
@@ -36,6 +36,10 @@ class HardwareTests(unittest.TestCase):
         current = controller.current_steps()
         self.assertEqual(current["m1_horizontal"], 7.0)
         self.assertEqual(current["m1_vertical"], -4.0)
+
+    def test_build_signal_backend_does_not_simulate_main_gui_signal(self) -> None:
+        backend = build_signal_backend(False, "p1_h1_avg", None, PVFactory(True))
+        self.assertIsInstance(backend, SignalBackend)
 
 
 if __name__ == "__main__":

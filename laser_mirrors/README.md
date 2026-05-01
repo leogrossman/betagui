@@ -35,13 +35,19 @@ The tool also includes:
 The mirror controller/IOC has already shown instability in the past. This tool is intentionally conservative:
 
 - default real mode is **read-only** unless `--write-mode` is used
-- `--safe-mode` simulates motors and the selected signal
+- `--safe-mode` means **real EPICS readback/signal, but no motor writes**
 - all real moves are split into small EPICS `.VAL` ramps
 - the tool waits for `.DMOV=1`
 - the tool waits an additional settle time
 - every planned write is logged
 - last-command and recovery files are written before/while moving
 - hard `STOP` is available, but it is treated as an emergency action
+
+Important:
+
+- the main control-room GUI should not invent fake live data
+- if EPICS is unavailable, the GUI now stays in a disconnected read-only state instead of faking values
+- the only place simulation is still intended is the separate offline `laser_optics_digital_twin.py`
 
 Recommended commissioning pattern:
 

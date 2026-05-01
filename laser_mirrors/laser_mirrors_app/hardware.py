@@ -215,6 +215,16 @@ class SimulatedSignalBackend:
         return SignalReading(self.label, self.pv_name, value, True)
 
 
+class DisconnectedSignalBackend:
+    def __init__(self, label: str, pv_name: str, reason: str):
+        self.label = label
+        self.pv_name = pv_name
+        self.reason = reason
+
+    def read(self) -> SignalReading:
+        return SignalReading(self.label, self.pv_name, math.nan, False)
+
+
 class MirrorController:
     """Controller-safe EPICS motor wrapper.
 
@@ -232,7 +242,7 @@ class MirrorController:
         self.config = config
         self.factory = factory
         self.debug = debug or (lambda message: None)
-        self.write_mode = True if config.safe_mode else config.write_mode
+        self.write_mode = bool(config.write_mode or factory.safe_mode)
         self.motors = {key: EpicsMotor(key, pv, factory) for key, pv in MOTOR_PVS.items()}
         self.reference_steps = self.capture_reference()
         self.last_move_error: str | None = None
@@ -389,15 +399,76 @@ class MirrorController:
                 motor.stop()
 
 
+class DisconnectedController:
+    def __init__(self, config: ControllerConfig, reason: str, debug: Callable[[str], None] | None = None):
+        self.config = config
+        self.reason = reason
+        self.debug = debug or (lambda message: None)
+        self.write_mode = False
+        self.reference_steps = {key: math.nan for key in MOTOR_PVS}
+        self.last_move_error: str | None = reason
+
+    def capture_reference(self) -> dict[str, float]:
+        return dict(self.reference_steps)
+
+    def current_steps(self) -> dict[str, float]:
+        return dict(self.reference_steps)
+
+    def motor_snapshots(self) -> list[MotorSnapshot]:
+        return [
+            MotorSnapshot(
+                key=key,
+                base=base,
+                val=math.nan,
+                rbv=math.nan,
+                dmov=0,
+                movn=0,
+                desc=key,
+                egu="steps",
+                stat="DISCONNECTED",
+                sevr="INVALID",
+                rtyp="motor",
+                hlm=math.nan,
+                llm=math.nan,
+                velo=math.nan,
+                accl=math.nan,
+            )
+            for key, base in MOTOR_PVS.items()
+        ]
+
+    def diagnostics(self) -> dict[str, object]:
+        return {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "connected": False,
+            "reason": self.reason,
+        }
+
+    def write_diagnostics(self, path: Path) -> None:
+        path.write_text(json.dumps(self.diagnostics(), indent=2, sort_keys=True))
+
+    def validate_targets(self, targets: dict[str, float]) -> tuple[bool, list[str]]:
+        return False, [f"EPICS backend unavailable: {self.reason}"]
+
+    def move_absolute_group(
+        self,
+        targets: dict[str, float],
+        request_stop: Callable[[], bool] | None = None,
+        command_logger: Callable[[CommandRecord], None] | None = None,
+        command_path: Path | None = None,
+    ) -> bool:
+        self.last_move_error = f"EPICS backend unavailable: {self.reason}"
+        raise RuntimeError(self.last_move_error)
+
+    def stop_all(self) -> None:
+        self.debug("STOP requested while controller is disconnected.")
+
+
 def build_signal_backend(
     safe_mode: bool,
     preset_key: str | None,
     manual_pv: str | None,
     factory: PVFactory,
 ) -> object:
-    if safe_mode:
-        label = SIGNAL_PRESETS.get(preset_key or "", ("Signal", ""))[0] if preset_key else "Signal"
-        return SimulatedSignalBackend(label)
     if manual_pv:
         return SignalBackend(manual_pv, manual_pv, factory)
     if preset_key and preset_key in SIGNAL_PRESETS:

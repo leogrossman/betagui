@@ -23,7 +23,7 @@ from pathlib import Path
 
 from laser_mirrors_app.config import AppConfig
 from laser_mirrors_app.geometry import LaserMirrorGeometry
-from laser_mirrors_app.hardware import PVFactory, build_signal_backend
+from laser_mirrors_app.hardware import PVFactory, SimulatedSignalBackend
 from laser_mirrors_app.layout import default_optics_layout
 from laser_mirrors_app.scan import ScanContext, ScanRunner, build_angle_scan_points
 from laser_mirrors_app.hardware import MirrorController
@@ -46,7 +46,7 @@ def run_offline_scan(config: AppConfig, output_root: Path) -> tuple[list[dict[st
     geometry = LaserMirrorGeometry(config.geometry)
     factory = PVFactory(True)
     controller = MirrorController(config.controller, factory)
-    signal = build_signal_backend(True, "p1_h1_avg", None, factory)
+    signal = SimulatedSignalBackend("Simulated P1")
     runner = ScanRunner(config, geometry, controller, signal, lambda _msg: None, output_root)
     rows: list[dict[str, float]] = []
     context = ScanContext(reference_steps=controller.capture_reference(), signal_label="Simulated P1", signal_pv="simulated")
