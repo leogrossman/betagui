@@ -51,6 +51,10 @@ Recommended commissioning pattern:
 4. preview scan commands
 5. only then enable `--write-mode`
 
+For more controller-specific notes, see:
+
+- `MOTOR_CONTROLLER_NOTES.md`
+
 ## Confirmed motor PVs
 
 These are the mirror motors currently used by the tool:
@@ -512,6 +516,7 @@ Be honest before beam time:
 | Exact best default solve mode for Carsten's scan | Not fully verified |
 | Whether `DMOV=1` is always a sufficient settle indicator | Not fully verified |
 | Maximum safe command rate before IOC/controller stress | Not fully verified |
+| Separate encoder PV mapping for live GUI monitoring | Not fully verified |
 | Full optical-table schematic with every static optic | Not fully implemented |
 | Automatic closed-loop “keep point fixed from measured camera signal” | Not implemented |
 | Robust controller-specific root-cause diagnosis for the crashy IOC | Not solved yet |

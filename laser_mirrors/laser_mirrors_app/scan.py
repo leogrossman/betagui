@@ -181,6 +181,7 @@ class ScanRunner:
         self.measurements: list[MeasurementRecord] = []
         self.command_log: list[CommandRecord] = []
         self.session_dir: Path | None = None
+        self.last_error: str | None = None
 
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
@@ -228,6 +229,7 @@ class ScanRunner:
             raise RuntimeError("Scan already running")
         self.measurements.clear()
         self.command_log.clear()
+        self.last_error = None
         self.clear_stop()
         run_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
         self.session_dir = self.output_root / ("laser_mirror_" + mode + "_" + run_id)
@@ -251,72 +253,76 @@ class ScanRunner:
         start = time.perf_counter()
         total_points = len(points)
         self.debug(f"Starting {points[0].mode if points else 'scan'} with {total_points} points. Session dir: {self.session_dir}")
-        for point in points:
-            if self._stop_requested.is_set():
-                self.debug("Stop requested before next point. Ending scan gracefully.")
-                break
-            targets = point.targets.as_dict()
-            self.debug(
-                "Point "
-                f"{point.index + 1}/{total_points}: "
-                f"angle=({point.angle_x_urad:.2f}, {point.angle_y_urad:.2f}) µrad "
-                f"offset=({point.offset_x_mm:.3f}, {point.offset_y_mm:.3f}) mm "
-                f"targets={{{', '.join(f'{key}={value:.2f}' for key, value in targets.items())}}}"
-            )
-            moved = self.controller.move_absolute_group(
-                targets,
-                request_stop=self._stop_requested.is_set,
-                command_logger=self.command_log.append,
-                command_path=self.session_dir / "last_move_plan.json",
-            )
-            if not moved:
-                self.debug(f"Move aborted at point {point.index + 1}/{total_points}.")
-                break
-            if hasattr(self.signal_backend, "update_target") and point.angle_x_urad == point.angle_x_urad:
-                self.signal_backend.update_target(point.angle_x_urad, point.angle_y_urad)
-            self.debug(f"Point {point.index + 1}/{total_points}: move complete, dwelling for {max(0.0, self.config.scan.dwell_s):.2f} s.")
-            time.sleep(max(0.0, self.config.scan.dwell_s))
-            samples: list[float] = []
-            for _ in range(max(1, self.config.scan.p1_samples_per_point)):
-                reading = self.signal_backend.read()
-                if reading.ok:
-                    samples.append(reading.value)
-                time.sleep(0.02)
-            average = sum(samples) / len(samples) if samples else math.nan
-            variance = 0.0 if len(samples) <= 1 else sum((value - average) ** 2 for value in samples) / len(samples)
-            rbv = self.controller.current_steps()
-            measurement = MeasurementRecord(
-                point_index=point.index,
-                mode=point.mode,
-                elapsed_s=time.perf_counter() - start,
-                angle_x_urad=point.angle_x_urad,
-                angle_y_urad=point.angle_y_urad,
-                offset_x_mm=point.offset_x_mm,
-                offset_y_mm=point.offset_y_mm,
-                signal_label=context.signal_label,
-                signal_pv=context.signal_pv,
-                signal_value=samples[-1] if samples else math.nan,
-                signal_average=average,
-                signal_std=math.sqrt(variance),
-                samples_used=len(samples),
-                commanded_m1_horizontal=point.targets.m1_horizontal,
-                commanded_m1_vertical=point.targets.m1_vertical,
-                commanded_m2_horizontal=point.targets.m2_horizontal,
-                commanded_m2_vertical=point.targets.m2_vertical,
-                rbv_m1_horizontal=rbv["m1_horizontal"],
-                rbv_m1_vertical=rbv["m1_vertical"],
-                rbv_m2_horizontal=rbv["m2_horizontal"],
-                rbv_m2_vertical=rbv["m2_vertical"],
-            )
-            self.measurements.append(measurement)
-            self.debug(
-                f"Point {point.index + 1}/{total_points}: "
-                f"{context.signal_label} avg={average:.6g} std={math.sqrt(variance):.6g} "
-                f"from {len(samples)} samples | "
-                f"RBV m1h={rbv['m1_horizontal']:.2f} m1v={rbv['m1_vertical']:.2f} "
-                f"m2h={rbv['m2_horizontal']:.2f} m2v={rbv['m2_vertical']:.2f}"
-            )
-            on_measurement(measurement)
+        try:
+            for point in points:
+                if self._stop_requested.is_set():
+                    self.debug("Stop requested before next point. Ending scan gracefully.")
+                    break
+                targets = point.targets.as_dict()
+                self.debug(
+                    "Point "
+                    f"{point.index + 1}/{total_points}: "
+                    f"angle=({point.angle_x_urad:.2f}, {point.angle_y_urad:.2f}) µrad "
+                    f"offset=({point.offset_x_mm:.3f}, {point.offset_y_mm:.3f}) mm "
+                    f"targets={{{', '.join(f'{key}={value:.2f}' for key, value in targets.items())}}}"
+                )
+                moved = self.controller.move_absolute_group(
+                    targets,
+                    request_stop=self._stop_requested.is_set,
+                    command_logger=self.command_log.append,
+                    command_path=self.session_dir / "last_move_plan.json",
+                )
+                if not moved:
+                    self.debug(f"Move aborted at point {point.index + 1}/{total_points}.")
+                    break
+                if hasattr(self.signal_backend, "update_target") and point.angle_x_urad == point.angle_x_urad:
+                    self.signal_backend.update_target(point.angle_x_urad, point.angle_y_urad)
+                self.debug(f"Point {point.index + 1}/{total_points}: move complete, dwelling for {max(0.0, self.config.scan.dwell_s):.2f} s.")
+                time.sleep(max(0.0, self.config.scan.dwell_s))
+                samples: list[float] = []
+                for _ in range(max(1, self.config.scan.p1_samples_per_point)):
+                    reading = self.signal_backend.read()
+                    if reading.ok:
+                        samples.append(reading.value)
+                    time.sleep(0.02)
+                average = sum(samples) / len(samples) if samples else math.nan
+                variance = 0.0 if len(samples) <= 1 else sum((value - average) ** 2 for value in samples) / len(samples)
+                rbv = self.controller.current_steps()
+                measurement = MeasurementRecord(
+                    point_index=point.index,
+                    mode=point.mode,
+                    elapsed_s=time.perf_counter() - start,
+                    angle_x_urad=point.angle_x_urad,
+                    angle_y_urad=point.angle_y_urad,
+                    offset_x_mm=point.offset_x_mm,
+                    offset_y_mm=point.offset_y_mm,
+                    signal_label=context.signal_label,
+                    signal_pv=context.signal_pv,
+                    signal_value=samples[-1] if samples else math.nan,
+                    signal_average=average,
+                    signal_std=math.sqrt(variance),
+                    samples_used=len(samples),
+                    commanded_m1_horizontal=point.targets.m1_horizontal,
+                    commanded_m1_vertical=point.targets.m1_vertical,
+                    commanded_m2_horizontal=point.targets.m2_horizontal,
+                    commanded_m2_vertical=point.targets.m2_vertical,
+                    rbv_m1_horizontal=rbv["m1_horizontal"],
+                    rbv_m1_vertical=rbv["m1_vertical"],
+                    rbv_m2_horizontal=rbv["m2_horizontal"],
+                    rbv_m2_vertical=rbv["m2_vertical"],
+                )
+                self.measurements.append(measurement)
+                self.debug(
+                    f"Point {point.index + 1}/{total_points}: "
+                    f"{context.signal_label} avg={average:.6g} std={math.sqrt(variance):.6g} "
+                    f"from {len(samples)} samples | "
+                    f"RBV m1h={rbv['m1_horizontal']:.2f} m1v={rbv['m1_vertical']:.2f} "
+                    f"m2h={rbv['m2_horizontal']:.2f} m2v={rbv['m2_vertical']:.2f}"
+                )
+                on_measurement(measurement)
+        except Exception as exc:  # noqa: BLE001
+            self.last_error = str(exc)
+            self.debug(f"Scan aborted with error: {exc}")
         self._write_session(points)
         best = choose_best_point(self.measurements, self.config.scan.objective)
         if best is not None:

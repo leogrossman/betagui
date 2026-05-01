@@ -235,6 +235,7 @@ class MirrorController:
         self.write_mode = True if config.safe_mode else config.write_mode
         self.motors = {key: EpicsMotor(key, pv, factory) for key, pv in MOTOR_PVS.items()}
         self.reference_steps = self.capture_reference()
+        self.last_move_error: str | None = None
 
     def capture_reference(self) -> dict[str, float]:
         reference = {}
@@ -303,9 +304,11 @@ class MirrorController:
         command_logger: Callable[[CommandRecord], None] | None = None,
         command_path: Path | None = None,
     ) -> bool:
+        self.last_move_error = None
         ok, errors = self.validate_targets(targets)
         if not ok:
-            raise RuntimeError("Unsafe motor command blocked: " + "; ".join(errors))
+            self.last_move_error = "Unsafe motor command blocked: " + "; ".join(errors)
+            raise RuntimeError(self.last_move_error)
         current_steps = self.current_steps()
         plan = self.plan_absolute_move(current_steps, targets)
         if command_path is not None:
@@ -324,6 +327,7 @@ class MirrorController:
             )
         for key, commands in plan.items():
             motor = self.motors[key]
+            self.debug(f"Starting serialized move for {motor.base} with {len(commands)} ramp layer(s).")
             for command in commands:
                 if request_stop and request_stop():
                     self.debug("Move interrupted by stop request before next command.")
@@ -347,11 +351,35 @@ class MirrorController:
                     f"wait DMOV, settle {command.settle_s:.2f}s"
                 )
                 if self.write_mode:
+                    before = motor.snapshot()
+                    self.debug(
+                        f"{motor.base}: before write RBV={before.rbv:.3f} VAL={before.val:.3f} "
+                        f"DMOV={before.dmov} MOVN={before.movn} STAT={before.stat} SEVR={before.sevr}"
+                    )
                     motor.put_target(command.target_val)
+                    self.debug(f"{motor.base}: command sent, waiting for DMOV=1.")
                     if command.wait_for_dmov and not motor.wait_done(timeout_s=self.config.wait_timeout_s):
-                        raise RuntimeError(f"{motor.base} did not report DMOV within timeout")
+                        self.last_move_error = f"{motor.base} did not report DMOV within timeout"
+                        raise RuntimeError(self.last_move_error)
+                    after_wait = motor.snapshot()
+                    self.debug(
+                        f"{motor.base}: after wait RBV={after_wait.rbv:.3f} VAL={after_wait.val:.3f} "
+                        f"DMOV={after_wait.dmov} MOVN={after_wait.movn} STAT={after_wait.stat} SEVR={after_wait.sevr}"
+                    )
+                    if abs(after_wait.rbv - command.target_val) > max(0.5, self.config.max_step_per_put):
+                        self.last_move_error = (
+                            f"{motor.base} reached RBV={after_wait.rbv:.3f}, expected {command.target_val:.3f}. "
+                            "Move may not have completed correctly."
+                        )
+                        raise RuntimeError(self.last_move_error)
                     time.sleep(max(0.0, self.config.settle_s))
+                    settled = motor.snapshot()
+                    self.debug(
+                        f"{motor.base}: post-settle RBV={settled.rbv:.3f} VAL={settled.val:.3f} "
+                        f"DMOV={settled.dmov} MOVN={settled.movn}"
+                    )
                 time.sleep(max(0.0, self.config.inter_put_delay_s))
+            self.debug(f"Finished serialized move for {motor.base}.")
         return True
 
     def stop_all(self) -> None:

@@ -950,10 +950,21 @@ class LaserMirrorApp:
                 f"Best {best_point.objective}: {best_point.signal_label}={best_point.signal_value:.6g} "
                 f"at ax={best_point.angle_x_urad:.2f} µrad, ay={best_point.angle_y_urad:.2f} µrad"
             )
-        self.status_var.set("Scan finished.")
+        if self.scan_runner.last_error:
+            self.status_var.set("Scan finished with warning/error.")
+        else:
+            self.status_var.set("Scan finished.")
         self._save_legacy_state()
         self._save_motor_recovery()
         self._log(f"Scan finished. Saved to {session_dir}")
+        if self.scan_runner.last_error:
+            messagebox.showwarning(
+                "Scan warning",
+                "The scan stopped with a motor/controller warning.\n\n"
+                f"{self.scan_runner.last_error}\n\n"
+                "The GUI stayed alive and saved the partial session data. "
+                "Please inspect the motor table, debug log, and saved session before continuing.",
+            )
 
     def _schedule_signal_poll(self) -> None:
         if self._poll_after_id is not None:

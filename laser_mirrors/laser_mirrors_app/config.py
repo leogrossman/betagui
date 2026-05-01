@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
+from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
 
@@ -84,12 +85,20 @@ class AppConfig:
         if not path.exists():
             return cls()
         raw = json.loads(path.read_text())
+        geometry_raw = _filter_dataclass_kwargs(GeometryConfig, raw.get("geometry", {}))
+        controller_raw = _filter_dataclass_kwargs(ControllerConfig, raw.get("controller", {}))
+        scan_raw = _filter_dataclass_kwargs(ScanConfig, raw.get("scan", {}))
         return cls(
-            geometry=GeometryConfig(**raw.get("geometry", {})),
-            controller=ControllerConfig(**raw.get("controller", {})),
-            scan=ScanConfig(**raw.get("scan", {})),
+            geometry=GeometryConfig(**geometry_raw),
+            controller=ControllerConfig(**controller_raw),
+            scan=ScanConfig(**scan_raw),
         )
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(asdict(self), indent=2, sort_keys=True))
+
+
+def _filter_dataclass_kwargs(cls, raw: dict) -> dict:
+    allowed = {field.name for field in dataclass_fields(cls)}
+    return {key: value for key, value in raw.items() if key in allowed}
