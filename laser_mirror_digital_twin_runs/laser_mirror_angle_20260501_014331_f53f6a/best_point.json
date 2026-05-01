@@ -1,0 +1,16 @@
+{
+  "angle_x_urad": 0.0,
+  "angle_y_urad": 0.0,
+  "objective": "max",
+  "offset_x_mm": 0.0,
+  "offset_y_mm": 0.0,
+  "point_index": 24,
+  "signal_label": "Simulated P1",
+  "signal_value": 1.0069965443885316,
+  "targets": {
+    "m1_horizontal": 0.0,
+    "m1_vertical": 0.0,
+    "m2_horizontal": 0.0,
+    "m2_vertical": 0.0
+  }
+}

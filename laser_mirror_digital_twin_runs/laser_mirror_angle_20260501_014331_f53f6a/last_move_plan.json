@@ -1,0 +1,59 @@
+{
+  "plan": {
+    "m1_horizontal": [
+      {
+        "motor_key": "m1_horizontal",
+        "ramp_values": [
+          9.090909090909092
+        ],
+        "settle_s": 0.0,
+        "start_rbv": 6.06060606060606,
+        "target_val": 9.090909090909092,
+        "wait_for_dmov": true
+      }
+    ],
+    "m1_vertical": [
+      {
+        "motor_key": "m1_vertical",
+        "ramp_values": [
+          13.227513227513228
+        ],
+        "settle_s": 0.0,
+        "start_rbv": 13.227513227513228,
+        "target_val": 13.227513227513228,
+        "wait_for_dmov": true
+      }
+    ],
+    "m2_horizontal": [
+      {
+        "motor_key": "m2_horizontal",
+        "ramp_values": [
+          -12.5472697020118
+        ],
+        "settle_s": 0.0,
+        "start_rbv": -8.364846468007864,
+        "target_val": -12.5472697020118,
+        "wait_for_dmov": true
+      }
+    ],
+    "m2_vertical": [
+      {
+        "motor_key": "m2_vertical",
+        "ramp_values": [
+          18.256609354779073
+        ],
+        "settle_s": 0.0,
+        "start_rbv": 18.256609354779073,
+        "target_val": 18.256609354779073,
+        "wait_for_dmov": true
+      }
+    ]
+  },
+  "targets": {
+    "m1_horizontal": 9.090909090909092,
+    "m1_vertical": 13.227513227513228,
+    "m2_horizontal": -12.5472697020118,
+    "m2_vertical": 18.256609354779073
+  },
+  "timestamp": "2026-05-01T01:43:32"
+}

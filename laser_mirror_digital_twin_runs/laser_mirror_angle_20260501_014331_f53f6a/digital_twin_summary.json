@@ -1,0 +1,11 @@
+{
+  "row_count": 49,
+  "session_dir": "/Users/leogrossman/Library/Mobile Documents/com~apple~CloudDocs/BESSY\ufffc/SSMB Fix/betagui/laser_mirror_digital_twin_runs/laser_mirror_angle_20260501_014331_f53f6a",
+  "config": {
+    "mode": "both_2d",
+    "span_x_urad": 50.0,
+    "span_y_urad": 50.0,
+    "points_x": 7,
+    "points_y": 7
+  }
+}
