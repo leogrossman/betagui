@@ -405,6 +405,7 @@ class LaserMirrorApp:
             "Angle heatmap:\n"
             "The plotted points are the measured scan samples.\n"
             "Colors encode the average selected signal at each point.\n"
+            "For separate horizontal-only and vertical-only runs, the canvas can combine them into a quasi-2D cross map.\n"
             "Optional interpolation paints a tiled background between measured points, but the dots remain the real data.",
         )
         self._attach_tooltip(
@@ -1187,11 +1188,15 @@ class LaserMirrorApp:
         span = max(hi - lo, 1e-9)
         unique_x = sorted({row.angle_x_urad for row in relevant if row.angle_x_urad == row.angle_x_urad})
         unique_y = sorted({row.angle_y_urad for row in relevant if row.angle_y_urad == row.angle_y_urad})
+        modes = {row.mode for row in relevant}
         if len(unique_y) == 1 and len(unique_x) >= 1:
             self._draw_angle_line_plot(canvas, relevant, margin, w, h, lo, span, "horizontal")
             return
         if len(unique_x) == 1 and len(unique_y) >= 1:
             self._draw_angle_line_plot(canvas, relevant, margin, w, h, lo, span, "vertical")
+            return
+        if modes.issubset({"horizontal_only", "vertical_only"}) and "horizontal_only" in modes and "vertical_only" in modes:
+            self._draw_angle_cross_map(canvas, relevant, margin, w, h, center_x, center_y, span_x, span_y, lo, span)
             return
         if self.interpolate_angle_map_var.get():
             x_values = unique_x
@@ -1264,6 +1269,86 @@ class LaserMirrorApp:
         canvas.create_text(width // 2, height - 18, text=axis_label)
         canvas.create_text(18, height // 2, text=self.signal_label_var.get(), angle=90)
         canvas.create_text(width - 18, 20, anchor="e", text=fixed_label, fill="#475569")
+
+    def _draw_angle_cross_map(
+        self,
+        canvas: tk.Canvas,
+        rows: list[MeasurementRecord],
+        margin: int,
+        width: int,
+        height: int,
+        center_x: float,
+        center_y: float,
+        span_x: float,
+        span_y: float,
+        lo: float,
+        span: float,
+    ) -> None:
+        horizontal_rows = [row for row in rows if row.mode == "horizontal_only"]
+        vertical_rows = [row for row in rows if row.mode == "vertical_only"]
+        if self.interpolate_angle_map_var.get():
+            x_values = sorted({row.angle_x_urad for row in horizontal_rows if row.angle_x_urad == row.angle_x_urad})
+            y_values = sorted({row.angle_y_urad for row in vertical_rows if row.angle_y_urad == row.angle_y_urad})
+            if len(x_values) >= 2:
+                x_edges = self._midpoint_edges(x_values)
+                band_half_height = max((h - 2 * margin) * 0.03, 8)
+                for index, x_value in enumerate(x_values):
+                    row = next((candidate for candidate in horizontal_rows if candidate.angle_x_urad == x_value), None)
+                    if row is None or row.signal_average != row.signal_average:
+                        continue
+                    left = margin + (x_edges[index] - (center_x - span_x / 2.0)) / span_x * (width - 2 * margin)
+                    right = margin + (x_edges[index + 1] - (center_x - span_x / 2.0)) / span_x * (width - 2 * margin)
+                    mid_y = height - margin - (center_y - (center_y - span_y / 2.0)) / span_y * (h - 2 * margin)
+                    color = self._color_for_value((row.signal_average - lo) / span)
+                    canvas.create_rectangle(left, mid_y - band_half_height, right, mid_y + band_half_height, fill=color, outline="")
+            if len(y_values) >= 2:
+                y_edges = self._midpoint_edges(y_values)
+                band_half_width = max((width - 2 * margin) * 0.03, 8)
+                for index, y_value in enumerate(y_values):
+                    row = next((candidate for candidate in vertical_rows if candidate.angle_y_urad == y_value), None)
+                    if row is None or row.signal_average != row.signal_average:
+                        continue
+                    bottom = height - margin - (y_edges[index] - (center_y - span_y / 2.0)) / span_y * (h - 2 * margin)
+                    top = height - margin - (y_edges[index + 1] - (center_y - span_y / 2.0)) / span_y * (h - 2 * margin)
+                    mid_x = margin + (center_x - (center_x - span_x / 2.0)) / span_x * (width - 2 * margin)
+                    color = self._color_for_value((row.signal_average - lo) / span)
+                    canvas.create_rectangle(mid_x - band_half_width, top, mid_x + band_half_width, bottom, fill=color, outline="")
+        for row in horizontal_rows + vertical_rows:
+            px = margin + (row.angle_x_urad - (center_x - span_x / 2.0)) / span_x * (width - 2 * margin)
+            py = height - margin - (row.angle_y_urad - (center_y - span_y / 2.0)) / span_y * (h - 2 * margin)
+            color = self._color_for_value((row.signal_average - lo) / span if row.signal_average == row.signal_average else 0.0)
+            canvas.create_oval(px - 5, py - 5, px + 5, py + 5, fill=color, outline="")
+        canvas.create_line(
+            margin,
+            height - margin - (center_y - (center_y - span_y / 2.0)) / span_y * (h - 2 * margin),
+            width - margin,
+            height - margin - (center_y - (center_y - span_y / 2.0)) / span_y * (h - 2 * margin),
+            fill="#94a3b8",
+            dash=(4, 4),
+        )
+        canvas.create_line(
+            margin + (center_x - (center_x - span_x / 2.0)) / span_x * (width - 2 * margin),
+            margin,
+            margin + (center_x - (center_x - span_x / 2.0)) / span_x * (width - 2 * margin),
+            height - margin,
+            fill="#94a3b8",
+            dash=(4, 4),
+        )
+        if self.best_point is not None:
+            px = margin + (self.best_point.angle_x_urad - (center_x - span_x / 2.0)) / span_x * (width - 2 * margin)
+            py = height - margin - (self.best_point.angle_y_urad - (center_y - span_y / 2.0)) / span_y * (h - 2 * margin)
+            canvas.create_line(px - 8, py, px + 8, py, fill="#111827", width=2)
+            canvas.create_line(px, py - 8, px, py + 8, fill="#111827", width=2)
+        canvas.create_text(width // 2, 18, text=f"{self.signal_label_var.get()} quasi-2D cross map", font=("Helvetica", 11, "bold"))
+        canvas.create_text(width // 2, height - 18, text="Angle X [µrad]")
+        canvas.create_text(18, height // 2, text="Angle Y [µrad]", angle=90)
+        canvas.create_text(
+            width - 18,
+            20,
+            anchor="e",
+            text="Combined horizontal-only + vertical-only scans",
+            fill="#475569",
+        )
 
     @staticmethod
     def _midpoint_edges(values: list[float]) -> list[float]:

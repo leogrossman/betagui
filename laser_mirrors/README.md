@@ -262,6 +262,7 @@ The tool marks that point in the angle map and can move the mirrors back to that
 - horizontal-only
 - vertical-only
 - full 2D scan
+- quasi-2D cross view when separate horizontal and vertical scans are combined in one session
 - command preview popup
 - live 2D colored signal map
 - live signal-vs-point trace
@@ -407,6 +408,22 @@ Then:
 4. `Preview commands`
 5. restart with `--write-mode` only when the preview looks sensible
 
+Recommended first scan sequence:
+
+1. use `horizontal_only`
+2. use `mirror1_primary`
+3. keep the span small around the trusted current setting
+4. use `P1 avg` first
+5. run the scan and watch the debug pane narration
+6. inspect the saved `measurements.csv`, `commands.jsonl`, and the live plot
+7. return to reference or move to best point only after sanity-checking the result
+8. then repeat with `vertical_only`
+
+After a horizontal-only run and a vertical-only run in the same GUI session:
+
+- the angle canvas can combine them into a quasi-2D cross map
+- this is a good compromise when you want something Fig. 7-like without committing immediately to a full 2D raster
+
 ## Output
 
 The output root is configurable in the GUI and saved in the config file.
@@ -512,6 +529,7 @@ Be honest before beam time:
 | Restore startup reference | Implemented | Based on captured RBV |
 | Legacy `mirror_state.ini` compatibility | Implemented | For continuity with old tool |
 | Horizontal / vertical / 2D sweep | Implemented | In angle-scan tab |
+| Combined quasi-2D cross map from separate 1D scans | Implemented | Horizontal-only + vertical-only in one GUI session |
 | Mirror 2 spiral | Implemented | Separate tab |
 | Live 2D signal map | Implemented | Canvas-based |
 | Live 1D signal trace | Implemented | In Overview |
