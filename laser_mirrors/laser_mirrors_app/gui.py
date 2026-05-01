@@ -22,6 +22,7 @@ from .hardware import (
     DisconnectedController,
     DisconnectedSignalBackend,
     MirrorController,
+    SignalBackend,
     SimulatedSignalBackend,
     build_signal_backend,
 )
@@ -190,6 +191,9 @@ class LaserMirrorApp:
         self.manual_absolute_var = tk.DoubleVar(value=0.0)
         self.passive_x_motor_var = tk.StringVar(value="m1_horizontal")
         self.passive_y_motor_var = tk.StringVar(value="m2_horizontal")
+        self.passive_metric_var = tk.StringVar(value="selected_signal")
+        self.passive_view_mode_var = tk.StringVar(value="motor_map")
+        self.passive_history_limit_var = tk.IntVar(value=400)
         self.passive_status_var = tk.StringVar(value="No passive sweep reconstructed yet.")
         self.pen_motor_var = tk.StringVar(value="m2_horizontal")
         self.pen_start_var = tk.DoubleVar(value=self.config.controller.pen_test_start_steps)
@@ -214,6 +218,7 @@ class LaserMirrorApp:
         self.state_path_var = tk.StringVar(value=self.config.controller.state_file_path)
         self.current_reference_steps: dict[str, float] = {key: 0.0 for key in MOTOR_PVS}
         self.pending_refine_preview: list[ScanPoint] = []
+        self._canvas_points: dict[str, list[dict[str, object]]] = {}
         self.legacy_state_path = (self.config_path.parent / self.config.controller.state_file_path).resolve()
         self.motor_recovery_path = (self.config_path.parent / self.config.controller.motor_recovery_path).resolve()
         self.last_command_path = (self.config_path.parent / self.config.controller.last_command_path).resolve()
@@ -439,6 +444,8 @@ class LaserMirrorApp:
             "Signal average vs scan index in acquisition order.\n"
             "Useful for spotting drift, hysteresis, or a time trend during the scan.",
         )
+        self.heatmap_canvas.bind("<Button-1>", lambda event: self._inspect_canvas_point("angle", event))
+        self.progress_canvas.bind("<Button-1>", lambda event: self._inspect_canvas_point("progress", event))
 
     def _build_advanced(self) -> None:
         info = ttk.LabelFrame(self.advanced_frame, text="Experimental / advanced scan modes", padding=10)
@@ -551,6 +558,7 @@ class LaserMirrorApp:
             "Each point is plotted at the commanded mirror-pair step position and colored by the measured signal average.\n"
             "The black cross is the current best measured point. Blue hollow markers indicate the next suggested local-refine region.",
         )
+        self.spiral_canvas.bind("<Button-1>", lambda event: self._inspect_canvas_point("spiral", event))
 
     def _build_passive(self) -> None:
         controls = ttk.LabelFrame(self.passive_frame, text="Passive monitor / reconstruction", padding=10)
@@ -559,25 +567,28 @@ class LaserMirrorApp:
         plots.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
         self.passive_frame.columnconfigure(1, weight=1)
         self.passive_frame.rowconfigure(0, weight=1)
-        self._add_labeled_combo(controls, "X motor", self.passive_x_motor_var, list(MOTOR_PVS.keys()), 0)
-        self._add_labeled_combo(controls, "Y motor", self.passive_y_motor_var, list(MOTOR_PVS.keys()), 1)
-        ttk.Button(controls, text="Clear passive buffer", command=self._clear_passive_buffer).grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Save passive plot (.ps)", command=lambda: self._save_canvas_postscript(self.passive_map_canvas, "passive_reconstruction.ps")).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        ttk.Label(controls, textvariable=self.passive_status_var, wraplength=340, justify="left").grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self._add_labeled_combo(controls, "View mode", self.passive_view_mode_var, ["motor_map", "time_vs_metric"], 0)
+        self._add_labeled_combo(controls, "Metric", self.passive_metric_var, self._passive_metric_choices(), 1)
+        self._add_labeled_entry(controls, "Recent samples", self.passive_history_limit_var, 2)
+        self._add_labeled_combo(controls, "X motor", self.passive_x_motor_var, list(MOTOR_PVS.keys()), 3)
+        self._add_labeled_combo(controls, "Y motor", self.passive_y_motor_var, list(MOTOR_PVS.keys()), 4)
+        ttk.Button(controls, text="Clear passive buffer", command=self._clear_passive_buffer).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Save passive plot (.ps)", command=lambda: self._save_canvas_postscript(self.passive_map_canvas, "passive_reconstruction.ps")).grid(row=6, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.passive_status_var, wraplength=340, justify="left").grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Label(
             controls,
             text=(
                 "This tab keeps logging passive motor RBVs plus the selected signal at every poll.\n"
-                "That means you can reconstruct quasi-sweeps even if an external control program is moving the mirrors."
+                "It also records the other configured live sensors, so you can recolor the same passive history by P1, sigma, or center signals later."
             ),
             wraplength=340,
             justify="left",
-        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self._add_help_button(
             controls,
-            5,
+            8,
             "Passive mode does not need this GUI to move the mirrors.\n"
-            "It simply records motor RBVs plus the selected signal every poll and turns the observed motion into a parameter-space plot.",
+            "It records all four motor RBVs plus the configured live signals every poll and lets you re-view the recent history in different ways.",
         )
 
         map_box = ttk.LabelFrame(plots, text="Observed parameter-space map", padding=10)
@@ -590,11 +601,12 @@ class LaserMirrorApp:
         self.passive_trend_canvas.pack(fill="both", expand=True)
         self._attach_tooltip(
             self.passive_map_canvas,
-            "Passive map:\n"
-            "x/y axes are whichever two motor RBVs you selected.\n"
-            "Color is the observed signal value.\n"
-            "This is useful when an external mirror-control program is driving the sweep.",
+            "Passive view:\n"
+            "You can show either a motor-parameter map or a time-vs-metric plot.\n"
+            "Click a point to inspect all four motor positions and the recorded signal values at that sample.",
         )
+        self.passive_map_canvas.bind("<Button-1>", lambda event: self._inspect_canvas_point("passive_map", event))
+        self.passive_trend_canvas.bind("<Button-1>", lambda event: self._inspect_canvas_point("passive_trend", event))
 
     def _build_pen_test(self) -> None:
         controls = ttk.LabelFrame(self.pen_frame, text="Experimental controller pen test", padding=10)
@@ -675,6 +687,9 @@ class LaserMirrorApp:
             if pv == pv_name:
                 return key
         return "p1_h1_avg"
+
+    def _passive_metric_choices(self) -> list[str]:
+        return ["selected_signal"] + list(SIGNAL_PRESETS.keys())
 
     def _scan_mode_help_text(self) -> str:
         return (
@@ -847,6 +862,7 @@ class LaserMirrorApp:
             self.controller = MirrorController(self.config.controller, self.factory, self._log)
             self.current_reference_steps = self.controller.capture_reference()
             self.signal_backend = SimulatedSignalBackend(self.signal_label_var.get() or "Simulated signal")
+            self.passive_signal_backends = {key: SimulatedSignalBackend(label) for key, (label, _pv) in SIGNAL_PRESETS.items()}
             self.scan_runner = ScanRunner(self.config, self.geometry, self.controller, self.signal_backend, self._log, self.output_root)
             self.runtime_var.set(
                 "Offline demo backend ready\n"
@@ -867,6 +883,10 @@ class LaserMirrorApp:
                 self.signal_pv_var.get(),
                 self.factory,
             )
+            self.passive_signal_backends = {
+                key: SignalBackend(label, pv, self.factory)
+                for key, (label, pv) in SIGNAL_PRESETS.items()
+            }
             if hasattr(self.signal_backend, "label"):
                 self.signal_label_var.set(getattr(self.signal_backend, "label"))
             if hasattr(self.signal_backend, "pv_name"):
@@ -890,6 +910,10 @@ class LaserMirrorApp:
                 self.signal_pv_var.get() or "disconnected",
                 str(exc),
             )
+            self.passive_signal_backends = {
+                key: DisconnectedSignalBackend(label, pv, str(exc))
+                for key, (label, pv) in SIGNAL_PRESETS.items()
+            }
             self.scan_runner = ScanRunner(self.config, self.geometry, self.controller, self.signal_backend, self._log, self.output_root)
             self.runtime_var.set(f"Backend connection failed; UI kept in disconnected read-only state.\nReason: {exc}")
             self.status_var.set("Disconnected / read-only.")
@@ -1211,6 +1235,15 @@ class LaserMirrorApp:
             if hasattr(self.signal_backend, "update_target"):
                 self.signal_backend.update_target(self.center_x_var.get(), self.center_y_var.get())
             reading = self.signal_backend.read()
+            passive_extras: dict[str, float] = {}
+            for key, backend in getattr(self, "passive_signal_backends", {}).items():
+                try:
+                    if hasattr(backend, "update_target"):
+                        backend.update_target(self.center_x_var.get(), self.center_y_var.get())
+                    extra = backend.read()
+                    passive_extras[key] = extra.value if extra.ok else math.nan
+                except Exception:
+                    passive_extras[key] = math.nan
             snapshots = self.controller.motor_snapshots()
             elapsed = time.time() - self.session_start
             if reading.ok:
@@ -1239,6 +1272,7 @@ class LaserMirrorApp:
                     m2_vertical=self._snapshot_value(snapshots, "m2_vertical"),
                     dmov_all=int(all(snapshot.dmov for snapshot in snapshots)),
                     movn_any=int(any(snapshot.movn for snapshot in snapshots)),
+                    extra_signals=passive_extras,
                 )
                 if self._should_record_passive_sample(sample):
                     self._passive_samples.append(sample)
@@ -1261,6 +1295,74 @@ class LaserMirrorApp:
             if snapshot.key == key:
                 return snapshot.rbv
         return math.nan
+
+    def _passive_metric_value(self, sample: PassiveSample) -> float:
+        metric = self.passive_metric_var.get()
+        if metric == "selected_signal":
+            return sample.signal_value
+        return sample.extra_signals.get(metric, math.nan)
+
+    def _recent_passive_samples(self) -> list[PassiveSample]:
+        samples = list(self._passive_samples)
+        limit = max(1, int(self.passive_history_limit_var.get()))
+        if len(samples) > limit:
+            samples = samples[-limit:]
+        return samples
+
+    def _register_canvas_points(self, name: str, points: list[dict[str, object]]) -> None:
+        self._canvas_points[name] = points
+
+    def _inspect_canvas_point(self, name: str, event) -> None:
+        points = self._canvas_points.get(name, [])
+        if not points:
+            return
+        best = min(points, key=lambda row: (float(row["x"]) - event.x) ** 2 + (float(row["y"]) - event.y) ** 2)
+        payload = best.get("payload", {})
+        if not isinstance(payload, dict):
+            return
+        lines = []
+        for key, value in payload.items():
+            if isinstance(value, float):
+                lines.append(f"{key}: {value:.6g}")
+            else:
+                lines.append(f"{key}: {value}")
+        messagebox.showinfo("Point details", "\n".join(lines))
+
+    def _passive_payload(self, sample: PassiveSample, metric_name: str, metric_value: float) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "timestamp": sample.timestamp_iso,
+            "elapsed_s": sample.elapsed_s,
+            "metric": metric_name,
+            "metric_value": metric_value,
+            "selected_signal_label": sample.signal_label,
+            "selected_signal_value": sample.signal_value,
+            "m1_horizontal": sample.m1_horizontal,
+            "m1_vertical": sample.m1_vertical,
+            "m2_horizontal": sample.m2_horizontal,
+            "m2_vertical": sample.m2_vertical,
+            "dmov_all": sample.dmov_all,
+            "movn_any": sample.movn_any,
+        }
+        for key, value in sample.extra_signals.items():
+            payload[f"signal_{key}"] = value
+        return payload
+
+    def _measurement_payload(self, row: MeasurementRecord) -> dict[str, object]:
+        return {
+            "timestamp": row.timestamp_iso,
+            "mode": row.mode,
+            "point_index": row.point_index,
+            "angle_x_urad": row.angle_x_urad,
+            "angle_y_urad": row.angle_y_urad,
+            "offset_x_mm": row.offset_x_mm,
+            "offset_y_mm": row.offset_y_mm,
+            "signal_average": row.signal_average,
+            "signal_std": row.signal_std,
+            "m1_horizontal": row.rbv_m1_horizontal,
+            "m1_vertical": row.rbv_m1_vertical,
+            "m2_horizontal": row.rbv_m2_horizontal,
+            "m2_vertical": row.rbv_m2_vertical,
+        }
 
     def _should_record_passive_sample(self, sample: PassiveSample) -> bool:
         if self.config.controller.passive_log_all_samples:
@@ -1445,6 +1547,7 @@ class LaserMirrorApp:
     def _draw_angle_heatmap(self) -> None:
         canvas = self.heatmap_canvas
         canvas.delete("all")
+        points_meta: list[dict[str, object]] = []
         w = int(canvas["width"])
         h = int(canvas["height"])
         margin = 48
@@ -1497,6 +1600,7 @@ class LaserMirrorApp:
             color = self._color_for_value((row.signal_average - lo) / span if row.signal_average == row.signal_average else 0.0)
             radius = 5
             canvas.create_oval(px - radius, py - radius, px + radius, py + radius, fill=color, outline="")
+            points_meta.append({"x": px, "y": py, "payload": self._measurement_payload(row)})
         if self.best_point is not None:
             px = margin + (self.best_point.angle_x_urad - (center_x - span_x / 2.0)) / span_x * (w - 2 * margin)
             py = h - margin - (self.best_point.angle_y_urad - (center_y - span_y / 2.0)) / span_y * (h - 2 * margin)
@@ -1505,6 +1609,7 @@ class LaserMirrorApp:
         canvas.create_text(w // 2, 18, text=f"{self.signal_label_var.get()} vs interaction angle", font=("Helvetica", 11, "bold"))
         canvas.create_text(w // 2, h - 18, text="Angle X [µrad]")
         canvas.create_text(18, h // 2, text="Angle Y [µrad]", angle=90)
+        self._register_canvas_points("angle", points_meta)
 
     def _draw_angle_line_plot(
         self,
@@ -1517,6 +1622,7 @@ class LaserMirrorApp:
         span: float,
         axis: str,
     ) -> None:
+        points_meta: list[dict[str, object]] = []
         sorted_rows = sorted(rows, key=lambda row: row.angle_x_urad if axis == "horizontal" else row.angle_y_urad)
         x_values = [row.angle_x_urad if axis == "horizontal" else row.angle_y_urad for row in sorted_rows]
         x_lo = min(x_values)
@@ -1531,6 +1637,7 @@ class LaserMirrorApp:
             color = self._color_for_value((row.signal_average - lo) / span if row.signal_average == row.signal_average else 0.0)
             canvas.create_oval(px - 5, py - 5, px + 5, py + 5, fill=color, outline="")
             prev = (px, py)
+            points_meta.append({"x": px, "y": py, "payload": self._measurement_payload(row)})
         if self.best_point is not None:
             best_x = self.best_point.angle_x_urad if axis == "horizontal" else self.best_point.angle_y_urad
             px = margin + (best_x - x_lo) / x_span * (width - 2 * margin)
@@ -1544,6 +1651,7 @@ class LaserMirrorApp:
         canvas.create_text(width // 2, height - 18, text=axis_label)
         canvas.create_text(18, height // 2, text=self.signal_label_var.get(), angle=90)
         canvas.create_text(width - 18, 20, anchor="e", text=fixed_label, fill="#475569")
+        self._register_canvas_points("angle", points_meta)
 
     def _draw_angle_cross_map(
         self,
@@ -1559,6 +1667,7 @@ class LaserMirrorApp:
         lo: float,
         span: float,
     ) -> None:
+        points_meta: list[dict[str, object]] = []
         horizontal_rows = [row for row in rows if row.mode == "horizontal_only"]
         vertical_rows = [row for row in rows if row.mode == "vertical_only"]
         if self.interpolate_angle_map_var.get():
@@ -1593,6 +1702,7 @@ class LaserMirrorApp:
             py = height - margin - (row.angle_y_urad - (center_y - span_y / 2.0)) / span_y * (h - 2 * margin)
             color = self._color_for_value((row.signal_average - lo) / span if row.signal_average == row.signal_average else 0.0)
             canvas.create_oval(px - 5, py - 5, px + 5, py + 5, fill=color, outline="")
+            points_meta.append({"x": px, "y": py, "payload": self._measurement_payload(row)})
         canvas.create_line(
             margin,
             height - margin - (center_y - (center_y - span_y / 2.0)) / span_y * (h - 2 * margin),
@@ -1624,6 +1734,7 @@ class LaserMirrorApp:
             text="Combined horizontal-only + vertical-only scans",
             fill="#475569",
         )
+        self._register_canvas_points("angle", points_meta)
 
     @staticmethod
     def _midpoint_edges(values: list[float]) -> list[float]:
@@ -1639,6 +1750,7 @@ class LaserMirrorApp:
     def _draw_progress(self) -> None:
         canvas = self.progress_canvas
         canvas.delete("all")
+        points_meta: list[dict[str, object]] = []
         w = int(canvas["width"])
         h = int(canvas["height"])
         margin = 40
@@ -1658,11 +1770,29 @@ class LaserMirrorApp:
                 canvas.create_line(prev[0], prev[1], px, py, fill="#1d4ed8", width=2)
             canvas.create_oval(px - 3, py - 3, px + 3, py + 3, fill="#c2410c", outline="")
             prev = (px, py)
+            points_meta.append(
+                {
+                    "x": px,
+                    "y": py,
+                    "payload": {
+                        "mode": row.mode,
+                        "point_index": row.point_index,
+                        "signal_average": row.signal_average,
+                        "signal_std": row.signal_std,
+                        "m1_horizontal": row.rbv_m1_horizontal,
+                        "m1_vertical": row.rbv_m1_vertical,
+                        "m2_horizontal": row.rbv_m2_horizontal,
+                        "m2_vertical": row.rbv_m2_vertical,
+                    },
+                }
+            )
         canvas.create_text(w // 2, 18, text=f"{self.signal_label_var.get()} during scan", font=("Helvetica", 11, "bold"))
+        self._register_canvas_points("progress", points_meta)
 
     def _draw_spiral_map(self) -> None:
         canvas = self.spiral_canvas
         canvas.delete("all")
+        points_meta: list[dict[str, object]] = []
         w = int(canvas["width"])
         h = int(canvas["height"])
         margin = 48
@@ -1691,6 +1821,21 @@ class LaserMirrorApp:
             py = h - margin - (getattr(row, y_attr) - min(ys)) / vy * (h - 2 * margin)
             color = self._color_for_value((row.signal_average - lo) / span if row.signal_average == row.signal_average else 0.0)
             canvas.create_oval(px - 4, py - 4, px + 4, py + 4, fill=color, outline="")
+            points_meta.append(
+                {
+                    "x": px,
+                    "y": py,
+                    "payload": {
+                        "mode": row.mode,
+                        "signal_average": row.signal_average,
+                        "signal_std": row.signal_std,
+                        "m1_horizontal": row.rbv_m1_horizontal,
+                        "m1_vertical": row.rbv_m1_vertical,
+                        "m2_horizontal": row.rbv_m2_horizontal,
+                        "m2_vertical": row.rbv_m2_vertical,
+                    },
+                }
+            )
         if self.best_point is not None:
             best_x = self.best_point.targets.m1_horizontal if pair == "mirror1" else self.best_point.targets.m2_horizontal
             best_y = self.best_point.targets.m1_vertical if pair == "mirror1" else self.best_point.targets.m2_vertical
@@ -1708,61 +1853,93 @@ class LaserMirrorApp:
         canvas.create_text(w // 2, 18, text=f"{self.signal_label_var.get()} vs {label} position", font=("Helvetica", 11, "bold"))
         canvas.create_text(w // 2, h - 18, text=f"{label} horizontal [steps]")
         canvas.create_text(18, h // 2, text=f"{label} vertical [steps]", angle=90)
+        self._register_canvas_points("spiral", points_meta)
 
     def _draw_passive_map(self) -> None:
         canvas = self.passive_map_canvas
         canvas.delete("all")
+        points_meta: list[dict[str, object]] = []
         w = int(canvas["width"])
         h = int(canvas["height"])
         margin = 48
         canvas.create_rectangle(margin, margin, w - margin, h - margin, outline="#999999")
-        samples = list(self._passive_samples)
+        samples = self._recent_passive_samples()
         if len(samples) < 2:
             canvas.create_text(w // 2, h // 2, text="Waiting for passive motor/signal history...", fill="#666666")
+            return
+        metric_name = self.passive_metric_var.get()
+        values = [self._passive_metric_value(sample) for sample in samples]
+        finite_values = [value for value in values if value == value]
+        lo = min(finite_values) if finite_values else 0.0
+        hi = max(finite_values) if finite_values else 1.0
+        v_span = max(hi - lo, 1e-9)
+        if self.passive_view_mode_var.get() == "time_vs_metric":
+            times = [sample.elapsed_s for sample in samples]
+            t_span = max(max(times) - min(times), 1e-6)
+            prev = None
+            for sample, metric in zip(samples, values):
+                if metric != metric:
+                    continue
+                px = margin + (sample.elapsed_s - min(times)) / t_span * (w - 2 * margin)
+                py = h - margin - (metric - lo) / v_span * (h - 2 * margin)
+                if prev is not None:
+                    canvas.create_line(prev[0], prev[1], px, py, fill="#1d4ed8", width=2)
+                color = self._color_for_value((metric - lo) / v_span)
+                canvas.create_oval(px - 3, py - 3, px + 3, py + 3, fill=color, outline="")
+                prev = (px, py)
+                points_meta.append({"x": px, "y": py, "payload": self._passive_payload(sample, metric_name, metric)})
+            canvas.create_text(w // 2, 18, text=f"Passive {metric_name} vs time", font=("Helvetica", 11, "bold"))
+            canvas.create_text(w // 2, h - 18, text="Elapsed time [s]")
+            canvas.create_text(18, h // 2, text=metric_name, angle=90)
+            self.passive_status_var.set(f"Passive history window: {len(samples)} recent samples shown as time trace.")
+            self._register_canvas_points("passive_map", points_meta)
             return
         x_key = self.passive_x_motor_var.get()
         y_key = self.passive_y_motor_var.get()
         xs = [getattr(sample, x_key) for sample in samples]
         ys = [getattr(sample, y_key) for sample in samples]
-        values = [sample.signal_value for sample in samples]
         x_span = max(max(xs) - min(xs), 1e-6)
         y_span = max(max(ys) - min(ys), 1e-6)
-        lo = min(values)
-        hi = max(values)
-        v_span = max(hi - lo, 1e-9)
-        best = max(samples, key=lambda row: row.signal_value)
-        for sample in samples:
+        best_index = max(
+            range(len(samples)),
+            key=lambda idx: self._passive_metric_value(samples[idx]) if self._passive_metric_value(samples[idx]) == self._passive_metric_value(samples[idx]) else -math.inf,
+        )
+        best = samples[best_index]
+        for sample, metric in zip(samples, values):
             px = margin + (getattr(sample, x_key) - min(xs)) / x_span * (w - 2 * margin)
             py = h - margin - (getattr(sample, y_key) - min(ys)) / y_span * (h - 2 * margin)
-            color = self._color_for_value((sample.signal_value - lo) / v_span)
+            color = self._color_for_value((metric - lo) / v_span if metric == metric else 0.0)
             canvas.create_oval(px - 3, py - 3, px + 3, py + 3, fill=color, outline="")
+            points_meta.append({"x": px, "y": py, "payload": self._passive_payload(sample, metric_name, metric)})
         best_x = margin + (getattr(best, x_key) - min(xs)) / x_span * (w - 2 * margin)
         best_y = h - margin - (getattr(best, y_key) - min(ys)) / y_span * (h - 2 * margin)
         canvas.create_line(best_x - 8, best_y, best_x + 8, best_y, fill="#111827", width=2)
         canvas.create_line(best_x, best_y - 8, best_x, best_y + 8, fill="#111827", width=2)
         self.passive_status_var.set(
-            f"Passive reconstruction: {len(samples)} samples | best {best.signal_label}={best.signal_value:.6g} "
+            f"Passive reconstruction: {len(samples)} samples | best {metric_name}={self._passive_metric_value(best):.6g} "
             f"at {x_key}={getattr(best, x_key):.2f}, {y_key}={getattr(best, y_key):.2f}"
         )
-        canvas.create_text(w // 2, 18, text=f"Passive {self.signal_label_var.get()} map from observed mirror motion", font=("Helvetica", 11, "bold"))
+        canvas.create_text(w // 2, 18, text=f"Passive {metric_name} map from observed mirror motion", font=("Helvetica", 11, "bold"))
         canvas.create_text(w // 2, h - 18, text=f"{x_key} [steps]")
         canvas.create_text(18, h // 2, text=f"{y_key} [steps]", angle=90)
+        self._register_canvas_points("passive_map", points_meta)
 
     def _draw_passive_trend(self) -> None:
         canvas = self.passive_trend_canvas
         canvas.delete("all")
+        points_meta: list[dict[str, object]] = []
         w = int(canvas["width"])
         h = int(canvas["height"])
         margin = 40
         canvas.create_rectangle(margin, margin, w - margin, h - margin, outline="#999999")
-        samples = list(self._passive_samples)
+        samples = self._recent_passive_samples()
         if len(samples) < 2:
             canvas.create_text(w // 2, h // 2, text="Waiting for passive trend history...", fill="#666666")
             return
         x_key = self.passive_x_motor_var.get()
         y_key = self.passive_y_motor_var.get()
         series = [
-            ("signal", [sample.signal_value for sample in samples], "#1d4ed8"),
+            (self.passive_metric_var.get(), [self._passive_metric_value(sample) for sample in samples], "#1d4ed8"),
             (x_key, [getattr(sample, x_key) for sample in samples], "#dc2626"),
             (y_key, [getattr(sample, y_key) for sample in samples], "#16a34a"),
         ]
@@ -1777,8 +1954,11 @@ class LaserMirrorApp:
                 if prev is not None:
                     canvas.create_line(prev[0], prev[1], px, py, fill=color, width=2)
                 prev = (px, py)
+                if label == self.passive_metric_var.get():
+                    points_meta.append({"x": px, "y": py, "payload": self._passive_payload(samples[idx], label, value)})
             canvas.create_text(w - 140, 18 + 16 * series.index((label, values, color)), anchor="w", text=label, fill=color)
         canvas.create_text(w // 2, 18, text="Passive signal + motor traces (each trace scaled to its own range)", font=("Helvetica", 11, "bold"))
+        self._register_canvas_points("passive_trend", points_meta)
 
     def _clear_passive_buffer(self) -> None:
         self._passive_samples.clear()

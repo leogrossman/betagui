@@ -30,7 +30,7 @@ class SessionRecorder:
         self._log_handle.flush()
 
     def record_sample(self, sample: PassiveSample) -> None:
-        payload = asdict(sample)
+        payload = _flatten_sample(asdict(sample))
         with self.passive_jsonl_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, sort_keys=True) + "\n")
         if not self._csv_header_written:
@@ -54,3 +54,10 @@ class SessionRecorder:
         finally:
             self._log_handle.close()
 
+
+def _flatten_sample(payload: dict[str, object]) -> dict[str, object]:
+    extra = payload.pop("extra_signals", {}) or {}
+    if isinstance(extra, dict):
+        for key, value in extra.items():
+            payload[f"signal_{key}"] = value
+    return payload

@@ -28,6 +28,7 @@ class MonitoringTests(unittest.TestCase):
             m2_vertical=4.0,
             dmov_all=1,
             movn_any=0,
+            extra_signals={"p3_h1_avg": 7.8},
         )
         recorder.record_sample(sample)
         recorder.write_summary({"ok": True})
@@ -37,6 +38,7 @@ class MonitoringTests(unittest.TestCase):
         self.assertTrue(recorder.passive_csv_path.exists())
         self.assertTrue(recorder.summary_path.exists())
         self.assertIn("hello world", recorder.log_path.read_text())
+        self.assertIn("signal_p3_h1_avg", recorder.passive_csv_path.read_text())
         summary = json.loads(recorder.summary_path.read_text())
         self.assertEqual(summary["ok"], True)
 

@@ -39,6 +39,7 @@ The tool also includes:
 - explicit previews of the EPICS motor commands that would be sent
 - graceful scan stop and hard emergency stop separation
 - passive monitoring mode that reconstructs quasi-sweeps from externally moved mirrors
+- passive multi-signal logging so the same passive motor history can later be viewed as `P1`, `P3`, `σx`, `σy`, or center response
 - controller pen-test diagnostics tab for cautious IOC stress probing
 - an offline digital twin that runs on a normal laptop without EPICS
 
@@ -283,6 +284,11 @@ The 2D mode is still useful, but it is better understood as an extension:
    - only when you explicitly want the broader 2D angle map or direct target-space solve
 5. `Optics / Geometry`
    - confirm the live steering picture and step/angle scale
+6. `Passive monitor`
+   - leave the GUI open while something else moves the mirrors
+   - choose how much recent history to use
+   - recolor the same passive history by a different signal
+   - click any point to inspect all four motor positions and all recorded signal values
 
 ### What “best point” means
 

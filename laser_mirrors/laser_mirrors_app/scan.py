@@ -153,7 +153,27 @@ def _targets_for_mode(
 def choose_best_point(measurements: list[MeasurementRecord], objective: str) -> BestPointRecommendation | None:
     if not measurements:
         return None
-    best = min(measurements, key=lambda row: row.signal_average) if objective == "min" else max(measurements, key=lambda row: row.signal_average)
+    scored_rows: list[tuple[float, MeasurementRecord]] = []
+    for row in measurements:
+        if row.mode in ("mirror1_spiral", "mirror2_spiral", "mirror1_refine", "mirror2_refine"):
+            x0 = row.commanded_m1_horizontal if row.mode.startswith("mirror1") else row.commanded_m2_horizontal
+            y0 = row.commanded_m1_vertical if row.mode.startswith("mirror1") else row.commanded_m2_vertical
+            neighbors = []
+            for other in measurements:
+                if other.mode != row.mode:
+                    continue
+                x1 = other.commanded_m1_horizontal if other.mode.startswith("mirror1") else other.commanded_m2_horizontal
+                y1 = other.commanded_m1_vertical if other.mode.startswith("mirror1") else other.commanded_m2_vertical
+                distance = math.hypot(x1 - x0, y1 - y0)
+                neighbors.append((distance, other.signal_average))
+            neighbors.sort(key=lambda item: item[0])
+            local = [value for _distance, value in neighbors[:5]]
+            score = sum(local) / len(local) if local else row.signal_average
+        else:
+            local = [other.signal_average for other in measurements if other.mode == row.mode]
+            score = row.signal_average if len(local) <= 2 else (row.signal_average * 0.7 + (sum(local) / len(local)) * 0.3)
+        scored_rows.append((score, row))
+    best = min(scored_rows, key=lambda item: item[0])[1] if objective == "min" else max(scored_rows, key=lambda item: item[0])[1]
     return BestPointRecommendation(
         objective=objective,
         signal_label=best.signal_label,

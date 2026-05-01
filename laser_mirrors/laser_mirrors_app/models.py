@@ -129,6 +129,7 @@ class PassiveSample:
     m2_vertical: float
     dmov_all: int
     movn_any: int
+    extra_signals: dict[str, float] = field(default_factory=dict)
     source: str = "passive_poll"
     timestamp_iso: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
