@@ -1092,6 +1092,35 @@ class LaserMirrorApp:
             prev = (px, py)
         canvas.create_text(w // 2, 14, text=f"{self.signal_label_var.get()} over time", font=("Helvetica", 10, "bold"))
 
+    def _refresh_plots(self) -> None:
+        """Redraw all plot canvases after a view/control toggle.
+
+        Keep this method tiny and defensive because Tk widgets may not all exist
+        yet if a startup/build sequence is changed later. This method is used by
+        checkboxes/buttons in the UI and should never be allowed to crash the
+        whole application.
+        """
+
+        try:
+            if hasattr(self, "heatmap_canvas"):
+                self._draw_angle_heatmap()
+            if hasattr(self, "progress_canvas"):
+                self._draw_progress()
+            if hasattr(self, "spiral_canvas"):
+                self._draw_spiral_map()
+            if hasattr(self, "passive_map_canvas"):
+                self._draw_passive_map()
+            if hasattr(self, "passive_trend_canvas"):
+                self._draw_passive_trend()
+            if hasattr(self, "signal_trace_canvas"):
+                self._draw_signal_trace()
+            if hasattr(self, "pen_canvas"):
+                self._draw_pen_test_plot()
+            if hasattr(self, "optics_canvas"):
+                self._draw_geometry_preview()
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"plot refresh warning: {exc}")
+
     def _current_targets_from_motors(self) -> tuple[UndulatorTarget, UndulatorTarget]:
         current = self.controller.current_steps()
         horizontal = MirrorAngles(
