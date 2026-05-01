@@ -55,13 +55,13 @@ class ControllerConfig:
 
 @dataclass
 class ScanConfig:
-    mode: str = "both_2d"
+    mode: str = "vertical_only"
     center_angle_x_urad: float = 0.0
     center_angle_y_urad: float = 0.0
     span_angle_x_urad: float = 50.0
     span_angle_y_urad: float = 50.0
-    points_x: int = 7
-    points_y: int = 7
+    points_x: int = 9
+    points_y: int = 9
     dwell_s: float = 1.0
     p1_samples_per_point: int = 5
     serpentine: bool = True

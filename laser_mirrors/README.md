@@ -36,6 +36,7 @@ The mirror controller/IOC has already shown instability in the past. This tool i
 
 - default real mode is **read-only** unless `--write-mode` is used
 - `--safe-mode` means **real EPICS readback/signal, but no motor writes**
+- `--demo-mode` means **fully offline simulated motors and simulated signal**
 - all real moves are split into small EPICS `.VAL` ramps
 - the tool waits for `.DMOV=1`
 - the tool waits an additional settle time
@@ -56,6 +57,31 @@ Recommended commissioning pattern:
 3. capture current RBV as reference
 4. preview scan commands
 5. only then enable `--write-mode`
+6. start with a small `vertical_only` scan in a primary solve mode
+7. check the `Optics / Geometry` tab for the step-scale estimate before committing to a larger span
+
+## Launch modes
+
+Control room, read-only:
+
+```bash
+cd /path/to/betagui/laser_mirrors
+python3 laser_mirrors_gui.py --safe-mode
+```
+
+Control room, real writes:
+
+```bash
+cd /path/to/betagui/laser_mirrors
+python3 laser_mirrors_gui.py --write-mode
+```
+
+Laptop / Ubuntu UI-only demo:
+
+```bash
+cd /path/to/betagui/laser_mirrors
+python3 laser_mirrors_gui.py --demo-mode
+```
 
 For more controller-specific notes, see:
 
@@ -152,7 +178,7 @@ So the scan map uses:
 - point color = measured signal average at that angle point
 
 Motor coordinates are still logged completely, but they are implementation coordinates.
-The angle map is the plot that best matches the overlap / modulation question from Carsten's email
+The angle map is the plot that best matches the overlap / modulation question from the requested fixed-position angle scan
 and the qualitative Fig. 7 style idea: build a response landscape in angle space and identify an optimum.
 
 The optional interpolated background in the GUI is only a visual guide.
@@ -208,7 +234,7 @@ an established physics truth.
 
 ### What sweep probably comes first in the control room
 
-In practice, Carsten's email most naturally suggests **1D scans**:
+In practice, the requested workflow most naturally suggests **1D scans**:
 
 - a **horizontal-only** angle sweep
 - or a **vertical-only** angle sweep

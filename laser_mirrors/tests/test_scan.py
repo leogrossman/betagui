@@ -16,6 +16,7 @@ from laser_mirrors_app.scan import ScanContext, ScanRunner, build_angle_scan_poi
 class ScanTests(unittest.TestCase):
     def test_build_scan_grid_count(self) -> None:
         config = AppConfig()
+        config.scan.mode = "both_2d"
         config.scan.points_x = 5
         config.scan.points_y = 4
         geometry = LaserMirrorGeometry(config.geometry)
@@ -26,6 +27,7 @@ class ScanTests(unittest.TestCase):
 
     def test_runner_collects_measurements(self) -> None:
         config = AppConfig()
+        config.scan.mode = "both_2d"
         config.scan.points_x = 2
         config.scan.points_y = 2
         config.scan.dwell_s = 0.0
@@ -50,6 +52,7 @@ class ScanTests(unittest.TestCase):
 
     def test_primary_mirror_mode_keeps_offset(self) -> None:
         config = AppConfig()
+        config.scan.mode = "horizontal_only"
         config.scan.points_x = 2
         config.scan.points_y = 1
         config.scan.dwell_s = 0.0
@@ -77,6 +80,7 @@ class ScanTests(unittest.TestCase):
 
     def test_choose_best_point_max(self) -> None:
         config = AppConfig()
+        config.scan.mode = "both_2d"
         config.controller.inter_put_delay_s = 0.0
         config.controller.settle_s = 0.0
         config.controller.max_step_per_put = 1000.0
@@ -94,6 +98,7 @@ class ScanTests(unittest.TestCase):
 
     def test_runner_survives_move_failure_and_sets_last_error(self) -> None:
         config = AppConfig()
+        config.scan.mode = "horizontal_only"
         config.scan.points_x = 2
         config.scan.points_y = 1
         config.scan.dwell_s = 0.0

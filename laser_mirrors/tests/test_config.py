@@ -12,6 +12,10 @@ from laser_mirrors_app.config import AppConfig
 
 
 class ConfigTests(unittest.TestCase):
+    def test_default_scan_mode_is_vertical_only(self) -> None:
+        loaded = AppConfig()
+        self.assertEqual(loaded.scan.mode, "vertical_only")
+
     def test_load_ignores_unknown_keys_from_older_configs(self) -> None:
         root = Path(tempfile.mkdtemp())
         config_path = root / "laser_mirrors_config.json"

@@ -19,6 +19,13 @@ MOTOR_PVS = {
     "m2_horizontal": "MNF2C2L2RP",
 }
 
+MOTOR_LABELS = {
+    "m1_vertical": "Mirror 1 vertical",
+    "m1_horizontal": "Mirror 1 horizontal",
+    "m2_vertical": "Mirror 2 vertical",
+    "m2_horizontal": "Mirror 2 horizontal",
+}
+
 
 SIGNAL_PRESETS = {
     "p1_h1_raw": ("P1 raw", "SCOPE1ZULP:h1p1:rdAmpl"),

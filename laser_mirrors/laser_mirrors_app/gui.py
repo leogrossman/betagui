@@ -15,12 +15,14 @@ from tkinter import filedialog, messagebox, ttk
 from .config import AppConfig
 from .geometry import LaserMirrorGeometry
 from .hardware import (
+    MOTOR_LABELS,
     MOTOR_PVS,
     PVFactory,
     SIGNAL_PRESETS,
     DisconnectedController,
     DisconnectedSignalBackend,
     MirrorController,
+    SimulatedSignalBackend,
     build_signal_backend,
 )
 from .layout import default_optics_layout
@@ -41,7 +43,8 @@ from .state import load_state, save_state
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="SSMB laser mirror scan tool")
-    parser.add_argument("--safe-mode", action="store_true", help="Run with simulated motors and simulated signal")
+    parser.add_argument("--safe-mode", action="store_true", help="Use real EPICS readback/signal, but keep motor writes disabled")
+    parser.add_argument("--demo-mode", action="store_true", help="Run fully offline with simulated motors and simulated signal")
     parser.add_argument("--write-mode", action="store_true", help="Enable real motor writes (never needed for safe demos)")
     parser.add_argument("--config", default="laser_mirrors_config.json", help="Path to JSON config file")
     return parser
@@ -96,11 +99,22 @@ class LaserMirrorApp:
     them with ad-hoc PV writes.
     """
 
-    def __init__(self, root: tk.Tk, config_path: Path, force_safe_mode: bool = False, force_write_mode: bool = False):
+    def __init__(
+        self,
+        root: tk.Tk,
+        config_path: Path,
+        force_safe_mode: bool = False,
+        force_write_mode: bool = False,
+        force_demo_mode: bool = False,
+    ):
         self.root = root
         self.root.title("SSMB Laser Mirror Angle Scan Tool")
         self.config_path = config_path
         self.config = AppConfig.load(config_path)
+        self.demo_mode = force_demo_mode
+        if force_demo_mode:
+            self.config.controller.safe_mode = True
+            self.config.controller.write_mode = False
         if force_safe_mode:
             self.config.controller.safe_mode = True
             self.config.controller.write_mode = False
@@ -183,6 +197,7 @@ class LaserMirrorApp:
         self.pen_pause_var = tk.DoubleVar(value=self.config.controller.pen_test_pause_s)
         self.pen_status_var = tk.StringVar(value="Pen test idle.")
         self.mode_help_var = tk.StringVar(value=self._scan_mode_help_text())
+        self.scale_summary_var = tk.StringVar(value="")
         self.status_var = tk.StringVar(value="Idle")
         self.runtime_var = tk.StringVar(value="Backends not connected yet.")
         self.best_var = tk.StringVar(value="No best point yet.")
@@ -206,6 +221,7 @@ class LaserMirrorApp:
         self.manual_frame = ttk.Frame(notebook, padding=10)
         self.angle_frame = ttk.Frame(notebook, padding=10)
         self.spiral_frame = ttk.Frame(notebook, padding=10)
+        self.optics_frame = ttk.Frame(notebook, padding=10)
         self.passive_frame = ttk.Frame(notebook, padding=10)
         self.pen_frame = ttk.Frame(notebook, padding=10)
         self.debug_frame = ttk.Frame(notebook, padding=10)
@@ -213,6 +229,7 @@ class LaserMirrorApp:
         notebook.add(self.manual_frame, text="Manual control")
         notebook.add(self.angle_frame, text="Angle scan")
         notebook.add(self.spiral_frame, text="Mirror 2 spiral")
+        notebook.add(self.optics_frame, text="Optics / Geometry")
         notebook.add(self.passive_frame, text="Passive monitor")
         notebook.add(self.pen_frame, text="Controller pen test")
         notebook.add(self.debug_frame, text="Debug / Logs")
@@ -220,6 +237,7 @@ class LaserMirrorApp:
         self._build_manual()
         self._build_angle()
         self._build_spiral()
+        self._build_optics()
         self._build_passive()
         self._build_pen_test()
         self._build_debug()
@@ -235,7 +253,7 @@ class LaserMirrorApp:
 
         top = ttk.LabelFrame(left, text="Machine / safety", padding=10)
         top.pack(fill="x")
-        ttk.Checkbutton(top, text="Safe mode (no hardware writes)", variable=self.safe_mode_var, command=self._safe_mode_changed).grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Checkbutton(top, text="Safe mode (real readback, no writes)", variable=self.safe_mode_var, command=self._safe_mode_changed).grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Checkbutton(top, text="Enable real writes", variable=self.write_mode_var, command=self._write_mode_changed).grid(row=1, column=0, columnspan=2, sticky="w")
         self._add_labeled_combo(top, "Signal preset", self.signal_preset_var, list(SIGNAL_PRESETS.keys()), 2)
         self._add_labeled_entry(top, "Signal PV override", self.signal_pv_var, 3, width=34)
@@ -257,7 +275,7 @@ class LaserMirrorApp:
             top,
             12,
             "The selected signal preset is what all live plots and scans color by.\n"
-            "In read-only mode the GUI never sends motion commands.\n"
+            "Safe mode still reads the real EPICS signal and motor readback.\n"
             "In write mode every move still goes through the same ramped, DMOV-waiting safety path.",
         )
 
@@ -279,11 +297,12 @@ class LaserMirrorApp:
 
         self.motor_tree = ttk.Treeview(
             left,
-            columns=("pv", "rbv", "val", "dmov", "movn", "stat", "sevr", "egu"),
+            columns=("motor", "pv", "rbv", "val", "dmov", "movn", "stat", "sevr", "egu"),
             show="headings",
             height=8,
         )
         for key, title, width in [
+            ("motor", "Motor", 150),
             ("pv", "PV", 190),
             ("rbv", "RBV", 90),
             ("val", "VAL", 90),
@@ -297,7 +316,7 @@ class LaserMirrorApp:
             self.motor_tree.column(key, width=width)
         self.motor_tree.pack(fill="x", pady=(10, 0))
         for key, pv in MOTOR_PVS.items():
-            self.motor_tree.insert("", "end", iid=key, text=key, values=(pv, "", "", "", "", "", "", ""))
+            self.motor_tree.insert("", "end", iid=key, text=key, values=(MOTOR_LABELS.get(key, key), pv, "", "", "", "", "", "", ""))
 
         self.signal_box = ttk.LabelFrame(right, text="Live signal readout", padding=10)
         self.signal_box.pack(fill="x")
@@ -317,17 +336,6 @@ class LaserMirrorApp:
         ttk.Label(info, text=f"Motor recovery file: {self.motor_recovery_path}", wraplength=420, justify="left").pack(anchor="w", pady=(6, 0))
         ttk.Label(info, text=f"Last command file: {self.last_command_path}", wraplength=420, justify="left").pack(anchor="w", pady=(6, 0))
         ttk.Label(info, text=f"Application session: {self.session_recorder.session_dir}", wraplength=420, justify="left").pack(anchor="w", pady=(6, 0))
-
-        schematic = ttk.LabelFrame(right, text="PoP II steering layout", padding=10)
-        schematic.pack(fill="both", expand=True, pady=(10, 0))
-        self.geometry_canvas = tk.Canvas(schematic, width=520, height=360, bg="white", highlightthickness=1, highlightbackground="#cccccc")
-        self.geometry_canvas.pack(fill="both", expand=True)
-        self._attach_tooltip(
-            self.geometry_canvas,
-            "This is the ordered PoP II steering schematic.\n"
-            "The exact steering distances are preserved for Mirror 1 → Mirror 2 → undulator.\n"
-            "Upstream optics are drawn in documented order for faithful context, but not as surveyed CAD coordinates.",
-        )
 
     def _build_manual(self) -> None:
         left = ttk.Frame(self.manual_frame)
@@ -363,7 +371,7 @@ class LaserMirrorApp:
         )
 
     def _build_angle(self) -> None:
-        controls = ttk.LabelFrame(self.angle_frame, text="Carsten angle scan", padding=10)
+        controls = ttk.LabelFrame(self.angle_frame, text="Standard angle scan", padding=10)
         controls.grid(row=0, column=0, sticky="nsew")
         plots = ttk.LabelFrame(self.angle_frame, text="Live scan maps", padding=10)
         plots.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
@@ -377,7 +385,7 @@ class LaserMirrorApp:
         self._add_labeled_entry(controls, "Points Y", self.points_y_var, 5)
         self._add_labeled_entry(controls, "Dwell [s]", self.dwell_var, 6)
         self._add_labeled_entry(controls, "Samples / point", self.samples_var, 7)
-        self._add_labeled_combo(controls, "Sweep mode", self.scan_mode_var, ["both_2d", "horizontal_only", "vertical_only"], 8)
+        self._add_labeled_combo(controls, "Sweep mode", self.scan_mode_var, ["vertical_only", "horizontal_only", "both_2d"], 8)
         self._add_labeled_combo(controls, "Solve mode", self.solve_mode_var, ["two_mirror_target", "mirror1_primary", "mirror2_primary"], 9)
         self._add_labeled_combo(controls, "Objective", self.objective_var, ["max", "min"], 10)
         ttk.Checkbutton(controls, text="Interpolated background", variable=self.interpolate_angle_map_var, command=self._refresh_plots).grid(row=11, column=0, columnspan=2, sticky="w", pady=(8, 0))
@@ -392,9 +400,10 @@ class LaserMirrorApp:
         ttk.Label(controls, textvariable=self.best_var, wraplength=340, justify="left").grid(row=17, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Label(controls, textvariable=self.last_export_var, wraplength=340, justify="left").grid(row=18, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Button(controls, text="Save angle plot (.ps)", command=lambda: self._save_canvas_postscript(self.heatmap_canvas, "angle_scan_map.ps")).grid(row=19, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.scale_summary_var, wraplength=340, justify="left").grid(row=20, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self._add_help_button(
             controls,
-            19,
+            20,
             "2D angle map meaning:\n"
             "• each dot = one actually measured scan point\n"
             "• x/y coordinates = requested interaction-angle coordinates at the undulator, not raw motor coordinates\n"
@@ -422,6 +431,55 @@ class LaserMirrorApp:
             "Signal average vs scan index in acquisition order.\n"
             "Useful for spotting drift, hysteresis, or a time trend during the scan.",
         )
+
+    def _build_optics(self) -> None:
+        left = ttk.Frame(self.optics_frame)
+        right = ttk.Frame(self.optics_frame)
+        left.grid(row=0, column=0, sticky="nsew")
+        right.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+        self.optics_frame.columnconfigure(0, weight=3)
+        self.optics_frame.columnconfigure(1, weight=2)
+        self.optics_frame.rowconfigure(0, weight=1)
+
+        schematic = ttk.LabelFrame(left, text="PoP II steering layout", padding=10)
+        schematic.pack(fill="both", expand=True)
+        self.geometry_canvas = tk.Canvas(schematic, width=780, height=480, bg="white", highlightthickness=1, highlightbackground="#cccccc")
+        self.geometry_canvas.pack(fill="both", expand=True)
+        self._attach_tooltip(
+            self.geometry_canvas,
+            "This is the ordered PoP II steering schematic.\n"
+            "Mirror 1 → Mirror 2 → undulator distances stay exact.\n"
+            "Upstream optics are drawn in documented order for context, not as surveyed CAD coordinates.",
+        )
+
+        helper = ttk.LabelFrame(right, text="Angle / step scale helper", padding=10)
+        helper.pack(fill="x")
+        ttk.Label(
+            helper,
+            text=(
+                "Use this to sanity-check the scan span against motor steps.\n"
+                "The estimates below use the current angle spans and the calibrated µrad/step factors."
+            ),
+            wraplength=360,
+            justify="left",
+        ).pack(anchor="w")
+        ttk.Label(helper, textvariable=self.scale_summary_var, wraplength=360, justify="left").pack(anchor="w", pady=(8, 0))
+
+        notes = ttk.LabelFrame(right, text="Sweep / solve interpretation", padding=10)
+        notes.pack(fill="both", expand=True, pady=(10, 0))
+        ttk.Label(
+            notes,
+            text=(
+                "Sweep mode chooses which undulator-space angle coordinates are scanned.\n"
+                "Solve mode chooses how the mirrors cooperate to realize that target.\n\n"
+                "Recommended default:\n"
+                "• vertical_only\n"
+                "• mirror1_primary or mirror2_primary\n"
+                "That keeps the beam position fixed as well as possible while varying angle in one plane."
+            ),
+            wraplength=360,
+            justify="left",
+        ).pack(anchor="w")
 
     def _build_spiral(self) -> None:
         controls = ttk.LabelFrame(self.spiral_frame, text="Mirror 2 spiral", padding=10)
@@ -578,11 +636,11 @@ class LaserMirrorApp:
 
     def _scan_mode_help_text(self) -> str:
         return (
-            "Carsten most likely wants a 1D PRIMARY scan in one plane at a time: horizontal-only or vertical-only,\n"
+            "Standard use is a 1D PRIMARY scan in one plane at a time: horizontal-only or vertical-only,\n"
             "with one mirror driving and the other counter-steering to keep the same interaction point.\n"
             "Start with mirror1_primary if mirror 1 should be the driving mirror and mirror 2 should hold the point.\n"
             "Use mirror2_primary if commissioning shows the opposite is more stable. two_mirror_target is a direct\n"
-            "undulator-space solve and is less close to the original request."
+            "undulator-space solve and is less close to the standard fixed-position angle sweep."
         )
 
     def _show_scan_mode_help(self) -> None:
@@ -590,15 +648,15 @@ class LaserMirrorApp:
             "Scan modes",
             (
                 "Sweep modes:\n"
-                "• horizontal_only: most literal horizontal Carsten scan. Change horizontal interaction angle, keep vertical fixed.\n"
-                "• vertical_only: most literal vertical Carsten scan. Change vertical interaction angle, keep horizontal fixed.\n"
+                "• horizontal_only: change horizontal interaction angle, keep vertical fixed.\n"
+                "• vertical_only: change vertical interaction angle, keep horizontal fixed.\n"
                 "• both_2d: 2D extension when you want a full angle map instead of a single-plane line scan.\n\n"
                 "Solve modes:\n"
                 "• two_mirror_target: solve both mirrors directly from the desired undulator offset + angle.\n"
-                "  Good for target-space scans, but not the most literal implementation of Carsten's request.\n"
+                "  Good for target-space scans, but not the most literal fixed-position angle sweep.\n"
                 "• mirror1_primary: sweep mirror 1, analytically solve mirror 2 to keep the point fixed.\n"
                 "• mirror2_primary: sweep mirror 2, analytically solve mirror 1 to keep the point fixed.\n\n"
-                "Closest to Carsten's idea:\n"
+                "Closest to the standard operating idea:\n"
                 "Use one of the PRIMARY modes together with horizontal_only or vertical_only.\n"
                 "The right default depends on which mirror you trust more as the driving mirror in the control room.\n"
                 "This app defaults to mirror1_primary."
@@ -609,7 +667,7 @@ class LaserMirrorApp:
         messagebox.showinfo(
             "Why this angle scan exists",
             (
-                "Carsten's idea is not to scan one mirror in isolation. The goal is to vary the interaction angle of the laser at the undulator "
+                "The goal is not to scan one mirror in isolation. The point is to vary the interaction angle of the laser at the undulator "
                 "while keeping the hit point in space as fixed as possible.\n\n"
                 "That is why two mirrors matter:\n"
                 "• one mirror is the deliberate steering mirror\n"
@@ -632,7 +690,7 @@ class LaserMirrorApp:
                 "• two_mirror_target: solve both mirrors from the requested undulator-space target directly\n"
                 "• mirror1_primary: mirror 1 is the scanned mirror, mirror 2 counter-steers to hold point\n"
                 "• mirror2_primary: mirror 2 is the scanned mirror, mirror 1 counter-steers to hold point\n\n"
-                "The most literal implementation of Carsten's email is one of the primary modes."
+                "The most literal implementation of the fixed-position angle sweep is one of the primary modes."
             ),
         )
 
@@ -677,6 +735,7 @@ class LaserMirrorApp:
         self.config.scan.spiral_step_x = float(self.spiral_step_x_var.get())
         self.config.scan.spiral_step_y = float(self.spiral_step_y_var.get())
         self.config.scan.spiral_turns = max(1, int(self.spiral_turns_var.get()))
+        self._update_scale_summary()
 
     def _save_config(self) -> None:
         self._pull_ui_into_config()
@@ -699,11 +758,45 @@ class LaserMirrorApp:
             self.safe_mode_var.set(False)
         self._connect_backends()
 
+    def _update_scale_summary(self) -> None:
+        span_x = abs(float(self.span_x_var.get()))
+        span_y = abs(float(self.span_y_var.get()))
+        half_x = span_x / 2.0
+        half_y = span_y / 2.0
+        values = {
+            "M1 H": self.geometry.angle_delta_to_steps(half_x, "x", 1),
+            "M2 H": self.geometry.angle_delta_to_steps(half_x, "x", 2),
+            "M1 V": self.geometry.angle_delta_to_steps(half_y, "y", 1),
+            "M2 V": self.geometry.angle_delta_to_steps(half_y, "y", 2),
+        }
+        self.scale_summary_var.set(
+            "Half-span step estimate from current angle span:\n"
+            f"Horizontal ±{half_x:.1f} µrad -> M1 ≈ {values['M1 H']} steps, M2 ≈ {values['M2 H']} steps\n"
+            f"Vertical ±{half_y:.1f} µrad -> M1 ≈ {values['M1 V']} steps, M2 ≈ {values['M2 V']} steps\n"
+            "This is only the angle part. Counter-steering / fixed-position compensation can shift the actual targets."
+        )
+
     def _connect_backends(self) -> None:
         self._pull_ui_into_config()
         self.output_root = self._resolve_output_root(self.output_root_var.get())
         self.output_root.mkdir(parents=True, exist_ok=True)
         self.geometry = LaserMirrorGeometry(self.config.geometry)
+        self._update_scale_summary()
+        if self.demo_mode:
+            self.factory = PVFactory(True)
+            self.controller = MirrorController(self.config.controller, self.factory, self._log)
+            self.current_reference_steps = self.controller.capture_reference()
+            self.signal_backend = SimulatedSignalBackend(self.signal_label_var.get() or "Simulated signal")
+            self.scan_runner = ScanRunner(self.config, self.geometry, self.controller, self.signal_backend, self._log, self.output_root)
+            self.runtime_var.set(
+                "Offline demo backend ready\n"
+                "motors=simulated, signal=simulated\n"
+                f"output_root={self.output_root}"
+            )
+            self.status_var.set("Demo mode connected.")
+            self.reference_var.set("Reference RBV: " + ", ".join(f"{key}={value:.2f}" for key, value in self.current_reference_steps.items()))
+            self._refresh_motor_table()
+            return
         try:
             self.factory = PVFactory(False)
             self.controller = MirrorController(self.config.controller, self.factory, self._log)
@@ -1061,6 +1154,7 @@ class LaserMirrorApp:
             self.motor_tree.item(
                 snapshot.key,
                 values=(
+                    MOTOR_LABELS.get(snapshot.key, snapshot.key),
                     snapshot.base,
                     f"{snapshot.rbv:.3f}",
                     f"{snapshot.val:.3f}",
@@ -1129,6 +1223,7 @@ class LaserMirrorApp:
                 self._draw_pen_test_plot()
             if hasattr(self, "optics_canvas"):
                 self._draw_geometry_preview()
+            self._update_scale_summary()
         except Exception as exc:  # noqa: BLE001
             self._log(f"plot refresh warning: {exc}")
 
@@ -1759,7 +1854,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     root = tk.Tk()
-    app = LaserMirrorApp(root, Path(args.config), force_safe_mode=args.safe_mode, force_write_mode=args.write_mode)
+    app = LaserMirrorApp(
+        root,
+        Path(args.config),
+        force_safe_mode=args.safe_mode,
+        force_write_mode=args.write_mode,
+        force_demo_mode=args.demo_mode,
+    )
     root.protocol("WM_DELETE_WINDOW", app.on_close)
     root.mainloop()
     return 0
