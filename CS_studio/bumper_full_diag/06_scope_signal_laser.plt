@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databrowser>
+  <title>Scope/coherent signal, laser trigger and averaging</title>
+  <show_legend>true</show_legend>
+  <show_toolbar>true</show_toolbar>
+  <grid>true</grid>
+  <update_period>1.0</update_period>
+  <scroll_step>30</scroll_step>
+  <scroll>true</scroll>
+  <start>-4 hours</start>
+  <end>now</end>
+  <archive_rescale>NONE</archive_rescale>
+  <foreground><red>0</red><green>0</green><blue>0</blue></foreground>
+  <background><red>255</red><green>255</green><blue>255</blue></background>
+  <title_font>Liberation Sans|18|1</title_font>
+  <label_font>Liberation Sans|12|1</label_font>
+  <scale_font>Liberation Sans|11|0</scale_font>
+  <legend_font>Liberation Sans|12|0</legend_font>
+  <axes>
+    <axis>
+      <visible>true</visible>
+      <name>Coherent signal [scope arb.]</name>
+      <use_axis_name>true</use_axis_name>
+      <use_trace_names>false</use_trace_names>
+      <right>false</right>
+      <color><red>0</red><green>0</green><blue>0</blue></color>
+      <min>-0.05</min>
+      <max>1.2</max>
+      <grid>true</grid>
+      <autoscale>false</autoscale>
+      <log_scale>false</log_scale>
+    </axis>
+    <axis>
+      <visible>true</visible>
+      <name>Laser/trigger scope channels</name>
+      <use_axis_name>true</use_axis_name>
+      <use_trace_names>false</use_trace_names>
+      <right>true</right>
+      <color><red>0</red><green>0</green><blue>0</blue></color>
+      <min>-0.1</min>
+      <max>1.2</max>
+      <grid>true</grid>
+      <autoscale>false</autoscale>
+      <log_scale>false</log_scale>
+    </axis>
+    <axis>
+      <visible>true</visible>
+      <name>Scope averaging / settings</name>
+      <use_axis_name>true</use_axis_name>
+      <use_trace_names>false</use_trace_names>
+      <right>true</right>
+      <color><red>0</red><green>0</green><blue>0</blue></color>
+      <min>0</min>
+      <max>1000</max>
+      <grid>true</grid>
+      <autoscale>true</autoscale>
+      <log_scale>false</log_scale>
+    </axis>
+    <axis>
+      <visible>true</visible>
+      <name>Bunch current / charge</name>
+      <use_axis_name>true</use_axis_name>
+      <use_trace_names>false</use_trace_names>
+      <right>false</right>
+      <color><red>0</red><green>0</green><blue>0</blue></color>
+      <min>0</min>
+      <max>30</max>
+      <grid>true</grid>
+      <autoscale>false</autoscale>
+      <log_scale>false</log_scale>
+    </axis>
+  </axes>
+  <pvs>
+    <pv>
+      <display_name>coherent signal avg h1p2</display_name>
+      <visible>true</visible>
+      <name>SCOPE1ZULP:h1p2:rdAmplAv</name>
+      <axis>0</axis>
+      <color><red>31</red><green>119</green><blue>180</blue></color>
+      <trace_type>LINE</trace_type>
+      <linewidth>2</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <period>0.0</period>
+      <ring_size>200000</ring_size>
+      <request>OPTIMIZED</request>
+    </pv>
+    <pv>
+      <display_name>coherent signal raw h1p2</display_name>
+      <visible>false</visible>
+      <name>SCOPE1ZULP:h1p2:rdAmpl</name>
+      <axis>0</axis>
+      <color><red>255</red><green>127</green><blue>14</blue></color>
+      <trace_type>LINE</trace_type>
+      <linewidth>1</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <period>0.0</period>
+      <ring_size>200000</ring_size>
+      <request>OPTIMIZED</request>
+    </pv>
+    <pv>
+      <display_name>scope h1p1 avg laser/trigger</display_name>
+      <visible>true</visible>
+      <name>SCOPE1ZULP:h1p1:rdAmplAv</name>
+      <axis>1</axis>
+      <color><red>44</red><green>160</green><blue>44</blue></color>
+      <trace_type>LINE</trace_type>
+      <linewidth>2</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <period>0.0</period>
+      <ring_size>200000</ring_size>
+      <request>OPTIMIZED</request>
+    </pv>
+    <pv>
+      <display_name>scope h1p3 avg laser/trigger</display_name>
+      <visible>true</visible>
+      <name>SCOPE1ZULP:h1p3:rdAmplAv</name>
+      <axis>1</axis>
+      <color><red>214</red><green>39</green><blue>40</blue></color>
+      <trace_type>LINE</trace_type>
+      <linewidth>2</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <period>0.0</period>
+      <ring_size>200000</ring_size>
+      <request>OPTIMIZED</request>
+    </pv>
+    <pv>
+      <display_name>scope averaging length</display_name>
+      <visible>true</visible>
+      <name>SCOPE1ZULP:rdAvLength</name>
+      <axis>2</axis>
+      <color><red>148</red><green>103</green><blue>189</blue></color>
+      <trace_type>LINE</trace_type>
+      <linewidth>2</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <period>0.0</period>
+      <ring_size>200000</ring_size>
+      <request>OPTIMIZED</request>
+    </pv>
+    <pv>
+      <display_name>waveform generator setVolt</display_name>
+      <visible>false</visible>
+      <name>WFGEN2C1CP:setVolt</name>
+      <axis>2</axis>
+      <color><red>140</red><green>86</green><blue>75</blue></color>
+      <trace_type>LINE</trace_type>
+      <linewidth>2</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <period>0.0</period>
+      <ring_size>200000</ring_size>
+      <request>OPTIMIZED</request>
+    </pv>
+    <pv>
+      <display_name>waveform generator rdVolt</display_name>
+      <visible>false</visible>
+      <name>WFGENC1CP:rdVolt</name>
+      <axis>2</axis>
+      <color><red>227</red><green>119</green><blue>194</blue></color>
+      <trace_type>LINE</trace_type>
+      <linewidth>2</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <period>0.0</period>
+      <ring_size>200000</ring_size>
+      <request>OPTIMIZED</request>
+    </pv>
+    <pv>
+      <display_name>beam/bunch current</display_name>
+      <visible>true</visible>
+      <name>CUM1ZK3RP:rdCur</name>
+      <axis>3</axis>
+      <color><red>31</red><green>119</green><blue>180</blue></color>
+      <trace_type>LINE</trace_type>
+      <linewidth>2</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <period>0.0</period>
+      <ring_size>200000</ring_size>
+      <request>OPTIMIZED</request>
+    </pv>
+    <pv>
+      <display_name>MLS current monitor</display_name>
+      <visible>false</visible>
+      <name>mlsCurrent:Mnt3collectData.VALD</name>
+      <axis>3</axis>
+      <color><red>255</red><green>127</green><blue>14</blue></color>
+      <trace_type>LINE</trace_type>
+      <linewidth>2</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <period>0.0</period>
+      <ring_size>200000</ring_size>
+      <request>OPTIMIZED</request>
+    </pv>
+  </pvs>
+  <annotations></annotations>
+</databrowser>
