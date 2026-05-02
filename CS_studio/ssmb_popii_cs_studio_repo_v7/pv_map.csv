@@ -1,0 +1,52 @@
+key,PV,meaning
+x3,BPMZ3L2RP:rdX,BPM3 before U125 horizontal
+x4,BPMZ4L2RP:rdX,BPM4 before U125 horizontal
+x5,BPMZ5L2RP:rdX,BPM5 after U125 horizontal
+x6,BPMZ6L2RP:rdX,BPM6 after U125 horizontal
+y3,BPMZ3L2RP:rdY,BPM3 before U125 vertical
+y4,BPMZ4L2RP:rdY,BPM4 before U125 vertical
+y5,BPMZ5L2RP:rdY,BPM5 after U125 vertical
+y6,BPMZ6L2RP:rdY,BPM6 after U125 vertical
+I1,HS1P2K3RP:setCur,steerer 1
+I2,HS3P1L4RP:setCur,steerer 2
+I3,HS3P2L4RP:setCur,steerer 3
+I4,HS1P1K1RP:setCur,steerer 4
+tuneX,TUNEZRP:measX,see README/theory
+tuneY,TUNEZRP:measY,see README/theory
+tuneZ,TUNEZRP:measZ,see README/theory
+sig,SCOPE1ZULP:h1p1:rdAmplAv,coherent h1p1 averaged signal
+sigraw,SCOPE1ZULP:h1p1:rdAmpl,coherent h1p1 raw signal
+sig2,SCOPE1ZULP:h1p2:rdAmplAv,see README/theory
+sig3,SCOPE1ZULP:h1p3:rdAmplAv,see README/theory
+scopeavglen,SCOPE1ZULP:rdAvLength,see README/theory
+qpdL4x,QPD00ZL4RP:rdSigmaXav,see README/theory
+qpdL4y,QPD00ZL4RP:rdSigmaYav,see README/theory
+qpdL2x,QPD01ZL2RP:rdSigmaXav,see README/theory
+qpdL2y,QPD01ZL2RP:rdSigmaYav,see README/theory
+cur,CUM1ZK3RP:rdCur,see README/theory
+lt100,CUM1ZK3RP:rdLt100,see README/theory
+lt3,CUM1ZK3RP:rdLt3,see README/theory
+energy,ERMPCGP:rdRmp,see README/theory
+rf,MCLKHGP:rdFrq499,see README/theory
+rfset,MCLKHGP:setFrq499,see README/theory
+cav,PAHRP:NRVD:rdVoltCav,see README/theory
+cavset,PAHRP:setVoltCav,see README/theory
+q1,Q1P1L2RP:setCur,see README/theory
+u125gap,U125IL2RP:BasePmGap.A,see README/theory
+purity,PURITYCCP:calculation,see README/theory
+oplife,OPCHECKCCP:calcCurrLife,see README/theory
+akc05,AKC05VP,see README/theory
+akc06,AKC06VP,see README/theory
+akc10,AKC10VP,see README/theory
+akc11,AKC11VP,see README/theory
+akc12,AKC12VP,see README/theory
+akc13,AKC13VP,see README/theory
+mnf1,MNF1C1L2RP,see README/theory
+mnf2,MNF1C2L2RP,see README/theory
+mnf3,MNF2C2L2RP,see README/theory
+mnf4,MNF2C1L2RP,see README/theory
+screen,SCRYZK3RP.VAL,see README/theory
+wfvolt,WFGEN2C1CP:setVolt,see README/theory
+wfout,WFGEN2C1CP:stOut,see README/theory
+cavtemp,PAHRP:Ctrl:rdCavTempBody,see README/theory
+plunger,PAHRP:Ctrl:rdPlngPos,see README/theory
