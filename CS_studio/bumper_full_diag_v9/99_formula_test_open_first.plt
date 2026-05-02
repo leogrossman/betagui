@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databrowser>
+  <title>Formula syntax test: if this fails, formula support/PV names are the issue</title>
+  <show_legend>true</show_legend>
+  <show_toolbar>true</show_toolbar>
+  <grid>true</grid>
+  <update_period>1.0</update_period>
+  <scroll_step>5</scroll_step>
+  <scroll>true</scroll>
+  <start>-10 minutes</start>
+  <end>now</end>
+  <archive_rescale>NONE</archive_rescale>
+  <foreground><red>0</red><green>0</green><blue>0</blue></foreground>
+  <background><red>255</red><green>255</green><blue>255</blue></background>
+  <title_font>Liberation Sans|16|1</title_font>
+  <label_font>Liberation Sans|10|1</label_font>
+  <scale_font>Liberation Sans|8|0</scale_font>
+  <legend_font>Liberation Sans|9|0</legend_font>
+  <axes>
+    <axis>
+      <visible>true</visible>
+      <name>Formula test values</name>
+      <use_axis_name>true</use_axis_name>
+      <use_trace_names>false</use_trace_names>
+      <right>false</right>
+      <color><red>0</red><green>0</green><blue>0</blue></color>
+      <min>-2</min>
+      <max>2</max>
+      <grid>true</grid>
+      <autoscale>true</autoscale>
+      <log_scale>false</log_scale>
+    </axis>
+    <axis>
+      <visible>false</visible>
+      <name>raw hidden</name>
+      <use_axis_name>true</use_axis_name>
+      <use_trace_names>false</use_trace_names>
+      <right>false</right>
+      <color><red>0</red><green>0</green><blue>0</blue></color>
+      <min>-1</min>
+      <max>1</max>
+      <grid>false</grid>
+      <autoscale>true</autoscale>
+      <log_scale>false</log_scale>
+    </axis>
+  </axes>
+  <annotations>
+  </annotations>
+  <pvlist>
+    <pv>
+      <display_name>dep BPM3 X</display_name>
+      <visible>false</visible>
+      <name>BPMZ3L2RP:rdX</name>
+      <axis>9</axis>
+      <color>
+        <red>127</red>
+        <green>127</green>
+        <blue>127</blue>
+      </color>
+      <trace_type>AREA</trace_type>
+      <linewidth>1</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <period>0.0</period>
+      <ring_size>259200</ring_size>
+      <request>RAW</request>
+    </pv>
+    <pv>
+      <display_name>dep BPM4 X</display_name>
+      <visible>false</visible>
+      <name>BPMZ4L2RP:rdX</name>
+      <axis>9</axis>
+      <color>
+        <red>127</red>
+        <green>127</green>
+        <blue>127</blue>
+      </color>
+      <trace_type>AREA</trace_type>
+      <linewidth>1</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <period>0.0</period>
+      <ring_size>259200</ring_size>
+      <request>RAW</request>
+    </pv>
+    <pv>
+      <display_name>dep BPM3 Y</display_name>
+      <visible>false</visible>
+      <name>BPMZ3L2RP:rdY</name>
+      <axis>9</axis>
+      <color>
+        <red>127</red>
+        <green>127</green>
+        <blue>127</blue>
+      </color>
+      <trace_type>AREA</trace_type>
+      <linewidth>1</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <period>0.0</period>
+      <ring_size>259200</ring_size>
+      <request>RAW</request>
+    </pv>
+    <pv>
+      <display_name>dep BPM4 Y</display_name>
+      <visible>false</visible>
+      <name>BPMZ4L2RP:rdY</name>
+      <axis>9</axis>
+      <color>
+        <red>127</red>
+        <green>127</green>
+        <blue>127</blue>
+      </color>
+      <trace_type>AREA</trace_type>
+      <linewidth>1</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <period>0.0</period>
+      <ring_size>259200</ring_size>
+      <request>RAW</request>
+    </pv>
+    <formula>
+      <display_name>TEST dX BPM4-BPM3 [mm]</display_name>
+      <visible>true</visible>
+      <name>TEST dX BPM4-BPM3 [mm]</name>
+      <axis>0</axis>
+      <color>
+        <red>214</red>
+        <green>39</green>
+        <blue>40</blue>
+      </color>
+      <trace_type>AREA</trace_type>
+      <linewidth>4</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <formula>x4-x3</formula>
+      <input>
+        <pv>BPMZ3L2RP:rdX</pv>
+        <name>x3</name>
+      </input>
+      <input>
+        <pv>BPMZ4L2RP:rdX</pv>
+        <name>x4</name>
+      </input>
+    </formula>
+    <formula>
+      <display_name>TEST X angle BPM3-&gt;4 [mrad]</display_name>
+      <visible>true</visible>
+      <name>TEST X angle BPM3-&gt;4 [mrad]</name>
+      <axis>0</axis>
+      <color>
+        <red>31</red>
+        <green>119</green>
+        <blue>180</blue>
+      </color>
+      <trace_type>AREA</trace_type>
+      <linewidth>4</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <formula>(x4-x3)/0.8594</formula>
+      <input>
+        <pv>BPMZ3L2RP:rdX</pv>
+        <name>x3</name>
+      </input>
+      <input>
+        <pv>BPMZ4L2RP:rdX</pv>
+        <name>x4</name>
+      </input>
+    </formula>
+    <formula>
+      <display_name>TEST Y angle BPM3-&gt;4 [mrad]</display_name>
+      <visible>true</visible>
+      <name>TEST Y angle BPM3-&gt;4 [mrad]</name>
+      <axis>0</axis>
+      <color>
+        <red>44</red>
+        <green>160</green>
+        <blue>44</blue>
+      </color>
+      <trace_type>AREA</trace_type>
+      <linewidth>4</linewidth>
+      <line_style>SOLID</line_style>
+      <point_type>NONE</point_type>
+      <point_size>2</point_size>
+      <waveform_index>0</waveform_index>
+      <formula>(y4-y3)/0.8594</formula>
+      <input>
+        <pv>BPMZ3L2RP:rdY</pv>
+        <name>y3</name>
+      </input>
+      <input>
+        <pv>BPMZ4L2RP:rdY</pv>
+        <name>y4</name>
+      </input>
+    </formula>
+  </pvlist>
+</databrowser>
