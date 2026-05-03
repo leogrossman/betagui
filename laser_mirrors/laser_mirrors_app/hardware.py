@@ -351,6 +351,15 @@ class MirrorController:
                 errors.append(f"{key}: motor alarm severity {current.sevr}")
         return (not errors, errors)
 
+    def completion_tolerance_steps(self) -> float:
+        """Conservative completion tolerance for real motor RBV checks.
+
+        The control-room motors sometimes report DMOV before RBV fully settles to
+        the exact requested value. We therefore allow a little more than one ramp
+        layer before declaring the move suspicious.
+        """
+        return max(1.0, float(self.config.max_step_per_put) * 1.25)
+
     def move_absolute_group(
         self,
         targets: dict[str, float],
@@ -420,18 +429,30 @@ class MirrorController:
                         f"{motor.base}: after wait RBV={after_wait.rbv:.3f} VAL={after_wait.val:.3f} "
                         f"DMOV={after_wait.dmov} MOVN={after_wait.movn} STAT={after_wait.stat} SEVR={after_wait.sevr}"
                     )
-                    if abs(after_wait.rbv - command.target_val) > max(0.5, self.config.max_step_per_put):
-                        self.last_move_error = (
-                            f"{motor.base} reached RBV={after_wait.rbv:.3f}, expected {command.target_val:.3f}. "
-                            "Move may not have completed correctly."
-                        )
-                        raise RuntimeError(self.last_move_error)
+                    tolerance = self.completion_tolerance_steps()
                     time.sleep(max(0.0, self.config.settle_s))
                     settled = motor.snapshot()
                     self.debug(
                         f"{motor.base}: post-settle RBV={settled.rbv:.3f} VAL={settled.val:.3f} "
-                        f"DMOV={settled.dmov} MOVN={settled.movn}"
+                        f"DMOV={settled.dmov} MOVN={settled.movn} tol={tolerance:.3f}"
                     )
+                    if abs(settled.rbv - command.target_val) > tolerance:
+                        extra_wait = max(0.2, self.config.inter_put_delay_s)
+                        self.debug(
+                            f"{motor.base}: RBV still outside tolerance after settle; waiting an extra {extra_wait:.2f}s for late controller settling."
+                        )
+                        time.sleep(extra_wait)
+                        settled = motor.snapshot()
+                        self.debug(
+                            f"{motor.base}: extra-settle RBV={settled.rbv:.3f} VAL={settled.val:.3f} "
+                            f"DMOV={settled.dmov} MOVN={settled.movn}"
+                        )
+                    if abs(settled.rbv - command.target_val) > tolerance:
+                        self.last_move_error = (
+                            f"{motor.base} reached RBV={settled.rbv:.3f}, expected {command.target_val:.3f}. "
+                            f"Move may not have completed correctly after settle (tol={tolerance:.3f})."
+                        )
+                        raise RuntimeError(self.last_move_error)
                 time.sleep(max(0.0, self.config.inter_put_delay_s))
             self.debug(f"Finished serialized move for {motor.base}.")
         return True
@@ -495,6 +516,15 @@ class DisconnectedController:
 
     def validate_targets(self, targets: dict[str, float]) -> tuple[bool, list[str]]:
         return False, [f"EPICS backend unavailable: {self.reason}"]
+
+    def completion_tolerance_steps(self) -> float:
+        """Conservative completion tolerance for real motor RBV checks.
+
+        The control-room motors sometimes report DMOV before RBV fully settles to
+        the exact requested value. We therefore allow a little more than one ramp
+        layer before declaring the move suspicious.
+        """
+        return max(1.0, float(self.config.max_step_per_put) * 1.25)
 
     def move_absolute_group(
         self,

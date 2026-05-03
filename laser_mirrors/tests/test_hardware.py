@@ -41,6 +41,12 @@ class HardwareTests(unittest.TestCase):
         backend = build_signal_backend(False, "p1_h1_avg", None, PVFactory(True))
         self.assertIsInstance(backend, SignalBackend)
 
+    def test_completion_tolerance_has_margin(self) -> None:
+        factory = PVFactory(True)
+        config = ControllerConfig(safe_mode=True, max_step_per_put=8.0)
+        controller = MirrorController(config, factory)
+        self.assertAlmostEqual(controller.completion_tolerance_steps(), 10.0)
+
 
 if __name__ == "__main__":
     unittest.main()
