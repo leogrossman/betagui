@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from laser_mirrors_app.config import AppConfig
 from laser_mirrors_app.geometry import LaserMirrorGeometry
 from laser_mirrors_app.hardware import MirrorController, PVFactory, build_signal_backend
-from laser_mirrors_app.scan import ScanContext, ScanRunner, build_angle_scan_points, build_spiral_scan_points, choose_best_point
+from laser_mirrors_app.scan import ScanContext, ScanRunner, build_angle_scan_points, build_overlap_scan_points, build_spiral_scan_points, choose_best_point
 
 
 class ScanTests(unittest.TestCase):
@@ -177,6 +177,25 @@ class ScanTests(unittest.TestCase):
         best = choose_best_point(rows, 'max')
         self.assertIsNotNone(best)
         self.assertNotEqual(best.point_index, 5)
+
+    def test_build_overlap_scan_points_count(self) -> None:
+        config = AppConfig()
+        geometry = LaserMirrorGeometry(config.geometry)
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        points = build_overlap_scan_points(
+            geometry,
+            controller.capture_reference(),
+            'vertical',
+            'mirror2',
+            5,
+            8.0,
+            9,
+            50.0,
+            'mirror1_primary',
+        )
+        self.assertEqual(len(points), 45)
+        self.assertTrue(all(point.mode == 'overlap_vertical' for point in points))
 
 
 if __name__ == "__main__":

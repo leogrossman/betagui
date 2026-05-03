@@ -30,6 +30,13 @@ The tool is organized around two standard jobs:
    - use the `Angle scan` tab
    - run a vertical-only or horizontal-only compensated scan
    - use the best position from step 1 as your center/reference
+3. **Run the diagonal overlap scan from the reference figure style**
+   - move to the best position first
+   - use the `Overlap scan` tab
+   - choose `vertical` or `horizontal`
+   - step one mirror slightly above and below the current best position
+   - for each stepped position, run a local 1D angle scan
+   - inspect the mirror-1 vs mirror-2 deflection-angle map and the recommended optimum
 
 The tool also includes:
 
@@ -73,7 +80,8 @@ Recommended commissioning pattern:
 6. use `Position search` first to find the best mirror position
 7. use `local refine` if needed to tighten around the best point
 8. then start with a small `vertical_only` scan in a primary solve mode
-9. check the `Optics / Geometry` tab for the step-scale estimate before committing to a larger span
+9. if you want the figure-style diagonal overlap map, use the `Overlap scan` tab after moving to the current best position
+10. check the `Optics / Geometry` tab for the step-scale estimate before committing to a larger span
 
 ### If IOC HLM/LLM are broken
 

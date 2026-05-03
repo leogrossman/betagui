@@ -38,7 +38,7 @@ from .models import (
 )
 from .monitoring import SessionRecorder
 from .pen_test import build_pen_test_sequence
-from .scan import ScanContext, ScanRunner, build_angle_scan_points, build_spiral_scan_points
+from .scan import ScanContext, ScanRunner, build_angle_scan_points, build_overlap_scan_points, build_spiral_scan_points
 from .state import load_state, save_state
 
 
@@ -195,6 +195,14 @@ class LaserMirrorApp:
         self.spiral_turns_var = tk.IntVar(value=self.config.scan.spiral_turns)
         self.spiral_target_var = tk.StringVar(value=self.config.scan.spiral_target)
         self.spiral_strategy_var = tk.StringVar(value=self.config.scan.spiral_strategy)
+        self.overlap_axis_var = tk.StringVar(value="vertical")
+        self.overlap_position_target_var = tk.StringVar(value="mirror2")
+        self.overlap_position_points_var = tk.IntVar(value=7)
+        self.overlap_position_step_var = tk.DoubleVar(value=8.0)
+        self.overlap_angle_points_var = tk.IntVar(value=9)
+        self.overlap_angle_span_var = tk.DoubleVar(value=50.0)
+        self.overlap_solve_mode_var = tk.StringVar(value="mirror1_primary")
+        self.overlap_status_var = tk.StringVar(value="No overlap scan run yet.")
         self.manual_motor_var = tk.StringVar(value="m2_horizontal")
         self.manual_delta_var = tk.DoubleVar(value=1.0)
         self.manual_absolute_var = tk.DoubleVar(value=0.0)
@@ -229,7 +237,10 @@ class LaserMirrorApp:
         self.state_path_var = tk.StringVar(value=self.config.controller.state_file_path)
         self.current_reference_steps: dict[str, float] = {key: 0.0 for key in MOTOR_PVS}
         self.pending_refine_preview: list[ScanPoint] = []
+        self.overlap_reference_steps: dict[str, float] = {key: 0.0 for key in MOTOR_PVS}
         self._canvas_points: dict[str, list[dict[str, object]]] = {}
+        self._scan_redraw_after_id: str | None = None
+        self._active_scan_view: str = "angle"
         self.legacy_state_path = (self.config_path.parent / self.config.controller.state_file_path).resolve()
         self.motor_recovery_path = (self.config_path.parent / self.config.controller.motor_recovery_path).resolve()
         self.last_command_path = (self.config_path.parent / self.config.controller.last_command_path).resolve()
@@ -240,6 +251,7 @@ class LaserMirrorApp:
         self.overview_frame = ttk.Frame(notebook, padding=10)
         self.manual_frame = ttk.Frame(notebook, padding=10)
         self.angle_frame = ttk.Frame(notebook, padding=10)
+        self.overlap_frame = ttk.Frame(notebook, padding=10)
         self.advanced_frame = ttk.Frame(notebook, padding=10)
         self.spiral_frame = ttk.Frame(notebook, padding=10)
         self.optics_frame = ttk.Frame(notebook, padding=10)
@@ -249,6 +261,7 @@ class LaserMirrorApp:
         notebook.add(self.overview_frame, text="Overview")
         notebook.add(self.manual_frame, text="Manual control")
         notebook.add(self.angle_frame, text="Angle scan")
+        notebook.add(self.overlap_frame, text="Overlap scan")
         notebook.add(self.advanced_frame, text="Advanced scans")
         notebook.add(self.spiral_frame, text="Position search")
         notebook.add(self.optics_frame, text="Optics / Geometry")
@@ -258,6 +271,7 @@ class LaserMirrorApp:
         self._build_overview()
         self._build_manual()
         self._build_angle()
+        self._build_overlap()
         self._build_advanced()
         self._build_spiral()
         self._build_optics()
@@ -483,6 +497,47 @@ class LaserMirrorApp:
         )
         self.heatmap_canvas.bind("<Button-1>", lambda event: self._inspect_canvas_point("angle", event))
         self.progress_canvas.bind("<Button-1>", lambda event: self._inspect_canvas_point("progress", event))
+
+    def _build_overlap(self) -> None:
+        controls = ttk.LabelFrame(self.overlap_frame, text="Diagonal overlap scan", padding=10)
+        controls.grid(row=0, column=0, sticky="nsew")
+        plots = ttk.LabelFrame(self.overlap_frame, text="Overlap maps", padding=10)
+        plots.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+        self.overlap_frame.columnconfigure(1, weight=1)
+        self.overlap_frame.rowconfigure(0, weight=1)
+        self._add_labeled_combo(controls, "Plane", self.overlap_axis_var, ["vertical", "horizontal"], 0)
+        self._add_labeled_combo(controls, "Position mirror", self.overlap_position_target_var, ["mirror2", "mirror1"], 1)
+        self._add_labeled_entry(controls, "Position points", self.overlap_position_points_var, 2)
+        self._add_labeled_entry(controls, "Position step [steps]", self.overlap_position_step_var, 3)
+        self._add_labeled_entry(controls, "Angle points / strip", self.overlap_angle_points_var, 4)
+        self._add_labeled_entry(controls, "Angle span [µrad]", self.overlap_angle_span_var, 5)
+        self._add_labeled_combo(controls, "Compensation mode", self.overlap_solve_mode_var, ["mirror1_primary", "mirror2_primary", "two_mirror_target"], 6)
+        ttk.Button(controls, text="Explain overlap scan", command=self._show_overlap_theory).grid(row=7, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Preview commands", command=self._preview_overlap_scan).grid(row=7, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Start overlap scan", command=self._start_overlap_scan).grid(row=8, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Request stop", command=self._stop_scan).grid(row=8, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Save overlap plot (.ps)", command=lambda: self._save_canvas_postscript(self.overlap_canvas, "overlap_scan_map.ps")).grid(row=9, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.overlap_status_var, wraplength=340, justify="left").grid(row=10, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(
+            controls,
+            text=(
+                "Workflow: move to the best found overlap position first. Then step one mirror a little above and below that position. "
+                "At each stepped position, run a local 1D angle scan. This recreates the diagonal family of strips rather than a coarse full 2D grid."
+            ),
+            wraplength=340,
+            justify="left",
+        ).grid(row=11, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self.overlap_canvas = tk.Canvas(plots, width=760, height=380, bg="white", highlightthickness=1, highlightbackground="#cccccc")
+        self.overlap_canvas.pack(fill="both", expand=True)
+        self.overlap_progress_canvas = tk.Canvas(plots, width=760, height=240, bg="white", highlightthickness=1, highlightbackground="#cccccc")
+        self.overlap_progress_canvas.pack(fill="x", pady=(10, 0))
+        self._attach_tooltip(
+            self.overlap_canvas,
+            "Diagonal overlap map: x and y are the two mirror deflection angles in the chosen plane. "
+            "Each strip corresponds to one stepped position center; points along a strip are the local 1D angle scan around that center.",
+        )
+        self.overlap_canvas.bind("<Button-1>", lambda event: self._inspect_canvas_point("overlap", event))
+        self.overlap_progress_canvas.bind("<Button-1>", lambda event: self._inspect_canvas_point("overlap_progress", event))
 
     def _build_advanced(self) -> None:
         info = ttk.LabelFrame(self.advanced_frame, text="Experimental / advanced scan modes", padding=10)
@@ -803,6 +858,19 @@ class LaserMirrorApp:
                 "• mirror1_primary: mirror 1 is the scanned mirror, mirror 2 counter-steers to hold point\n"
                 "• mirror2_primary: mirror 2 is the scanned mirror, mirror 1 counter-steers to hold point\n\n"
                 "The most literal implementation of the fixed-position angle sweep is one of the primary modes."
+            ),
+        )
+
+    def _show_overlap_theory(self) -> None:
+        messagebox.showinfo(
+            "Why this overlap scan exists",
+            (
+                "This scan starts from the current best overlap position. It does not fill a coarse full 2D grid.\n\n"
+                "Instead, it builds a diagonal family of strips:\n"
+                "• step one mirror a little above and below the current best position\n"
+                "• at each stepped position, run a local 1D angle scan in one plane\n"
+                "• plot the measured signal against mirror-1 and mirror-2 deflection angles\n\n"
+                "This is closer to the high-resolution overlap optimization pattern in the reference figure than a rectangular 2D raster."
             ),
         )
 
@@ -1130,6 +1198,7 @@ class LaserMirrorApp:
             return
         self.pending_refine_preview = []
         self.search_status_var.set("Position search running...")
+        self._active_scan_view = "spiral"
         self._start_scan_common("spiral")
 
     def _preview_local_refine(self) -> None:
@@ -1160,6 +1229,7 @@ class LaserMirrorApp:
         )
         self.status_var.set("Local refine running...")
         self.search_status_var.set("Local refine running around current best point...")
+        self._active_scan_view = "spiral"
         self.scan_runner.start_custom("position_refine", points, context, self._on_measurement_thread, self._on_finish_thread)
 
     def _refresh_active_signal_backend(self) -> None:
@@ -1186,6 +1256,46 @@ class LaserMirrorApp:
             self.signal_pv_var.set(getattr(self.signal_backend, "pv_name"))
         self.scan_runner = ScanRunner(self.config, self.geometry, self.controller, self.signal_backend, self._log, self.output_root)
 
+    def _build_overlap_points(self) -> list[ScanPoint]:
+        axis = self.overlap_axis_var.get()
+        self._pull_ui_into_config()
+        base_steps = self.controller.current_steps()
+        self.overlap_reference_steps = dict(base_steps)
+        return build_overlap_scan_points(
+            self.geometry,
+            base_steps,
+            axis,
+            self.overlap_position_target_var.get(),
+            max(1, int(self.overlap_position_points_var.get())),
+            float(self.overlap_position_step_var.get()),
+            max(1, int(self.overlap_angle_points_var.get())),
+            float(self.overlap_angle_span_var.get()),
+            self.overlap_solve_mode_var.get(),
+        )
+
+    def _preview_overlap_scan(self) -> None:
+        points = self._build_overlap_points()
+        preview = self.scan_runner.build_preview(points, self.overlap_reference_steps)
+        self._show_scan_preview(preview, "Overlap scan preview")
+
+    def _start_overlap_scan(self) -> None:
+        self._refresh_active_signal_backend()
+        points = self._build_overlap_points()
+        preview = self.scan_runner.build_preview(points, self.overlap_reference_steps)
+        if self.config.controller.preview_required and not self._show_scan_preview(preview, "Approve overlap scan"):
+            return
+        if self.scan_runner.is_running():
+            messagebox.showinfo("Scan running", "A scan is already running.")
+            return
+        self.measurements.clear()
+        self.best_point = None
+        self.best_var.set("Best point pending...")
+        context = ScanContext(reference_steps=dict(self.overlap_reference_steps), signal_label=self.signal_label_var.get(), signal_pv=self.signal_pv_var.get())
+        self.status_var.set("Overlap scan running...")
+        self.overlap_status_var.set("Overlap scan running...")
+        self._active_scan_view = "overlap"
+        self.scan_runner.start_custom("overlap_scan", points, context, self._on_measurement_thread, self._on_finish_thread)
+
     def _start_scan_common(self, mode: str) -> None:
         self._refresh_active_signal_backend()
         if self.scan_runner.is_running():
@@ -1200,6 +1310,10 @@ class LaserMirrorApp:
             signal_pv=self.signal_pv_var.get(),
         )
         self.status_var.set("Scan running...")
+        if mode == "angle":
+            self._active_scan_view = "angle"
+        elif mode == "spiral":
+            self._active_scan_view = "spiral"
         self.scan_runner.start(mode, context, self._on_measurement_thread, self._on_finish_thread)
 
     def _build_local_refine_points(self) -> list[ScanPoint] | None:
@@ -1248,21 +1362,45 @@ class LaserMirrorApp:
     def _on_measurement_thread(self, measurement: MeasurementRecord) -> None:
         self.root.after(0, self._record_measurement, measurement)
 
+    def _queue_scan_redraw(self) -> None:
+        if self._scan_redraw_after_id is not None:
+            return
+        self._scan_redraw_after_id = self.root.after(40, self._flush_scan_redraw)
+
+    def _flush_scan_redraw(self) -> None:
+        self._scan_redraw_after_id = None
+        try:
+            if self._active_scan_view == "spiral":
+                self._draw_spiral_map()
+                self._draw_progress()
+            elif self._active_scan_view == "overlap":
+                self._draw_overlap_map()
+                self._draw_overlap_progress()
+            else:
+                self._draw_angle_heatmap()
+                self._draw_progress()
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"scan redraw warning: {exc}")
+
     def _record_measurement(self, measurement: MeasurementRecord) -> None:
         self.measurements.append(measurement)
         self.status_var.set(
             f"Scan point {measurement.point_index + 1}: {measurement.signal_label} "
             f"avg={measurement.signal_average:.6g}"
         )
-        self._draw_angle_heatmap()
-        self._draw_progress()
-        if measurement.mode in ("mirror1_spiral", "mirror2_spiral", "mirror1_refine", "mirror2_refine"):
-            self._draw_spiral_map()
+        self._queue_scan_redraw()
 
     def _on_finish_thread(self, session_dir: Path, best_point: BestPointRecommendation | None) -> None:
         self.root.after(0, self._finish_scan, session_dir, best_point)
 
     def _finish_scan(self, session_dir: Path, best_point: BestPointRecommendation | None) -> None:
+        if self._scan_redraw_after_id is not None:
+            try:
+                self.root.after_cancel(self._scan_redraw_after_id)
+            except Exception:
+                pass
+            self._scan_redraw_after_id = None
+        self._flush_scan_redraw()
         self.best_point = best_point
         self.last_export_var.set(f"Saved session: {session_dir}")
         if best_point is None:
@@ -1299,6 +1437,13 @@ class LaserMirrorApp:
                     f"Recommended optimum: {best_point.signal_label}={best_point.signal_value:.6g}. "
                     "Use local refine for a tighter search around this peak."
                 )
+        if any(row.mode.startswith("overlap_") for row in self.measurements):
+            if best_point is not None:
+                self.overlap_status_var.set(
+                    f"Overlap optimum: {best_point.signal_label}={best_point.signal_value:.6g} at point {best_point.point_index + 1}."
+                )
+            else:
+                self.overlap_status_var.set("Overlap scan finished without a valid optimum.")
         self._save_legacy_state()
         self._save_motor_recovery()
         self._log(f"Scan finished. Saved to {session_dir}")
@@ -1577,6 +1722,10 @@ class LaserMirrorApp:
                 self._draw_angle_heatmap()
             if hasattr(self, "progress_canvas"):
                 self._draw_progress()
+            if hasattr(self, "overlap_canvas"):
+                self._draw_overlap_map()
+            if hasattr(self, "overlap_progress_canvas"):
+                self._draw_overlap_progress()
             if hasattr(self, "spiral_canvas"):
                 self._draw_spiral_map()
             if hasattr(self, "passive_map_canvas"):
@@ -1989,6 +2138,79 @@ class LaserMirrorApp:
         canvas.create_text(w // 2, h - 18, text=f"{label} horizontal [steps]")
         canvas.create_text(18, h // 2, text=f"{label} vertical [steps]", angle=90)
         self._register_canvas_points("spiral", points_meta)
+
+    def _draw_overlap_map(self) -> None:
+        canvas = self.overlap_canvas
+        canvas.delete("all")
+        points_meta: list[dict[str, object]] = []
+        w = int(canvas["width"])
+        h = int(canvas["height"])
+        margin = 48
+        canvas.create_rectangle(margin, margin, w - margin, h - margin, outline="#999999")
+        relevant = [row for row in self.measurements if row.mode.startswith("overlap_")]
+        if not relevant:
+            canvas.create_text(w // 2, h // 2, text="No overlap scan data yet", fill="#666666")
+            return
+        axis = "x" if any(row.mode == "overlap_horizontal" for row in relevant) else "y"
+        m1_key = "m1_horizontal" if axis == "x" else "m1_vertical"
+        m2_key = "m2_horizontal" if axis == "x" else "m2_vertical"
+        xs = [self.geometry.steps_to_angle_delta(getattr(row, f"commanded_{m1_key}") - self.overlap_reference_steps[m1_key], axis, 1) / 1000.0 for row in relevant]
+        ys = [self.geometry.steps_to_angle_delta(getattr(row, f"commanded_{m2_key}") - self.overlap_reference_steps[m2_key], axis, 2) / 1000.0 for row in relevant]
+        xlo, xhi = min(xs), max(xs)
+        ylo, yhi = min(ys), max(ys)
+        xspan = max(xhi - xlo, 1e-9)
+        yspan = max(yhi - ylo, 1e-9)
+        values = [row.signal_average for row in relevant if row.signal_average == row.signal_average]
+        lo = min(values) if values else 0.0
+        hi = max(values) if values else 1.0
+        vspan = max(hi - lo, 1e-9)
+        for row, xval, yval in zip(relevant, xs, ys):
+            px = margin + (xval - xlo) / xspan * (w - 2 * margin)
+            py = h - margin - (yval - ylo) / yspan * (h - 2 * margin)
+            color = self._color_for_value((row.signal_average - lo) / vspan if row.signal_average == row.signal_average else 0.0)
+            radius = 4
+            canvas.create_oval(px - radius, py - radius, px + radius, py + radius, fill=color, outline="")
+            points_meta.append({"x": px, "y": py, "payload": self._measurement_payload(row) | {"group_index": row.point_index, "mirror1_mrad": xval, "mirror2_mrad": yval}})
+        if self.best_point is not None and any(row.mode.startswith("overlap_") for row in relevant):
+            best_m1 = self.geometry.steps_to_angle_delta(self.best_point.targets.as_dict()[m1_key] - self.overlap_reference_steps[m1_key], axis, 1) / 1000.0
+            best_m2 = self.geometry.steps_to_angle_delta(self.best_point.targets.as_dict()[m2_key] - self.overlap_reference_steps[m2_key], axis, 2) / 1000.0
+            px = margin + (best_m1 - xlo) / xspan * (w - 2 * margin)
+            py = h - margin - (best_m2 - ylo) / yspan * (h - 2 * margin)
+            canvas.create_line(px - 8, py, px + 8, py, fill="#111827", width=2)
+            canvas.create_line(px, py - 8, px, py + 8, fill="#111827", width=2)
+        plane = "horizontal" if axis == "x" else "vertical"
+        canvas.create_text(w // 2, 18, text=f"{self.signal_label_var.get()} vs mirror deflection angles ({plane})", font=("Helvetica", 11, "bold"))
+        canvas.create_text(w // 2, h - 18, text="Deflection angle 1 [mrad]")
+        canvas.create_text(18, h // 2, text="Deflection angle 2 [mrad]", angle=90)
+        self._register_canvas_points("overlap", points_meta)
+
+    def _draw_overlap_progress(self) -> None:
+        canvas = self.overlap_progress_canvas
+        canvas.delete("all")
+        points_meta: list[dict[str, object]] = []
+        w = int(canvas["width"])
+        h = int(canvas["height"])
+        margin = 40
+        canvas.create_rectangle(margin, margin, w - margin, h - margin, outline="#999999")
+        relevant = [row for row in self.measurements if row.mode.startswith("overlap_")]
+        if not relevant:
+            canvas.create_text(w // 2, h // 2, text="No overlap scan progress yet", fill="#666666")
+            return
+        values = [row.signal_average for row in relevant if row.signal_average == row.signal_average]
+        lo = min(values) if values else 0.0
+        hi = max(values) if values else 1.0
+        span = max(hi - lo, 1e-9)
+        prev = None
+        for index, row in enumerate(relevant):
+            px = margin + index / max(len(relevant) - 1, 1) * (w - 2 * margin)
+            py = h - margin - (row.signal_average - lo) / span * (h - 2 * margin)
+            if prev is not None:
+                canvas.create_line(prev[0], prev[1], px, py, fill="#1d4ed8", width=2)
+            canvas.create_oval(px - 3, py - 3, px + 3, py + 3, fill="#c2410c", outline="")
+            prev = (px, py)
+            points_meta.append({"x": px, "y": py, "payload": self._measurement_payload(row)})
+        canvas.create_text(w // 2, 18, text=f"{self.signal_label_var.get()} during overlap scan", font=("Helvetica", 11, "bold"))
+        self._register_canvas_points("overlap_progress", points_meta)
 
     def _draw_passive_map(self) -> None:
         canvas = self.passive_map_canvas

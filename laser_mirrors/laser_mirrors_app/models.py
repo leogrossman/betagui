@@ -74,6 +74,8 @@ class ScanPoint:
     offset_x_mm: float
     offset_y_mm: float
     targets: MotorTargets
+    group_index: int = 0
+    group_label: str = ""
 
 
 @dataclass

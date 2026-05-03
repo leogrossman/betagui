@@ -13,7 +13,7 @@ from typing import Callable, Literal
 from .config import AppConfig
 from .geometry import LaserMirrorGeometry, linspace
 from .hardware import MirrorController
-from .models import BestPointRecommendation, CommandRecord, MeasurementRecord, MotorTargets, ScanPoint, UndulatorTarget
+from .models import BestPointRecommendation, CommandRecord, MeasurementRecord, MirrorAngles, MotorTargets, ScanPoint, UndulatorTarget
 
 
 @dataclass
@@ -77,11 +77,58 @@ def build_angle_scan_points(config: AppConfig, geometry: LaserMirrorGeometry, re
                     offset_x_mm=scan.offset_x_mm,
                     offset_y_mm=scan.offset_y_mm,
                     targets=targets,
+                    group_index=row,
+                    group_label=f"row {row + 1}",
                 )
             )
             index += 1
     return points
 
+
+def build_overlap_scan_points(
+    geometry: LaserMirrorGeometry,
+    reference_steps: dict[str, float],
+    axis: Literal["horizontal", "vertical"],
+    position_target: Literal["mirror1", "mirror2"],
+    position_points: int,
+    position_step_steps: float,
+    angle_points: int,
+    angle_span_urad: float,
+    solve_mode: Literal["mirror1_primary", "mirror2_primary", "two_mirror_target"],
+) -> list[ScanPoint]:
+    axis_code = "x" if axis == "horizontal" else "y"
+    motor_axis = "horizontal" if axis == "horizontal" else "vertical"
+    move_key = f"{'m1' if position_target == 'mirror1' else 'm2'}_{motor_axis}"
+    position_span = max(0.0, float(position_step_steps)) * max(0, int(position_points) - 1)
+    position_offsets = linspace(0.0, position_span, max(1, int(position_points)))
+    points: list[ScanPoint] = []
+    index = 0
+    for group_index, position_offset_steps in enumerate(position_offsets):
+        strip_steps = dict(reference_steps)
+        strip_steps[move_key] = reference_steps[move_key] + position_offset_steps
+        if axis == "horizontal":
+            horizontal = MirrorAngles(
+                geometry.steps_to_angle_delta(strip_steps["m1_horizontal"] - reference_steps["m1_horizontal"], "x", 1),
+                geometry.steps_to_angle_delta(strip_steps["m2_horizontal"] - reference_steps["m2_horizontal"], "x", 2),
+            )
+            strip_target = geometry.to_undulator_target(horizontal, "x")
+            angle_values = linspace(strip_target.angle_urad, angle_span_urad, max(1, int(angle_points)))
+            for angle_x in angle_values:
+                targets = _targets_for_mode(geometry, reference_steps, strip_target.offset_mm, 0.0, angle_x, 0.0, solve_mode)
+                points.append(ScanPoint(index=index, mode=f"overlap_{axis}", angle_x_urad=angle_x, angle_y_urad=0.0, offset_x_mm=strip_target.offset_mm, offset_y_mm=0.0, targets=targets, group_index=group_index, group_label=f"strip {group_index + 1}"))
+                index += 1
+        else:
+            vertical = MirrorAngles(
+                geometry.steps_to_angle_delta(strip_steps["m1_vertical"] - reference_steps["m1_vertical"], "y", 1),
+                geometry.steps_to_angle_delta(strip_steps["m2_vertical"] - reference_steps["m2_vertical"], "y", 2),
+            )
+            strip_target = geometry.to_undulator_target(vertical, "y")
+            angle_values = linspace(strip_target.angle_urad, angle_span_urad, max(1, int(angle_points)))
+            for angle_y in angle_values:
+                targets = _targets_for_mode(geometry, reference_steps, 0.0, strip_target.offset_mm, 0.0, angle_y, solve_mode)
+                points.append(ScanPoint(index=index, mode=f"overlap_{axis}", angle_x_urad=0.0, angle_y_urad=angle_y, offset_x_mm=0.0, offset_y_mm=strip_target.offset_mm, targets=targets, group_index=group_index, group_label=f"strip {group_index + 1}"))
+                index += 1
+    return points
 
 def build_spiral_scan_points(
     config: AppConfig,
@@ -114,6 +161,8 @@ def build_spiral_scan_points(
                 offset_x_mm=math.nan,
                 offset_y_mm=math.nan,
                 targets=targets,
+                group_index=index,
+                group_label=f"spiral {target_pair}",
             )
         )
     return points
@@ -372,14 +421,27 @@ class ScanRunner:
                     break
                 if hasattr(self.signal_backend, "update_target") and point.angle_x_urad == point.angle_x_urad:
                     self.signal_backend.update_target(point.angle_x_urad, point.angle_y_urad)
-                self.debug(f"Point {point.index + 1}/{total_points}: move complete, dwelling for {max(0.0, self.config.scan.dwell_s):.2f} s.")
-                time.sleep(max(0.0, self.config.scan.dwell_s))
+                dwell_s = max(0.0, self.config.scan.dwell_s)
+                self.debug(f"Point {point.index + 1}/{total_points}: move complete, dwelling for {dwell_s:.2f} s.")
+                end_time = time.perf_counter() + dwell_s
+                while time.perf_counter() < end_time:
+                    if self._stop_requested.is_set():
+                        self.debug("Stop requested during dwell. Ending scan gracefully after current move.")
+                        break
+                    time.sleep(min(0.05, max(0.0, end_time - time.perf_counter())))
+                if self._stop_requested.is_set():
+                    break
                 samples: list[float] = []
                 for _ in range(max(1, self.config.scan.p1_samples_per_point)):
+                    if self._stop_requested.is_set():
+                        self.debug("Stop requested during sampling. Ending scan gracefully.")
+                        break
                     reading = self.signal_backend.read()
                     if reading.ok:
                         samples.append(reading.value)
                     time.sleep(0.02)
+                if self._stop_requested.is_set() and not samples:
+                    break
                 average = sum(samples) / len(samples) if samples else math.nan
                 variance = 0.0 if len(samples) <= 1 else sum((value - average) ** 2 for value in samples) / len(samples)
                 rbv = self.controller.current_steps()
