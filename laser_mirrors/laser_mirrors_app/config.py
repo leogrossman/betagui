@@ -39,6 +39,16 @@ class ControllerConfig:
     settle_s: float = 0.8
     max_delta_from_reference: float = 500.0
     max_absolute_move_steps: float = 1200.0
+    use_manual_motor_limits: bool = False
+    ignore_invalid_ioc_limits: bool = True
+    m1_vertical_llm: float = -500.0
+    m1_vertical_hlm: float = 500.0
+    m1_horizontal_llm: float = -500.0
+    m1_horizontal_hlm: float = 500.0
+    m2_vertical_llm: float = -500.0
+    m2_vertical_hlm: float = 500.0
+    m2_horizontal_llm: float = -500.0
+    m2_horizontal_hlm: float = 500.0
     preview_required: bool = True
     alarm_lockout: bool = True
     passive_log_enabled: bool = True

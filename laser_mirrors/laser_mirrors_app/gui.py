@@ -167,6 +167,15 @@ class LaserMirrorApp:
         self.settle_var = tk.DoubleVar(value=self.config.controller.settle_s)
         self.max_delta_var = tk.DoubleVar(value=self.config.controller.max_delta_from_reference)
         self.max_absolute_move_var = tk.DoubleVar(value=self.config.controller.max_absolute_move_steps)
+        self.use_manual_motor_limits_var = tk.BooleanVar(value=self.config.controller.use_manual_motor_limits)
+        self.ignore_invalid_ioc_limits_var = tk.BooleanVar(value=self.config.controller.ignore_invalid_ioc_limits)
+        self.manual_limit_vars = {
+            key: {
+                "llm": tk.DoubleVar(value=getattr(self.config.controller, f"{key}_llm")),
+                "hlm": tk.DoubleVar(value=getattr(self.config.controller, f"{key}_hlm")),
+            }
+            for key in MOTOR_PVS
+        }
         self.offset_x_var = tk.DoubleVar(value=self.config.controller.startup_offset_x_mm)
         self.offset_y_var = tk.DoubleVar(value=self.config.controller.startup_offset_y_mm)
         self.center_x_var = tk.DoubleVar(value=self.config.scan.center_angle_x_urad)
@@ -276,16 +285,18 @@ class LaserMirrorApp:
         self._add_labeled_entry(top, "Settle [s]", self.settle_var, 8)
         self._add_labeled_entry(top, "Max delta from ref [steps]", self.max_delta_var, 9)
         self._add_labeled_entry(top, "Max move window [steps]", self.max_absolute_move_var, 10)
-        ttk.Label(top, text="Output root").grid(row=11, column=0, sticky="w", pady=(8, 0))
+        ttk.Checkbutton(top, text="Use manual motor limits", variable=self.use_manual_motor_limits_var).grid(row=11, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Checkbutton(top, text="Ignore invalid IOC HLM/LLM", variable=self.ignore_invalid_ioc_limits_var).grid(row=12, column=0, columnspan=2, sticky="w")
+        ttk.Label(top, text="Output root").grid(row=13, column=0, sticky="w", pady=(8, 0))
         output_row = ttk.Frame(top)
-        output_row.grid(row=11, column=1, sticky="ew", pady=(8, 0))
+        output_row.grid(row=13, column=1, sticky="ew", pady=(8, 0))
         ttk.Entry(output_row, textvariable=self.output_root_var, width=28).pack(side="left", fill="x", expand=True)
         ttk.Button(output_row, text="Browse…", command=self._browse_output_root).pack(side="left", padx=(6, 0))
-        ttk.Button(top, text="Reconnect backends", command=self._connect_backends).grid(row=12, column=0, pady=(8, 0), sticky="w")
-        ttk.Button(top, text="Save config", command=self._save_config).grid(row=12, column=1, pady=(8, 0), sticky="e")
+        ttk.Button(top, text="Reconnect backends", command=self._connect_backends).grid(row=14, column=0, pady=(8, 0), sticky="w")
+        ttk.Button(top, text="Save config", command=self._save_config).grid(row=14, column=1, pady=(8, 0), sticky="e")
         self._add_help_button(
             top,
-            12,
+            14,
             "The selected signal preset is what all live plots and scans color by.\n"
             "Safe mode still reads the real EPICS signal and motor readback.\n"
             "In write mode every move still goes through the same ramped, DMOV-waiting safety path.",
@@ -307,17 +318,35 @@ class LaserMirrorApp:
             "Always capture a fresh reference when the controller has been restarted or when you are unsure whether the saved center is still valid.",
         )
 
+        limits = ttk.LabelFrame(left, text="Motor limits / overrides", padding=10)
+        limits.pack(fill="x", pady=(10, 0))
+        ttk.Label(limits, text="Motor").grid(row=0, column=0, sticky="w")
+        ttk.Label(limits, text="Manual LLM").grid(row=0, column=1, sticky="e")
+        ttk.Label(limits, text="Manual HLM").grid(row=0, column=2, sticky="e")
+        for row, key in enumerate(MOTOR_PVS, start=1):
+            ttk.Label(limits, text=MOTOR_LABELS.get(key, key)).grid(row=row, column=0, sticky="w", pady=2)
+            ttk.Entry(limits, textvariable=self.manual_limit_vars[key]["llm"], width=10).grid(row=row, column=1, sticky="e", padx=(6, 0), pady=2)
+            ttk.Entry(limits, textvariable=self.manual_limit_vars[key]["hlm"], width=10).grid(row=row, column=2, sticky="e", padx=(6, 0), pady=2)
+        buttons = ttk.Frame(limits)
+        buttons.grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Button(buttons, text="Seed around current RBV ±250", command=self._seed_manual_limits_from_current).pack(side="left")
+        ttk.Button(buttons, text="Copy IOC limits", command=self._copy_ioc_limits_to_manual).pack(side="left", padx=(8, 0))
+        ttk.Label(limits, text="If IOC HLM/LLM are 0 or otherwise broken, enable manual limits here and reconnect.", wraplength=640, justify="left").grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
         self.motor_tree = ttk.Treeview(
             left,
-            columns=("motor", "pv", "rbv", "val", "dmov", "movn", "stat", "sevr", "egu"),
+            columns=("motor", "pv", "rbv", "val", "llm", "hlm", "limit_src", "dmov", "movn", "stat", "sevr", "egu"),
             show="headings",
             height=8,
         )
         for key, title, width in [
             ("motor", "Motor", 150),
-            ("pv", "PV", 190),
-            ("rbv", "RBV", 90),
-            ("val", "VAL", 90),
+            ("pv", "PV", 170),
+            ("rbv", "RBV", 80),
+            ("val", "VAL", 80),
+            ("llm", "LLM", 80),
+            ("hlm", "HLM", 80),
+            ("limit_src", "Limit src", 90),
             ("dmov", "DMOV", 60),
             ("movn", "MOVN", 60),
             ("stat", "STAT", 90),
@@ -328,7 +357,13 @@ class LaserMirrorApp:
             self.motor_tree.column(key, width=width)
         self.motor_tree.pack(fill="x", pady=(10, 0))
         for key, pv in MOTOR_PVS.items():
-            self.motor_tree.insert("", "end", iid=key, text=key, values=(MOTOR_LABELS.get(key, key), pv, "", "", "", "", "", "", ""))
+            self.motor_tree.insert(
+                "",
+                "end",
+                iid=key,
+                text=key,
+                values=(MOTOR_LABELS.get(key, key), pv, "", "", "", "", "", "", "", "", "", ""),
+            )
 
         self.signal_box = ttk.LabelFrame(right, text="Live signal readout", padding=10)
         self.signal_box.pack(fill="x")
@@ -785,6 +820,11 @@ class LaserMirrorApp:
         self.config.controller.settle_s = max(0.0, float(self.settle_var.get()))
         self.config.controller.max_delta_from_reference = max(1.0, float(self.max_delta_var.get()))
         self.config.controller.max_absolute_move_steps = max(1.0, float(self.max_absolute_move_var.get()))
+        self.config.controller.use_manual_motor_limits = bool(self.use_manual_motor_limits_var.get())
+        self.config.controller.ignore_invalid_ioc_limits = bool(self.ignore_invalid_ioc_limits_var.get())
+        for key in MOTOR_PVS:
+            setattr(self.config.controller, f"{key}_llm", float(self.manual_limit_vars[key]["llm"].get()))
+            setattr(self.config.controller, f"{key}_hlm", float(self.manual_limit_vars[key]["hlm"].get()))
         self.config.controller.startup_offset_x_mm = float(self.offset_x_var.get())
         self.config.controller.startup_offset_y_mm = float(self.offset_y_var.get())
         self.config.controller.pen_test_start_steps = max(0.1, float(self.pen_start_var.get()))
@@ -1377,11 +1417,48 @@ class LaserMirrorApp:
                 return True
         return False
 
+    def _format_limit_value(self, value) -> str:
+        if value is None:
+            return "—"
+        try:
+            value = float(value)
+        except Exception:
+            return "—"
+        if value != value:
+            return "—"
+        return f"{value:.3f}"
+
+    def _seed_manual_limits_from_current(self) -> None:
+        if not hasattr(self, "controller"):
+            return
+        margin = max(250.0, float(self.max_absolute_move_var.get()))
+        for key, snapshot in {s.key: s for s in self.controller.motor_snapshots()}.items():
+            self.manual_limit_vars[key]["llm"].set(snapshot.rbv - margin)
+            self.manual_limit_vars[key]["hlm"].set(snapshot.rbv + margin)
+        self.use_manual_motor_limits_var.set(True)
+        self._log(f"Seeded manual motor limits around current RBV with ±{margin:.1f} steps.")
+
+    def _copy_ioc_limits_to_manual(self) -> None:
+        if not hasattr(self, "controller"):
+            return
+        copied = 0
+        for snapshot in self.controller.motor_snapshots():
+            if getattr(self.controller, '_usable_limit_pair', lambda *_: False)(snapshot.llm, snapshot.hlm):
+                self.manual_limit_vars[snapshot.key]["llm"].set(float(snapshot.llm))
+                self.manual_limit_vars[snapshot.key]["hlm"].set(float(snapshot.hlm))
+                copied += 1
+        if copied:
+            self.use_manual_motor_limits_var.set(True)
+            self._log(f"Copied IOC limits into manual override entries for {copied} motor(s).")
+        else:
+            self._log("IOC limits were not usable for any motor; nothing copied.")
+
     def _refresh_motor_table(self, snapshots=None) -> None:
         if not hasattr(self, "controller"):
             return
         snapshots = snapshots or self.controller.motor_snapshots()
         for snapshot in snapshots:
+            eff_llm, eff_hlm, limit_src = self.controller.effective_limits(snapshot.key, snapshot)
             self.motor_tree.item(
                 snapshot.key,
                 values=(
@@ -1389,6 +1466,9 @@ class LaserMirrorApp:
                     snapshot.base,
                     f"{snapshot.rbv:.3f}",
                     f"{snapshot.val:.3f}",
+                    self._format_limit_value(eff_llm),
+                    self._format_limit_value(eff_hlm),
+                    limit_src,
                     snapshot.dmov,
                     snapshot.movn,
                     snapshot.stat,

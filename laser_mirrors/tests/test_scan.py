@@ -133,6 +133,27 @@ class ScanTests(unittest.TestCase):
         self.assertTrue(finished)
         self.assertEqual(runner.last_error, "simulated move timeout")
 
+    def test_invalid_zero_ioc_limits_are_ignored_by_default(self) -> None:
+        config = AppConfig()
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        controller.motors['m2_horizontal'].llm.put(0.0)
+        controller.motors['m2_horizontal'].hlm.put(0.0)
+        ok, errors = controller.validate_targets({'m2_horizontal': -10.0})
+        self.assertTrue(ok)
+        self.assertEqual(errors, [])
+
+    def test_manual_motor_limits_are_enforced(self) -> None:
+        config = AppConfig()
+        config.controller.use_manual_motor_limits = True
+        config.controller.m2_horizontal_llm = -20.0
+        config.controller.m2_horizontal_hlm = 20.0
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        ok, errors = controller.validate_targets({'m2_horizontal': -25.0})
+        self.assertFalse(ok)
+        self.assertTrue(any('below LLM' in err and '(manual)' in err for err in errors))
+
 
 if __name__ == "__main__":
     unittest.main()

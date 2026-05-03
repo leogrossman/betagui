@@ -75,6 +75,26 @@ Recommended commissioning pattern:
 8. then start with a small `vertical_only` scan in a primary solve mode
 9. check the `Optics / Geometry` tab for the step-scale estimate before committing to a larger span
 
+### If IOC HLM/LLM are broken
+
+Some control-room IOC configurations appear to report unusable motor limits such as `LLM=0` and `HLM=0` even when the real working position is not near zero. The GUI now handles this in two ways:
+
+- if `Ignore invalid IOC HLM/LLM` is enabled, obviously broken `0/0`, non-finite, or inverted limits are ignored
+- if you want explicit bounds, enable `Use manual motor limits` in the `Overview` tab and enter the real allowed step ranges for each motor
+
+Recommended control-room sequence when this happens:
+
+1. start with `--safe-mode`
+2. verify the current RBVs match the actual working mirror position
+3. in `Overview`, either:
+   - click `Seed around current RBV ±250`, or
+   - enter the real manual LLM/HLM values yourself
+4. enable `Use manual motor limits`
+5. click `Reconnect backends`
+6. preview the scan again before using `--write-mode`
+
+The motor table now shows the *effective* LLM/HLM and whether they came from the IOC or the manual override.
+
 ## Launch modes
 
 Control room, read-only:

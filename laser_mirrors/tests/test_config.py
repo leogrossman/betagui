@@ -45,6 +45,20 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded.scan.mode, "horizontal_only")
         self.assertEqual(loaded.geometry.mirror_distance_mm, 2285.0)
 
+    def test_manual_motor_limit_fields_round_trip(self) -> None:
+        loaded = AppConfig()
+        loaded.controller.use_manual_motor_limits = True
+        loaded.controller.m2_horizontal_llm = -50.0
+        loaded.controller.m2_horizontal_hlm = 250.0
+        root = Path(tempfile.mkdtemp())
+        config_path = root / "laser_mirrors_config.json"
+        loaded.save(config_path)
+        reloaded = AppConfig.load(config_path)
+        self.assertTrue(reloaded.controller.use_manual_motor_limits)
+        self.assertEqual(reloaded.controller.m2_horizontal_llm, -50.0)
+        self.assertEqual(reloaded.controller.m2_horizontal_hlm, 250.0)
+
+
 
 if __name__ == "__main__":
     unittest.main()

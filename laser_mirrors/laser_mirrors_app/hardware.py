@@ -26,6 +26,13 @@ MOTOR_LABELS = {
     "m2_horizontal": "Mirror 2 horizontal",
 }
 
+MANUAL_LIMIT_FIELD_MAP = {
+    "m1_vertical": ("m1_vertical_llm", "m1_vertical_hlm"),
+    "m1_horizontal": ("m1_horizontal_llm", "m1_horizontal_hlm"),
+    "m2_vertical": ("m2_vertical_llm", "m2_vertical_hlm"),
+    "m2_horizontal": ("m2_horizontal_llm", "m2_horizontal_hlm"),
+}
+
 
 SIGNAL_PRESETS = {
     "p1_h1_raw": ("P1 raw", "SCOPE1ZULP:h1p1:rdAmpl"),
@@ -297,6 +304,31 @@ class MirrorController:
             ]
         return plan
 
+    def _usable_limit_pair(self, llm: float | None, hlm: float | None) -> bool:
+        if llm is None or hlm is None:
+            return False
+        if not math.isfinite(llm) or not math.isfinite(hlm):
+            return False
+        if hlm <= llm:
+            return False
+        if abs(llm) < 1e-12 and abs(hlm) < 1e-12:
+            return False
+        return True
+
+    def effective_limits(self, key: str, snapshot: MotorSnapshot | None = None) -> tuple[float | None, float | None, str]:
+        snapshot = snapshot or self.motors[key].snapshot()
+        if self.config.use_manual_motor_limits:
+            llm_field, hlm_field = MANUAL_LIMIT_FIELD_MAP[key]
+            llm = safe_float(getattr(self.config, llm_field), math.nan)
+            hlm = safe_float(getattr(self.config, hlm_field), math.nan)
+            if self._usable_limit_pair(llm, hlm):
+                return llm, hlm, 'manual'
+        if self._usable_limit_pair(snapshot.llm, snapshot.hlm):
+            return snapshot.llm, snapshot.hlm, 'ioc'
+        if self.config.ignore_invalid_ioc_limits:
+            return None, None, 'none'
+        return snapshot.llm, snapshot.hlm, 'ioc-raw'
+
     def validate_targets(self, targets: dict[str, float]) -> tuple[bool, list[str]]:
         errors: list[str] = []
         for key, target in targets.items():
@@ -304,10 +336,15 @@ class MirrorController:
             if abs(target - reference) > self.config.max_delta_from_reference:
                 errors.append(f"{key}: target {target:.3f} exceeds max delta from reference {reference:.3f}")
             current = self.motors[key].snapshot()
-            if current.hlm == current.hlm and target > current.hlm:
-                errors.append(f"{key}: target {target:.3f} exceeds HLM {current.hlm:.3f}")
-            if current.llm == current.llm and target < current.llm:
-                errors.append(f"{key}: target {target:.3f} below LLM {current.llm:.3f}")
+            effective_llm, effective_hlm, limit_source = self.effective_limits(key, current)
+            self.debug(
+                f"{current.base}: validating target {target:.3f} with limit source={limit_source} "
+                f"LLM={effective_llm!r} HLM={effective_hlm!r}"
+            )
+            if effective_hlm is not None and target > effective_hlm:
+                errors.append(f"{key}: target {target:.3f} exceeds HLM {effective_hlm:.3f} ({limit_source})")
+            if effective_llm is not None and target < effective_llm:
+                errors.append(f"{key}: target {target:.3f} below LLM {effective_llm:.3f} ({limit_source})")
             if abs(target - current.rbv) > self.config.max_absolute_move_steps:
                 errors.append(f"{key}: requested move {target - current.rbv:.3f} exceeds max absolute move window")
             if self.config.alarm_lockout and current.sevr not in ("NO_ALARM", "0", "None"):
@@ -442,6 +479,9 @@ class DisconnectedController:
             )
             for key, base in MOTOR_PVS.items()
         ]
+
+    def effective_limits(self, key: str, snapshot: MotorSnapshot | None = None) -> tuple[float | None, float | None, str]:
+        return None, None, 'disconnected'
 
     def diagnostics(self) -> dict[str, object]:
         return {
