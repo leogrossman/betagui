@@ -1,0 +1,52 @@
+key,PV,meaning
+x3,BPMZ3L2RP:rdX,BPM3 X upstream-1
+x4,BPMZ4L2RP:rdX,BPM4 X upstream-2
+x5,BPMZ5L2RP:rdX,BPM5 X downstream-1
+x6,BPMZ6L2RP:rdX,BPM6 X downstream-2
+y3,BPMZ3L2RP:rdY,BPM3 Y upstream-1
+y4,BPMZ4L2RP:rdY,BPM4 Y upstream-2
+y5,BPMZ5L2RP:rdY,BPM5 Y downstream-1
+y6,BPMZ6L2RP:rdY,BPM6 Y downstream-2
+i1,HS1P2K3RP:setCur,I1 K3 upstream
+i2,HS3P1L4RP:setCur,I2 L4 upstream
+i3,HS3P2L4RP:setCur,I3 L4 downstream
+i4,HS1P1K1RP:setCur,I4 K1 downstream
+sig,SCOPE1ZULP:h1p1:rdAmplAv,P1 coherent average
+sigraw,SCOPE1ZULP:h1p1:rdAmpl,P1 coherent raw
+sig2,SCOPE1ZULP:h1p2:rdAmplAv,P2 average
+sig3,SCOPE1ZULP:h1p3:rdAmplAv,P3 average
+qpd_l2x,QPD01ZL2RP:rdSigmaXav,QPD L2 sigma X
+qpd_l2y,QPD01ZL2RP:rdSigmaYav,QPD L2 sigma Y
+qpd_l4x,QPD00ZL4RP:rdSigmaXav,QPD L4 sigma X
+qpd_l4y,QPD00ZL4RP:rdSigmaYav,QPD L4 sigma Y
+beam_cur,CUM1ZK3RP:rdCur,Beam current
+lt100,CUM1ZK3RP:rdLt100,Lifetime 100 s
+lt3,CUM1ZK3RP:rdLt3,Lifetime 3 s
+rf,MCLKHGP:rdFrq499,RF readback 499 MHz
+rfset,MCLKHGP:setFrq499,RF setpoint 499 MHz
+energy,ERMPCGP:rdRmp,Beam energy ramp
+cav,PAHRP:NRVD:rdVoltCav,Cavity voltage readback
+cavset,PAHRP:setVoltCav,Cavity voltage setpoint
+q1,Q1P1L2RP:setCur,Q1 set current (alpha0 scan knob)
+u125_gap,U125IL2RP:BasePmGap.A,U125 gap
+purity,PURITYCCP:calculation,Purity calculation
+oplife,OPCHECKCCP:calcCurrLife,Current lifetime calculation
+akc05,AKC05VP,AKC05
+akc06,AKC06VP,AKC06
+akc10,AKC10VP,AKC10
+akc11,AKC11VP,AKC11
+akc12,AKC12VP,AKC12 bump reference
+akc13,AKC13VP,AKC13
+mnf1,MNF1C1L2RP,MNF1
+mnf2,MNF1C2L2RP,MNF2
+mnf3,MNF2C2L2RP,MNF3
+mnf4,MNF2C1L2RP,MNF4
+screen,SCRYZK3RP.VAL,Screen position
+wfvolt,WFGEN2C1CP:setVolt,Waveform/polarization drive voltage (candidate)
+wfout,WFGEN2C1CP:stOut,Waveform output state (candidate)
+scopeavglen,SCOPE1ZULP:rdAvLength,Scope averaging length / shot-window proxy
+cavtemp,PAHRP:Ctrl:rdCavTempBody,Cavity body temperature
+plunger,PAHRP:Ctrl:rdPlngPos,PAH plunger position
+tunex,TUNEZRP:measX,Tune monitor X raw
+tuney,TUNEZRP:measY,Tune monitor Y raw
+tunez,TUNEZRP:measZ,Tune monitor Z raw
