@@ -360,6 +360,40 @@ class MirrorController:
         """
         return max(1.0, float(self.config.max_step_per_put) * 1.25)
 
+    def estimated_move_timeout_s(self, motor: EpicsMotor, start_rbv: float, target_val: float) -> float:
+        """Estimate a conservative timeout from travel plus reported motor speed.
+
+        The controller can need noticeably longer for the first large relocation
+        than for the later small scan steps. If VELO/ACCL are unavailable, fall
+        back to a generous static timeout rather than failing early.
+        """
+        snapshot = motor.snapshot()
+        distance = abs(float(target_val) - float(start_rbv))
+        velo = snapshot.velo if snapshot.velo is not None and math.isfinite(snapshot.velo) and snapshot.velo > 0 else None
+        accl = snapshot.accl if snapshot.accl is not None and math.isfinite(snapshot.accl) and snapshot.accl >= 0 else 0.0
+        if velo is None:
+            return max(self.config.wait_timeout_s, 3.0 + 0.12 * distance)
+        return max(self.config.wait_timeout_s, 2.0 + float(accl) + distance / max(velo, 1e-6) + 0.5)
+
+    def wait_until_target(
+        self,
+        motor: EpicsMotor,
+        target_val: float,
+        tolerance: float,
+        timeout_s: float,
+        request_stop: Callable[[], bool] | None = None,
+    ) -> MotorSnapshot:
+        deadline = time.time() + max(0.0, timeout_s)
+        last = motor.snapshot()
+        while time.time() < deadline:
+            if request_stop and request_stop():
+                return last
+            last = motor.snapshot()
+            if abs(last.rbv - target_val) <= tolerance:
+                return last
+            time.sleep(0.05)
+        return last
+
     def move_absolute_group(
         self,
         targets: dict[str, float],
@@ -420,8 +454,9 @@ class MirrorController:
                         f"DMOV={before.dmov} MOVN={before.movn} STAT={before.stat} SEVR={before.sevr}"
                     )
                     motor.put_target(command.target_val)
-                    self.debug(f"{motor.base}: command sent, waiting for DMOV=1.")
-                    if command.wait_for_dmov and not motor.wait_done(timeout_s=self.config.wait_timeout_s):
+                    wait_timeout = self.estimated_move_timeout_s(motor, before.rbv, command.target_val)
+                    self.debug(f"{motor.base}: command sent, waiting for DMOV=1 (timeout {wait_timeout:.2f}s).")
+                    if command.wait_for_dmov and not motor.wait_done(timeout_s=wait_timeout):
                         self.last_move_error = f"{motor.base} did not report DMOV within timeout"
                         raise RuntimeError(self.last_move_error)
                     after_wait = motor.snapshot()
@@ -431,18 +466,31 @@ class MirrorController:
                     )
                     tolerance = self.completion_tolerance_steps()
                     time.sleep(max(0.0, self.config.settle_s))
-                    settled = motor.snapshot()
+                    completion_timeout = max(0.5, 0.5 * wait_timeout)
+                    settled = self.wait_until_target(
+                        motor,
+                        command.target_val,
+                        tolerance,
+                        completion_timeout,
+                        request_stop=request_stop,
+                    )
                     self.debug(
                         f"{motor.base}: post-settle RBV={settled.rbv:.3f} VAL={settled.val:.3f} "
                         f"DMOV={settled.dmov} MOVN={settled.movn} tol={tolerance:.3f}"
                     )
                     if abs(settled.rbv - command.target_val) > tolerance:
-                        extra_wait = max(0.2, self.config.inter_put_delay_s)
+                        extra_wait = max(0.2, self.config.inter_put_delay_s, 0.25 * wait_timeout)
                         self.debug(
                             f"{motor.base}: RBV still outside tolerance after settle; waiting an extra {extra_wait:.2f}s for late controller settling."
                         )
                         time.sleep(extra_wait)
-                        settled = motor.snapshot()
+                        settled = self.wait_until_target(
+                            motor,
+                            command.target_val,
+                            tolerance,
+                            extra_wait,
+                            request_stop=request_stop,
+                        )
                         self.debug(
                             f"{motor.base}: extra-settle RBV={settled.rbv:.3f} VAL={settled.val:.3f} "
                             f"DMOV={settled.dmov} MOVN={settled.movn}"

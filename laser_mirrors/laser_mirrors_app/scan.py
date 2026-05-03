@@ -96,7 +96,6 @@ def build_overlap_scan_points(
     angle_span_urad: float,
     solve_mode: Literal["mirror1_primary", "mirror2_primary", "two_mirror_target"],
 ) -> list[ScanPoint]:
-    del solve_mode  # The overlap-strip scan is defined directly in mirror-angle space.
     axis_code = "x" if axis == "horizontal" else "y"
     motor_axis = "horizontal" if axis == "horizontal" else "vertical"
     fixed_mirror = 1 if position_target == "mirror1" else 2
@@ -108,23 +107,37 @@ def build_overlap_scan_points(
         linspace(0.0, position_span, max(1, int(position_points))),
         key=lambda value: geometry.steps_to_angle_delta(value, axis_code, fixed_mirror),
     )
-    sweep_angles = sorted(linspace(0.0, float(angle_span_urad), max(1, int(angle_points))))
     points: list[ScanPoint] = []
     index = 0
     for group_index, position_offset_steps in enumerate(position_offsets):
         fixed_angle_urad = geometry.steps_to_angle_delta(position_offset_steps, axis_code, fixed_mirror)
         fixed_target_steps = reference_steps[fixed_key] + position_offset_steps
-        for sweep_angle_urad in sweep_angles:
-            sweep_target_steps = reference_steps[sweep_key] + geometry.urad_to_steps(sweep_angle_urad, axis_code, sweep_mirror)
+        if fixed_mirror == 1:
+            center_pair = geometry.solve_mirror2_for_fixed_offset(fixed_angle_urad, 0.0, axis_code)
+            center_mirror1_urad = center_pair.mirror1_urad
+            center_mirror2_urad = center_pair.mirror2_urad
+        else:
+            center_pair = geometry.solve_mirror1_for_fixed_offset(fixed_angle_urad, 0.0, axis_code)
+            center_mirror1_urad = center_pair.mirror1_urad
+            center_mirror2_urad = center_pair.mirror2_urad
+
+        if sweep_mirror == 1:
+            sweep_values = sorted(linspace(center_mirror1_urad, float(angle_span_urad), max(1, int(angle_points))))
+        else:
+            sweep_values = sorted(linspace(center_mirror2_urad, float(angle_span_urad), max(1, int(angle_points))))
+
+        for sweep_angle_urad in sweep_values:
+            if sweep_mirror == 1:
+                sweep_target_steps = reference_steps[sweep_key] + geometry.urad_to_steps(sweep_angle_urad, axis_code, 1)
+                mirror1_angle_urad = sweep_angle_urad
+                mirror2_angle_urad = fixed_angle_urad
+            else:
+                sweep_target_steps = reference_steps[sweep_key] + geometry.urad_to_steps(sweep_angle_urad, axis_code, 2)
+                mirror1_angle_urad = fixed_angle_urad
+                mirror2_angle_urad = sweep_angle_urad
             targets = dict(reference_steps)
             targets[fixed_key] = fixed_target_steps
             targets[sweep_key] = sweep_target_steps
-            if fixed_mirror == 1:
-                mirror1_angle_urad = fixed_angle_urad
-                mirror2_angle_urad = sweep_angle_urad
-            else:
-                mirror1_angle_urad = sweep_angle_urad
-                mirror2_angle_urad = fixed_angle_urad
             points.append(
                 ScanPoint(
                     index=index,
