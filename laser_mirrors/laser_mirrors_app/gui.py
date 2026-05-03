@@ -202,7 +202,9 @@ class LaserMirrorApp:
         self.passive_y_motor_var = tk.StringVar(value="m2_horizontal")
         self.passive_metric_var = tk.StringVar(value="selected_signal")
         self.passive_view_mode_var = tk.StringVar(value="motor_map")
-        self.passive_history_limit_var = tk.IntVar(value=400)
+        self.passive_history_limit_var = tk.IntVar(value=4000)
+        self.passive_history_start_back_var = tk.IntVar(value=4000)
+        self.passive_history_end_back_var = tk.IntVar(value=0)
         self.passive_status_var = tk.StringVar(value="No passive sweep reconstructed yet.")
         self.pen_motor_var = tk.StringVar(value="m2_horizontal")
         self.pen_start_var = tk.DoubleVar(value=self.config.controller.pen_test_start_steps)
@@ -605,11 +607,13 @@ class LaserMirrorApp:
         self._add_labeled_combo(controls, "View mode", self.passive_view_mode_var, ["motor_map", "time_vs_metric"], 0)
         self._add_labeled_combo(controls, "Metric", self.passive_metric_var, self._passive_metric_choices(), 1)
         self._add_labeled_entry(controls, "Recent samples", self.passive_history_limit_var, 2)
-        self._add_labeled_combo(controls, "X motor", self.passive_x_motor_var, list(MOTOR_PVS.keys()), 3)
-        self._add_labeled_combo(controls, "Y motor", self.passive_y_motor_var, list(MOTOR_PVS.keys()), 4)
-        ttk.Button(controls, text="Clear passive buffer", command=self._clear_passive_buffer).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Save passive plot (.ps)", command=lambda: self._save_canvas_postscript(self.passive_map_canvas, "passive_reconstruction.ps")).grid(row=6, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        ttk.Label(controls, textvariable=self.passive_status_var, wraplength=340, justify="left").grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self._add_labeled_entry(controls, "Start back", self.passive_history_start_back_var, 3)
+        self._add_labeled_entry(controls, "End back", self.passive_history_end_back_var, 4)
+        self._add_labeled_combo(controls, "X motor", self.passive_x_motor_var, list(MOTOR_PVS.keys()), 5)
+        self._add_labeled_combo(controls, "Y motor", self.passive_y_motor_var, list(MOTOR_PVS.keys()), 6)
+        ttk.Button(controls, text="Clear passive buffer", command=self._clear_passive_buffer).grid(row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Save passive plot (.ps)", command=lambda: self._save_canvas_postscript(self.passive_map_canvas, "passive_reconstruction.ps")).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.passive_status_var, wraplength=340, justify="left").grid(row=9, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Label(
             controls,
             text=(
@@ -618,10 +622,10 @@ class LaserMirrorApp:
             ),
             wraplength=340,
             justify="left",
-        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=10, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self._add_help_button(
             controls,
-            8,
+            10,
             "Passive mode does not need this GUI to move the mirrors.\n"
             "It records all four motor RBVs plus the configured live signals every poll and lets you re-view the recent history in different ways.",
         )
@@ -660,7 +664,7 @@ class LaserMirrorApp:
         ttk.Button(controls, text="Start pen test", command=self._start_pen_test).grid(row=6, column=1, sticky="ew", pady=(8, 0))
         ttk.Button(controls, text="Request stop", command=self._stop_pen_test).grid(row=7, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(controls, text="STOP all (emergency)", command=self._hard_stop).grid(row=7, column=1, sticky="ew", pady=(8, 0))
-        ttk.Label(controls, textvariable=self.pen_status_var, wraplength=340, justify="left").grid(row=8, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.pen_status_var, wraplength=340, justify="left").grid(row=10, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Label(
             controls,
             text=(
@@ -806,7 +810,7 @@ class LaserMirrorApp:
         self.config.controller.safe_mode = self.safe_mode_var.get()
         self.config.controller.write_mode = self.write_mode_var.get()
         preset = self.signal_preset_var.get()
-        if not self.signal_pv_var.get() and preset in SIGNAL_PRESETS:
+        if preset in SIGNAL_PRESETS:
             label, pv = SIGNAL_PRESETS[preset]
             self.signal_pv_var.set(pv)
             self.signal_label_var.set(label)
@@ -1119,7 +1123,7 @@ class LaserMirrorApp:
         self._start_scan_common("angle")
 
     def _start_spiral_scan(self) -> None:
-        self._pull_ui_into_config()
+        self._refresh_active_signal_backend()
         points = build_spiral_scan_points(self.config, self.current_reference_steps, target_pair=self.spiral_target_var.get())
         preview = self.scan_runner.build_preview(points, self.current_reference_steps)
         if self.config.controller.preview_required and not self._show_scan_preview(preview, "Approve position search"):
@@ -1138,6 +1142,7 @@ class LaserMirrorApp:
         self._show_scan_preview(preview, "Local refine preview")
 
     def _start_local_refine(self) -> None:
+        self._refresh_active_signal_backend()
         points = self._build_local_refine_points()
         if points is None:
             return
@@ -1157,7 +1162,32 @@ class LaserMirrorApp:
         self.search_status_var.set("Local refine running around current best point...")
         self.scan_runner.start_custom("position_refine", points, context, self._on_measurement_thread, self._on_finish_thread)
 
+    def _refresh_active_signal_backend(self) -> None:
+        self._pull_ui_into_config()
+        if self.demo_mode:
+            self.signal_backend = SimulatedSignalBackend(self.signal_label_var.get() or "Simulated signal")
+        elif self.factory is not None:
+            try:
+                self.signal_backend = build_signal_backend(
+                    False,
+                    self.signal_preset_var.get(),
+                    self.signal_pv_var.get(),
+                    self.factory,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.signal_backend = DisconnectedSignalBackend(
+                    self.signal_label_var.get() or "Signal",
+                    self.signal_pv_var.get() or "disconnected",
+                    str(exc),
+                )
+        if hasattr(self.signal_backend, "label"):
+            self.signal_label_var.set(getattr(self.signal_backend, "label"))
+        if hasattr(self.signal_backend, "pv_name"):
+            self.signal_pv_var.set(getattr(self.signal_backend, "pv_name"))
+        self.scan_runner = ScanRunner(self.config, self.geometry, self.controller, self.signal_backend, self._log, self.output_root)
+
     def _start_scan_common(self, mode: str) -> None:
+        self._refresh_active_signal_backend()
         if self.scan_runner.is_running():
             messagebox.showinfo("Scan running", "A scan is already running.")
             return
@@ -1226,7 +1256,7 @@ class LaserMirrorApp:
         )
         self._draw_angle_heatmap()
         self._draw_progress()
-        if measurement.mode == "mirror2_spiral":
+        if measurement.mode in ("mirror1_spiral", "mirror2_spiral", "mirror1_refine", "mirror2_refine"):
             self._draw_spiral_map()
 
     def _on_finish_thread(self, session_dir: Path, best_point: BestPointRecommendation | None) -> None:
@@ -1247,10 +1277,28 @@ class LaserMirrorApp:
         else:
             self.status_var.set("Scan finished.")
         if best_point is not None and any(mode in ("mirror1_spiral", "mirror2_spiral", "mirror1_refine", "mirror2_refine") for mode in {row.mode for row in self.measurements}):
-            self.search_status_var.set(
-                f"Best measured point: {best_point.signal_label}={best_point.signal_value:.6g}. "
-                "Use local refine for a tighter search around this point."
-            )
+            relevant = [row for row in self.measurements if row.mode in ("mirror1_spiral", "mirror2_spiral", "mirror1_refine", "mirror2_refine")]
+            start_row = relevant[0] if relevant else None
+            if start_row is not None:
+                start_signal = start_row.signal_average
+                deviation = best_point.signal_value - start_signal
+                target_pair = "mirror1" if best_point.targets.m1_horizontal != start_row.commanded_m1_horizontal or best_point.targets.m1_vertical != start_row.commanded_m1_vertical else "mirror2"
+                if target_pair == "mirror1":
+                    dx = best_point.targets.m1_horizontal - start_row.commanded_m1_horizontal
+                    dy = best_point.targets.m1_vertical - start_row.commanded_m1_vertical
+                else:
+                    dx = best_point.targets.m2_horizontal - start_row.commanded_m2_horizontal
+                    dy = best_point.targets.m2_vertical - start_row.commanded_m2_vertical
+                self.search_status_var.set(
+                    f"Recommended optimum: {best_point.signal_label}={best_point.signal_value:.6g}; "
+                    f"start={start_signal:.6g}; Δsignal={deviation:.6g}; Δsteps=({dx:.1f}, {dy:.1f}). "
+                    "Use local refine for a tighter search around this peak."
+                )
+            else:
+                self.search_status_var.set(
+                    f"Recommended optimum: {best_point.signal_label}={best_point.signal_value:.6g}. "
+                    "Use local refine for a tighter search around this peak."
+                )
         self._save_legacy_state()
         self._save_motor_recovery()
         self._log(f"Scan finished. Saved to {session_dir}")
@@ -1347,7 +1395,14 @@ class LaserMirrorApp:
         limit = max(1, int(self.passive_history_limit_var.get()))
         if len(samples) > limit:
             samples = samples[-limit:]
-        return samples
+        start_back = max(0, int(self.passive_history_start_back_var.get()))
+        end_back = max(0, int(self.passive_history_end_back_var.get()))
+        if start_back < end_back:
+            start_back, end_back = end_back, start_back
+        start_idx = max(0, len(samples) - start_back)
+        end_idx = len(samples) - end_back if end_back > 0 else len(samples)
+        sliced = samples[start_idx:end_idx]
+        return sliced if sliced else samples[-1:] if samples else []
 
     def _register_canvas_points(self, name: str, points: list[dict[str, object]]) -> None:
         self._canvas_points[name] = points

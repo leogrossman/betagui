@@ -153,25 +153,61 @@ def _targets_for_mode(
 def choose_best_point(measurements: list[MeasurementRecord], objective: str) -> BestPointRecommendation | None:
     if not measurements:
         return None
+    spacing_candidates: list[float] = []
+    spiral_rows = [
+        row for row in measurements if row.mode in ("mirror1_spiral", "mirror2_spiral", "mirror1_refine", "mirror2_refine")
+    ]
+    for row in spiral_rows:
+        x0 = row.commanded_m1_horizontal if row.mode.startswith("mirror1") else row.commanded_m2_horizontal
+        y0 = row.commanded_m1_vertical if row.mode.startswith("mirror1") else row.commanded_m2_vertical
+        distances = []
+        for other in spiral_rows:
+            if other.mode != row.mode or other.point_index == row.point_index:
+                continue
+            x1 = other.commanded_m1_horizontal if other.mode.startswith("mirror1") else other.commanded_m2_horizontal
+            y1 = other.commanded_m1_vertical if other.mode.startswith("mirror1") else other.commanded_m2_vertical
+            distance = math.hypot(x1 - x0, y1 - y0)
+            if distance > 0:
+                distances.append(distance)
+        if distances:
+            spacing_candidates.append(min(distances))
+    typical_spacing = min(spacing_candidates) if spacing_candidates else 1.0
     scored_rows: list[tuple[float, MeasurementRecord]] = []
+    maximizing = objective != "min"
     for row in measurements:
         if row.mode in ("mirror1_spiral", "mirror2_spiral", "mirror1_refine", "mirror2_refine"):
             x0 = row.commanded_m1_horizontal if row.mode.startswith("mirror1") else row.commanded_m2_horizontal
             y0 = row.commanded_m1_vertical if row.mode.startswith("mirror1") else row.commanded_m2_vertical
-            neighbors = []
+            neighbors: list[tuple[float, MeasurementRecord]] = []
             for other in measurements:
                 if other.mode != row.mode:
                     continue
                 x1 = other.commanded_m1_horizontal if other.mode.startswith("mirror1") else other.commanded_m2_horizontal
                 y1 = other.commanded_m1_vertical if other.mode.startswith("mirror1") else other.commanded_m2_vertical
                 distance = math.hypot(x1 - x0, y1 - y0)
-                neighbors.append((distance, other.signal_average))
+                neighbors.append((distance, other))
             neighbors.sort(key=lambda item: item[0])
-            local = [value for _distance, value in neighbors[:5]]
-            score = sum(local) / len(local) if local else row.signal_average
+            local_rows = [other for _distance, other in neighbors[:5]]
+            local_values = [other.signal_average for other in local_rows]
+            local_mean = sum(local_values) / len(local_values) if local_values else row.signal_average
+            ring_values = [other.signal_average for other in local_rows[1:]]
+            ring_distances = [distance for distance, _other in neighbors[1:5] if distance > 0]
+            if ring_values:
+                ring_mean = sum(ring_values) / len(ring_values)
+                if maximizing:
+                    prominence = row.signal_average - ring_mean
+                else:
+                    prominence = ring_mean - row.signal_average
+            else:
+                prominence = 0.0
+            distance_penalty = 0.0
+            if ring_distances:
+                distance_penalty = 0.2 * (sum(ring_distances) / len(ring_distances)) / max(typical_spacing, 1e-9)
+            score = (local_mean + 0.35 * prominence - distance_penalty) if maximizing else (local_mean - 0.35 * prominence + distance_penalty)
         else:
             local = [other.signal_average for other in measurements if other.mode == row.mode]
-            score = row.signal_average if len(local) <= 2 else (row.signal_average * 0.7 + (sum(local) / len(local)) * 0.3)
+            local_mean = sum(local) / len(local) if local else row.signal_average
+            score = row.signal_average if len(local) <= 2 else (row.signal_average * 0.65 + local_mean * 0.35)
         scored_rows.append((score, row))
     best = min(scored_rows, key=lambda item: item[0])[1] if objective == "min" else max(scored_rows, key=lambda item: item[0])[1]
     return BestPointRecommendation(

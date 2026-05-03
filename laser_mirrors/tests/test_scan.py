@@ -154,6 +154,30 @@ class ScanTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertTrue(any('below LLM' in err and '(manual)' in err for err in errors))
 
+    def test_choose_best_point_rejects_isolated_spike_in_spiral(self) -> None:
+        from laser_mirrors_app.models import MeasurementRecord
+        rows = []
+        base = dict(
+            mode='mirror2_spiral', elapsed_s=0.0, angle_x_urad=float('nan'), angle_y_urad=float('nan'),
+            offset_x_mm=float('nan'), offset_y_mm=float('nan'), signal_label='P1 avg', signal_pv='pv',
+            signal_std=0.0, samples_used=5, commanded_m1_horizontal=0.0, commanded_m1_vertical=0.0,
+            rbv_m1_horizontal=0.0, rbv_m1_vertical=0.0, rbv_m2_horizontal=0.0, rbv_m2_vertical=0.0,
+            timestamp_iso='t'
+        )
+        def row(idx, x, y, avg):
+            return MeasurementRecord(point_index=idx, signal_value=avg, signal_average=avg, commanded_m2_horizontal=x, commanded_m2_vertical=y, **base)
+        rows.extend([
+            row(0, 0.0, 0.0, 9.0),
+            row(1, 1.0, 0.0, 9.2),
+            row(2, -1.0, 0.0, 9.1),
+            row(3, 0.0, 1.0, 9.0),
+            row(4, 0.0, -1.0, 9.1),
+            row(5, 10.0, 10.0, 10.0),
+        ])
+        best = choose_best_point(rows, 'max')
+        self.assertIsNotNone(best)
+        self.assertNotEqual(best.point_index, 5)
+
 
 if __name__ == "__main__":
     unittest.main()
