@@ -197,6 +197,32 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(len(points), 45)
         self.assertTrue(all(point.mode == 'overlap_vertical' for point in points))
 
+    def test_build_overlap_scan_points_hold_fixed_angle_per_strip(self) -> None:
+        config = AppConfig()
+        geometry = LaserMirrorGeometry(config.geometry)
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        points = build_overlap_scan_points(
+            geometry,
+            controller.capture_reference(),
+            'vertical',
+            'mirror2',
+            3,
+            8.0,
+            5,
+            40.0,
+            'mirror1_primary',
+        )
+        strips: dict[int, list] = {}
+        for point in points:
+            strips.setdefault(point.group_index, []).append(point)
+        self.assertEqual(len(strips), 3)
+        for strip_points in strips.values():
+            mirror1_angles = {round(point.angle_x_urad, 8) for point in strip_points}
+            mirror2_angles = {round(point.angle_y_urad, 8) for point in strip_points}
+            self.assertGreater(len(mirror1_angles), 1)
+            self.assertEqual(len(mirror2_angles), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

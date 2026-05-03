@@ -34,9 +34,10 @@ The tool is organized around two standard jobs:
    - move to the best position first
    - use the `Overlap scan` tab
    - choose `vertical` or `horizontal`
-   - step one mirror slightly above and below the current best position
-   - for each stepped position, run a local 1D angle scan
-   - inspect the mirror-1 vs mirror-2 deflection-angle map and the recommended optimum
+   - choose which mirror provides the fixed strip coordinate
+   - step that mirror slightly above and below the current best position
+   - for each fixed strip, sweep the other mirror through a short local angle scan
+   - inspect the mirror-1 vs mirror-2 deflection-angle map, the marked start point, and the recommended optimum
 
 The tool also includes:
 
@@ -80,7 +81,7 @@ Recommended commissioning pattern:
 6. use `Position search` first to find the best mirror position
 7. use `local refine` if needed to tighten around the best point
 8. then start with a small `vertical_only` scan in a primary solve mode
-9. if you want the figure-style diagonal overlap map, use the `Overlap scan` tab after moving to the current best position
+9. if you want the figure-style strip map, use the `Overlap scan` tab after moving to the current best position
 10. check the `Optics / Geometry` tab for the step-scale estimate before committing to a larger span
 
 ### If IOC HLM/LLM are broken
@@ -205,24 +206,37 @@ The GUI currently treats:
 - `Offset X / Y [mm]` as the held interaction-point offset
 - `Center X / Y [µrad]` and `Span X / Y [µrad]` as the scan coordinates
 
-### Why the 2D plot is in angle space
+### Why the angle plots are in mirror-angle space
 
-The main physics plot is intentionally **not** a mirror-step plot.
+The physics-facing plots are intentionally **not** only mirror-step plots.
 
 The central experimental question is:
 
 - for a fixed interaction point near the undulator,
 - how does the measured response change when the **laser interaction angle** changes?
 
-So the scan map uses:
+For the standard `Angle scan` tab the map uses:
 
 - `x` axis = horizontal interaction angle at the undulator
 - `y` axis = vertical interaction angle at the undulator
 - point color = measured signal average at that angle point
 
 Motor coordinates are still logged completely, but they are implementation coordinates.
-The angle map is the plot that best matches the overlap / modulation question from the requested fixed-position angle scan
-and the qualitative Fig. 7 style idea: build a response landscape in angle space and identify an optimum.
+That angle map is the plot that best matches the fixed-position steering question.
+
+For the `Overlap scan` tab the plotted coordinates are different on purpose:
+
+- `x` axis = mirror 1 deflection angle in the chosen plane
+- `y` axis = mirror 2 deflection angle in the chosen plane
+- point color = measured signal average at that strip point
+
+This matches the Fig.-7 style strip logic better:
+
+- keep one mirror angle fixed for a strip
+- sweep the other mirror angle across it
+- then move to the next strip
+
+The start point before the scan is marked on the plot, and the recommended optimum is marked separately.
 
 The optional interpolated background in the GUI is only a visual guide.
 The measured dots remain the ground truth.
@@ -251,7 +265,21 @@ The angle scan supports three solve modes:
 
 This is the key place where the tool now goes beyond the simple early scripts.
 
-### Which one does Carsten really want?
+### Overlap scan interpretation
+
+The `Overlap scan` tab is no longer a coarse full 2D raster.
+
+It now implements a strip workflow:
+
+1. use `Position search` first and move to the best spatial overlap
+2. choose a plane, usually `vertical` first
+3. choose which mirror provides the fixed strip coordinate, usually `mirror2`
+4. step that mirror through a small set of strip centers
+5. for each strip center, sweep the other mirror through a short 1D angle scan
+
+So the result is a family of strips in `(deflection angle 1, deflection angle 2)` space rather than a full grid.
+
+### Which solve mode is the literal fixed-position angle scan?
 
 Carsten's wording was:
 

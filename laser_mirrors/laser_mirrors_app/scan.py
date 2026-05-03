@@ -96,38 +96,49 @@ def build_overlap_scan_points(
     angle_span_urad: float,
     solve_mode: Literal["mirror1_primary", "mirror2_primary", "two_mirror_target"],
 ) -> list[ScanPoint]:
+    del solve_mode  # The overlap-strip scan is defined directly in mirror-angle space.
     axis_code = "x" if axis == "horizontal" else "y"
     motor_axis = "horizontal" if axis == "horizontal" else "vertical"
-    move_key = f"{'m1' if position_target == 'mirror1' else 'm2'}_{motor_axis}"
+    fixed_mirror = 1 if position_target == "mirror1" else 2
+    sweep_mirror = 2 if fixed_mirror == 1 else 1
+    fixed_key = f"m{fixed_mirror}_{motor_axis}"
+    sweep_key = f"m{sweep_mirror}_{motor_axis}"
     position_span = max(0.0, float(position_step_steps)) * max(0, int(position_points) - 1)
-    position_offsets = linspace(0.0, position_span, max(1, int(position_points)))
+    position_offsets = sorted(
+        linspace(0.0, position_span, max(1, int(position_points))),
+        key=lambda value: geometry.steps_to_angle_delta(value, axis_code, fixed_mirror),
+    )
+    sweep_angles = sorted(linspace(0.0, float(angle_span_urad), max(1, int(angle_points))))
     points: list[ScanPoint] = []
     index = 0
     for group_index, position_offset_steps in enumerate(position_offsets):
-        strip_steps = dict(reference_steps)
-        strip_steps[move_key] = reference_steps[move_key] + position_offset_steps
-        if axis == "horizontal":
-            horizontal = MirrorAngles(
-                geometry.steps_to_angle_delta(strip_steps["m1_horizontal"] - reference_steps["m1_horizontal"], "x", 1),
-                geometry.steps_to_angle_delta(strip_steps["m2_horizontal"] - reference_steps["m2_horizontal"], "x", 2),
+        fixed_angle_urad = geometry.steps_to_angle_delta(position_offset_steps, axis_code, fixed_mirror)
+        fixed_target_steps = reference_steps[fixed_key] + position_offset_steps
+        for sweep_angle_urad in sweep_angles:
+            sweep_target_steps = reference_steps[sweep_key] + geometry.urad_to_steps(sweep_angle_urad, axis_code, sweep_mirror)
+            targets = dict(reference_steps)
+            targets[fixed_key] = fixed_target_steps
+            targets[sweep_key] = sweep_target_steps
+            if fixed_mirror == 1:
+                mirror1_angle_urad = fixed_angle_urad
+                mirror2_angle_urad = sweep_angle_urad
+            else:
+                mirror1_angle_urad = sweep_angle_urad
+                mirror2_angle_urad = fixed_angle_urad
+            points.append(
+                ScanPoint(
+                    index=index,
+                    mode=f"overlap_{axis}",
+                    angle_x_urad=mirror1_angle_urad,
+                    angle_y_urad=mirror2_angle_urad,
+                    offset_x_mm=math.nan,
+                    offset_y_mm=math.nan,
+                    targets=MotorTargets(**targets),
+                    group_index=group_index,
+                    group_label=f"strip {group_index + 1}",
+                )
             )
-            strip_target = geometry.to_undulator_target(horizontal, "x")
-            angle_values = linspace(strip_target.angle_urad, angle_span_urad, max(1, int(angle_points)))
-            for angle_x in angle_values:
-                targets = _targets_for_mode(geometry, reference_steps, strip_target.offset_mm, 0.0, angle_x, 0.0, solve_mode)
-                points.append(ScanPoint(index=index, mode=f"overlap_{axis}", angle_x_urad=angle_x, angle_y_urad=0.0, offset_x_mm=strip_target.offset_mm, offset_y_mm=0.0, targets=targets, group_index=group_index, group_label=f"strip {group_index + 1}"))
-                index += 1
-        else:
-            vertical = MirrorAngles(
-                geometry.steps_to_angle_delta(strip_steps["m1_vertical"] - reference_steps["m1_vertical"], "y", 1),
-                geometry.steps_to_angle_delta(strip_steps["m2_vertical"] - reference_steps["m2_vertical"], "y", 2),
-            )
-            strip_target = geometry.to_undulator_target(vertical, "y")
-            angle_values = linspace(strip_target.angle_urad, angle_span_urad, max(1, int(angle_points)))
-            for angle_y in angle_values:
-                targets = _targets_for_mode(geometry, reference_steps, 0.0, strip_target.offset_mm, 0.0, angle_y, solve_mode)
-                points.append(ScanPoint(index=index, mode=f"overlap_{axis}", angle_x_urad=0.0, angle_y_urad=angle_y, offset_x_mm=0.0, offset_y_mm=strip_target.offset_mm, targets=targets, group_index=group_index, group_label=f"strip {group_index + 1}"))
-                index += 1
+            index += 1
     return points
 
 def build_spiral_scan_points(
@@ -448,6 +459,8 @@ class ScanRunner:
                 measurement = MeasurementRecord(
                     point_index=point.index,
                     mode=point.mode,
+                    group_index=point.group_index,
+                    group_label=point.group_label,
                     elapsed_s=time.perf_counter() - start,
                     angle_x_urad=point.angle_x_urad,
                     angle_y_urad=point.angle_y_urad,

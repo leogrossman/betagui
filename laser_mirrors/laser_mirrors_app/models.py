@@ -101,6 +101,8 @@ class MeasurementRecord:
     rbv_m1_vertical: float
     rbv_m2_horizontal: float
     rbv_m2_vertical: float
+    group_index: int = 0
+    group_label: str = ""
     timestamp_iso: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
 
