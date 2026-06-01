@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from laser_mirrors_app.config import AppConfig
 from laser_mirrors_app.geometry import LaserMirrorGeometry
 from laser_mirrors_app.hardware import MirrorController, PVFactory, build_signal_backend
-from laser_mirrors_app.scan import ScanContext, ScanRunner, build_angle_scan_points, build_overlap_scan_points, build_spiral_scan_points, choose_best_point
+from laser_mirrors_app.scan import ScanContext, ScanRunner, bounded_rectangular_spiral, build_angle_scan_points, build_overlap_scan_points, build_spiral_scan_points, choose_best_point
 
 
 class ScanTests(unittest.TestCase):
@@ -23,6 +23,27 @@ class ScanTests(unittest.TestCase):
         self.assertTrue(points)
         self.assertEqual(points[0].mode, "mirror1_spiral")
         self.assertEqual(points[0].targets.m2_horizontal, controller.capture_reference()["m2_horizontal"])
+
+    def test_bounded_spiral_respects_outer_radius(self) -> None:
+        coords = bounded_rectangular_spiral(100.0, 100.0, 250.0, 150.0, 20)
+        self.assertTrue(coords)
+        self.assertTrue(all(abs(x) <= 250.0 and abs(y) <= 150.0 for x, y in coords))
+
+    def test_spiral_points_use_radius_strategy(self) -> None:
+        config = AppConfig()
+        config.scan.spiral_strategy = "bounded_spiral"
+        config.scan.spiral_step_x = 100.0
+        config.scan.spiral_step_y = 100.0
+        config.scan.spiral_radius_x = 200.0
+        config.scan.spiral_radius_y = 200.0
+        geometry = LaserMirrorGeometry(config.geometry)
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        points = build_spiral_scan_points(config, controller.capture_reference(), target_pair="mirror2")
+        self.assertTrue(points)
+        for point in points:
+            self.assertLessEqual(abs(point.targets.m2_horizontal), 200.0)
+            self.assertLessEqual(abs(point.targets.m2_vertical), 200.0)
 
     def test_build_scan_grid_count(self) -> None:
         config = AppConfig()
@@ -222,6 +243,37 @@ class ScanTests(unittest.TestCase):
             mirror2_angles = {round(point.angle_y_urad, 8) for point in strip_points}
             self.assertGreater(len(mirror1_angles), 1)
             self.assertEqual(len(mirror2_angles), 1)
+
+    def test_overlap_direction_can_be_reversed(self) -> None:
+        config = AppConfig()
+        geometry = LaserMirrorGeometry(config.geometry)
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        a = build_overlap_scan_points(
+            geometry,
+            controller.capture_reference(),
+            'vertical',
+            'mirror2',
+            3,
+            100.0,
+            3,
+            100.0,
+            'mirror1_primary',
+            'upper_left_to_lower_right',
+        )
+        b = build_overlap_scan_points(
+            geometry,
+            controller.capture_reference(),
+            'vertical',
+            'mirror2',
+            3,
+            100.0,
+            3,
+            100.0,
+            'mirror1_primary',
+            'lower_left_to_upper_right',
+        )
+        self.assertNotEqual([p.targets.m2_vertical for p in a[:3]], [p.targets.m2_vertical for p in b[:3]])
 
 
 if __name__ == "__main__":

@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="SSMB laser mirror scan tool")
     parser.add_argument("--safe-mode", action="store_true", help="Use real EPICS readback/signal, but keep motor writes disabled")
     parser.add_argument("--demo-mode", action="store_true", help="Run fully offline with simulated motors and simulated signal")
-    parser.add_argument("--write-mode", action="store_true", help="Enable real motor writes (never needed for safe demos)")
+    parser.add_argument("--write-mode", action="store_true", help="Enable real motor writes (default unless --safe-mode or --demo-mode is used)")
     parser.add_argument("--config", default="laser_mirrors_config.json", help="Path to JSON config file")
     return parser
 
@@ -193,18 +193,22 @@ class LaserMirrorApp:
         self.spiral_step_x_var = tk.DoubleVar(value=self.config.scan.spiral_step_x)
         self.spiral_step_y_var = tk.DoubleVar(value=self.config.scan.spiral_step_y)
         self.spiral_turns_var = tk.IntVar(value=self.config.scan.spiral_turns)
+        self.spiral_radius_x_var = tk.DoubleVar(value=getattr(self.config.scan, "spiral_radius_x", 1500.0))
+        self.spiral_radius_y_var = tk.DoubleVar(value=getattr(self.config.scan, "spiral_radius_y", 1500.0))
         self.spiral_target_var = tk.StringVar(value=self.config.scan.spiral_target)
         self.spiral_strategy_var = tk.StringVar(value=self.config.scan.spiral_strategy)
         self.overlap_axis_var = tk.StringVar(value="vertical")
         self.overlap_position_target_var = tk.StringVar(value="mirror2")
         self.overlap_position_points_var = tk.IntVar(value=7)
-        self.overlap_position_step_var = tk.DoubleVar(value=8.0)
+        self.overlap_horizontal_step_var = tk.DoubleVar(value=self.config.scan.overlap_horizontal_step_steps)
+        self.overlap_vertical_step_var = tk.DoubleVar(value=self.config.scan.overlap_vertical_step_steps)
         self.overlap_angle_points_var = tk.IntVar(value=9)
-        self.overlap_angle_span_var = tk.DoubleVar(value=50.0)
+        self.overlap_angle_span_var = tk.DoubleVar(value=self.config.scan.overlap_angle_span_urad)
         self.overlap_solve_mode_var = tk.StringVar(value="mirror1_primary")
+        self.overlap_diagonal_var = tk.StringVar(value="upper_left_to_lower_right")
         self.overlap_status_var = tk.StringVar(value="No overlap scan run yet.")
         self.manual_motor_var = tk.StringVar(value="m2_horizontal")
-        self.manual_delta_var = tk.DoubleVar(value=1.0)
+        self.manual_delta_var = tk.DoubleVar(value=100.0)
         self.manual_absolute_var = tk.DoubleVar(value=0.0)
         self.passive_x_motor_var = tk.StringVar(value="m1_horizontal")
         self.passive_y_motor_var = tk.StringVar(value="m2_horizontal")
@@ -261,7 +265,7 @@ class LaserMirrorApp:
         notebook.add(self.overview_frame, text="Overview")
         notebook.add(self.manual_frame, text="Manual control")
         notebook.add(self.angle_frame, text="Angle scan")
-        notebook.add(self.overlap_frame, text="Overlap scan")
+        notebook.add(self.overlap_frame, text="Two-mirror scan")
         notebook.add(self.advanced_frame, text="Advanced scans")
         notebook.add(self.spiral_frame, text="Position search")
         notebook.add(self.optics_frame, text="Optics / Geometry")
@@ -288,7 +292,25 @@ class LaserMirrorApp:
         self.overview_frame.columnconfigure(1, weight=1)
         self.overview_frame.rowconfigure(0, weight=1)
 
-        top = ttk.LabelFrame(left, text="Machine / safety", padding=10)
+        workflow = ttk.LabelFrame(left, text="Standard coarse recovery workflow", padding=10)
+        workflow.pack(fill="x")
+        ttk.Label(
+            workflow,
+            text=(
+                "1. Capture current RBV as reference.\n"
+                "2. Open Position search and run a mirror-2 bounded spiral until the laser is visible through the beamline.\n"
+                "3. Pause the search when the spot looks good, save the motor state, or resume if you want to continue.\n"
+                "4. Open Two-mirror scan for the coarse angle-overlap strip scan.\n"
+                "5. Use Manual control for single-axis nudges while watching the live motor readbacks."
+            ),
+            wraplength=660,
+            justify="left",
+        ).grid(row=0, column=0, columnspan=3, sticky="w")
+        ttk.Button(workflow, text="Use coarse recovery defaults", command=self._apply_coarse_recovery_defaults).grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(workflow, text="Capture current RBV", command=self._capture_reference).grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Button(workflow, text="Save current motor state", command=self._save_motor_recovery).grid(row=1, column=2, sticky="ew", padx=(8, 0), pady=(8, 0))
+
+        top = ttk.LabelFrame(left, text="Backend and coarse-move settings", padding=10)
         top.pack(fill="x")
         ttk.Checkbutton(top, text="Safe mode (real readback, no writes)", variable=self.safe_mode_var, command=self._safe_mode_changed).grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Checkbutton(top, text="Enable real writes", variable=self.write_mode_var, command=self._write_mode_changed).grid(row=1, column=0, columnspan=2, sticky="w")
@@ -318,7 +340,7 @@ class LaserMirrorApp:
             "In write mode every move still goes through the same ramped, DMOV-waiting safety path.",
         )
 
-        target = ttk.LabelFrame(left, text="Undulator-space target", padding=10)
+        target = ttk.LabelFrame(left, text="Reference and saved positions", padding=10)
         target.pack(fill="x", pady=(10, 0))
         self._add_labeled_entry(target, "Offset X [mm]", self.offset_x_var, 0)
         self._add_labeled_entry(target, "Offset Y [mm]", self.offset_y_var, 1)
@@ -345,7 +367,7 @@ class LaserMirrorApp:
             ttk.Entry(limits, textvariable=self.manual_limit_vars[key]["hlm"], width=10).grid(row=row, column=2, sticky="e", padx=(6, 0), pady=2)
         buttons = ttk.Frame(limits)
         buttons.grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 0))
-        ttk.Button(buttons, text="Seed around current RBV ±250", command=self._seed_manual_limits_from_current).pack(side="left")
+        ttk.Button(buttons, text="Seed around current RBV ±5000", command=self._seed_manual_limits_from_current).pack(side="left")
         ttk.Button(buttons, text="Copy IOC limits", command=self._copy_ioc_limits_to_manual).pack(side="left", padx=(8, 0))
         ttk.Label(limits, text="If IOC HLM/LLM are 0 or otherwise broken, enable manual limits here and reconnect.", wraplength=640, justify="left").grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
@@ -415,14 +437,55 @@ class LaserMirrorApp:
         ttk.Button(box, text="Move absolute", command=self._manual_absolute_move).grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         ttk.Button(box, text="STOP all (emergency)", command=self._hard_stop).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
 
-        note = ttk.LabelFrame(right, text="Safety notes", padding=10)
+        grid = ttk.LabelFrame(left, text="All motor nudges", padding=10)
+        grid.pack(fill="x", pady=(10, 0))
+        ttk.Label(grid, text="Use these for coarse hand steering while watching the beam by eye.").grid(row=0, column=0, columnspan=4, sticky="w")
+        for row, (mirror, h_key, v_key) in enumerate(
+            [
+                ("Mirror 1", "m1_horizontal", "m1_vertical"),
+                ("Mirror 2", "m2_horizontal", "m2_vertical"),
+            ],
+            start=1,
+        ):
+            ttk.Label(grid, text=mirror).grid(row=row, column=0, sticky="w", pady=4)
+            ttk.Button(grid, text="H -", command=lambda key=h_key: self._manual_nudge_key(key, -1)).grid(row=row, column=1, sticky="ew", padx=2)
+            ttk.Button(grid, text="H +", command=lambda key=h_key: self._manual_nudge_key(key, 1)).grid(row=row, column=2, sticky="ew", padx=2)
+            ttk.Button(grid, text="V -", command=lambda key=v_key: self._manual_nudge_key(key, -1)).grid(row=row, column=3, sticky="ew", padx=2)
+            ttk.Button(grid, text="V +", command=lambda key=v_key: self._manual_nudge_key(key, 1)).grid(row=row, column=4, sticky="ew", padx=2)
+        ttk.Button(grid, text="Refresh readbacks", command=self._refresh_motor_table).grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(grid, text="Capture RBV as reference", command=self._capture_reference).grid(row=3, column=1, columnspan=2, sticky="ew", pady=(8, 0), padx=2)
+        ttk.Button(grid, text="Save motor state", command=self._save_motor_recovery).grid(row=3, column=3, columnspan=2, sticky="ew", pady=(8, 0), padx=2)
+
+        self.manual_tree = ttk.Treeview(
+            left,
+            columns=("motor", "pv", "rbv", "val", "dmov", "movn", "stat", "sevr"),
+            show="headings",
+            height=4,
+        )
+        for key, title, width in [
+            ("motor", "Motor", 140),
+            ("pv", "PV", 150),
+            ("rbv", "RBV", 90),
+            ("val", "VAL", 90),
+            ("dmov", "DMOV", 60),
+            ("movn", "MOVN", 60),
+            ("stat", "STAT", 90),
+            ("sevr", "SEVR", 90),
+        ]:
+            self.manual_tree.heading(key, text=title)
+            self.manual_tree.column(key, width=width)
+        self.manual_tree.pack(fill="x", pady=(10, 0))
+        for key, pv in MOTOR_PVS.items():
+            self.manual_tree.insert("", "end", iid=key, values=(MOTOR_LABELS.get(key, key), pv, "", "", "", "", "", ""))
+
+        note = ttk.LabelFrame(right, text="Manual-control notes", padding=10)
         note.pack(fill="x")
         ttk.Label(
             note,
             text=(
                 "Manual commands use the same ramped EPICS `.VAL` path as scans.\n"
                 "Every real command is written to the debug log, session log, and last-command file.\n"
-                "Use tiny steps first. Prefer graceful scan stop over hard `.STOP` unless needed."
+                "For the current coarse recovery, 100-step nudges are expected. Use STOP only if a motor keeps moving unexpectedly."
             ),
             wraplength=420,
             justify="left",
@@ -499,35 +562,39 @@ class LaserMirrorApp:
         self.progress_canvas.bind("<Button-1>", lambda event: self._inspect_canvas_point("progress", event))
 
     def _build_overlap(self) -> None:
-        controls = ttk.LabelFrame(self.overlap_frame, text="Strip overlap scan", padding=10)
+        controls = ttk.LabelFrame(self.overlap_frame, text="Two-mirror target scan", padding=10)
         controls.grid(row=0, column=0, sticky="nsew")
         plots = ttk.LabelFrame(self.overlap_frame, text="Overlap maps", padding=10)
         plots.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
         self.overlap_frame.columnconfigure(1, weight=1)
         self.overlap_frame.rowconfigure(0, weight=1)
         self._add_labeled_combo(controls, "Plane", self.overlap_axis_var, ["vertical", "horizontal"], 0)
-        self._add_labeled_combo(controls, "Fixed-angle mirror", self.overlap_position_target_var, ["mirror2", "mirror1"], 1)
+        self._add_labeled_combo(controls, "Fixed strip mirror", self.overlap_position_target_var, ["mirror2", "mirror1"], 1)
         self._add_labeled_entry(controls, "Strip count", self.overlap_position_points_var, 2)
-        self._add_labeled_entry(controls, "Strip spacing [steps]", self.overlap_position_step_var, 3)
-        self._add_labeled_entry(controls, "Points / strip", self.overlap_angle_points_var, 4)
-        self._add_labeled_entry(controls, "Sweep span [µrad]", self.overlap_angle_span_var, 5)
-        self._add_labeled_combo(controls, "Legacy solve mode", self.overlap_solve_mode_var, ["mirror1_primary", "mirror2_primary", "two_mirror_target"], 6)
-        ttk.Button(controls, text="Explain overlap scan", command=self._show_overlap_theory).grid(row=7, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Preview commands", command=self._preview_overlap_scan).grid(row=7, column=1, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Start overlap scan", command=self._start_overlap_scan).grid(row=8, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Request stop", command=self._stop_scan).grid(row=8, column=1, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Move to overlap optimum", command=self._move_to_best_point).grid(row=9, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Save overlap plot (.ps)", command=lambda: self._save_canvas_postscript(self.overlap_canvas, "overlap_scan_map.ps")).grid(row=9, column=1, sticky="ew", pady=(8, 0))
-        ttk.Label(controls, textvariable=self.overlap_status_var, wraplength=340, justify="left").grid(row=10, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self._add_labeled_entry(controls, "Horizontal strip spacing [steps]", self.overlap_horizontal_step_var, 3)
+        self._add_labeled_entry(controls, "Vertical strip spacing [steps]", self.overlap_vertical_step_var, 4)
+        self._add_labeled_entry(controls, "Points / strip", self.overlap_angle_points_var, 5)
+        self._add_labeled_entry(controls, "Sweep span [µrad]", self.overlap_angle_span_var, 6)
+        self._add_labeled_combo(controls, "Compensation mode", self.overlap_solve_mode_var, ["mirror1_primary", "mirror2_primary", "two_mirror_target"], 7)
+        self._add_labeled_combo(controls, "Diagonal direction", self.overlap_diagonal_var, ["upper_left_to_lower_right", "lower_left_to_upper_right"], 8)
+        ttk.Button(controls, text="Explain scan", command=self._show_overlap_theory).grid(row=9, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Preview commands", command=self._preview_overlap_scan).grid(row=9, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Start scan", command=self._start_overlap_scan).grid(row=10, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Pause", command=self._pause_scan).grid(row=10, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Resume", command=self._resume_scan).grid(row=11, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Request stop", command=self._stop_scan).grid(row=11, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Move to optimum", command=self._move_to_best_point).grid(row=12, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Save plot (.ps)", command=lambda: self._save_canvas_postscript(self.overlap_canvas, "two_mirror_scan_map.ps")).grid(row=12, column=1, sticky="ew", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.overlap_status_var, wraplength=340, justify="left").grid(row=13, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Label(
             controls,
             text=(
-                "Workflow: first move to the best spatial overlap position. Then keep one mirror at a fixed deflection angle for a strip while sweeping the other mirror through a short 1D scan. "
-                "After that, shift the fixed-angle mirror to the next strip and sweep again. The result is the Fig.-7 style family of strips instead of a coarse raster."
+                "Workflow: first find a visible laser position. Then keep one mirror fixed for a strip while sweeping the other mirror. "
+                "Move the fixed-strip mirror to the next strip and repeat. Use larger strip spacing in vertical if the coarse search needs it."
             ),
             wraplength=340,
             justify="left",
-        ).grid(row=11, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=14, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self.overlap_canvas = tk.Canvas(plots, width=760, height=380, bg="white", highlightthickness=1, highlightbackground="#cccccc")
         self.overlap_canvas.pack(fill="both", expand=True)
         self.overlap_progress_canvas = tk.Canvas(plots, width=760, height=240, bg="white", highlightthickness=1, highlightbackground="#cccccc")
@@ -617,31 +684,36 @@ class LaserMirrorApp:
         ).pack(anchor="w")
 
     def _build_spiral(self) -> None:
-        controls = ttk.LabelFrame(self.spiral_frame, text="Best-position finder", padding=10)
+        controls = ttk.LabelFrame(self.spiral_frame, text="Coarse position search", padding=10)
         controls.grid(row=0, column=0, sticky="nsew")
         plots = ttk.LabelFrame(self.spiral_frame, text="Position-search map", padding=10)
         plots.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
         self.spiral_frame.columnconfigure(1, weight=1)
         self.spiral_frame.rowconfigure(0, weight=1)
         self._add_labeled_combo(controls, "Moving mirror pair", self.spiral_target_var, ["mirror2", "mirror1"], 0)
-        self._add_labeled_combo(controls, "Search strategy", self.spiral_strategy_var, ["classic_spiral", "local_refine"], 1)
+        self._add_labeled_combo(controls, "Search strategy", self.spiral_strategy_var, ["bounded_spiral", "classic_spiral", "local_refine"], 1)
         self._add_labeled_entry(controls, "Step X [steps]", self.spiral_step_x_var, 2)
         self._add_labeled_entry(controls, "Step Y [steps]", self.spiral_step_y_var, 3)
-        self._add_labeled_entry(controls, "Turns", self.spiral_turns_var, 4)
-        ttk.Button(controls, text="Preview commands", command=self._preview_spiral_scan).grid(row=5, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Start search", command=self._start_spiral_scan).grid(row=5, column=1, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Preview local refine", command=self._preview_local_refine).grid(row=6, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Start local refine", command=self._start_local_refine).grid(row=6, column=1, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Move to best point", command=self._move_to_best_point).grid(row=7, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Request stop", command=self._stop_scan).grid(row=7, column=1, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Save search plot (.ps)", command=lambda: self._save_canvas_postscript(self.spiral_canvas, "position_search_map.ps")).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        ttk.Label(controls, textvariable=self.search_status_var, wraplength=340, justify="left").grid(row=9, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self._add_labeled_entry(controls, "Outer radius X [steps]", self.spiral_radius_x_var, 4)
+        self._add_labeled_entry(controls, "Outer radius Y [steps]", self.spiral_radius_y_var, 5)
+        self._add_labeled_entry(controls, "Max turns", self.spiral_turns_var, 6)
+        ttk.Button(controls, text="Preview commands", command=self._preview_spiral_scan).grid(row=7, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Start search", command=self._start_spiral_scan).grid(row=7, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Pause", command=self._pause_scan).grid(row=8, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Resume", command=self._resume_scan).grid(row=8, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Request stop", command=self._stop_scan).grid(row=9, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Save motor state now", command=self._save_motor_recovery).grid(row=9, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Preview local refine", command=self._preview_local_refine).grid(row=10, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Start local refine", command=self._start_local_refine).grid(row=10, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Move to best point", command=self._move_to_best_point).grid(row=11, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Save search plot (.ps)", command=lambda: self._save_canvas_postscript(self.spiral_canvas, "position_search_map.ps")).grid(row=11, column=1, sticky="ew", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.search_status_var, wraplength=340, justify="left").grid(row=12, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self._add_help_button(
             controls,
-            9,
+            12,
             "Position finder:\n"
-            "This is the first step of the workflow. Search for the best laser position using one mirror pair, then use that result as the center for the fixed-position angle scan.\n"
-            "Classic spiral does a coarse search. Local refine uses the current best point as the center and searches a tighter neighborhood.",
+            "This is the first step after the beamline was rebuilt. Search mirror 2 first with large steps, pause when the beam is visible, save the motor state, then continue or stop.\n"
+            "Bounded spiral uses the requested outer radius directly. Local refine uses the current best point as the center and searches a tighter neighborhood.",
         )
         self.spiral_canvas = tk.Canvas(plots, width=760, height=440, bg="white", highlightthickness=1, highlightbackground="#cccccc")
         self.spiral_canvas.pack(fill="both", expand=True)
@@ -866,7 +938,7 @@ class LaserMirrorApp:
         messagebox.showinfo(
             "Why this overlap scan exists",
             (
-                "This scan starts from the current best overlap position and recreates the figure-style strip map.\n\n"
+                "This scan starts from the current best visible laser position and builds a strip map in mirror-angle space.\n\n"
                 "How it works now:\n"
                 "• choose one plane, vertical or horizontal\n"
                 "• choose which mirror supplies the fixed strip coordinate\n"
@@ -924,14 +996,48 @@ class LaserMirrorApp:
         self.config.scan.spiral_step_x = float(self.spiral_step_x_var.get())
         self.config.scan.spiral_step_y = float(self.spiral_step_y_var.get())
         self.config.scan.spiral_turns = max(1, int(self.spiral_turns_var.get()))
+        self.config.scan.spiral_radius_x = max(0.0, float(self.spiral_radius_x_var.get()))
+        self.config.scan.spiral_radius_y = max(0.0, float(self.spiral_radius_y_var.get()))
         self.config.scan.spiral_target = self.spiral_target_var.get()
         self.config.scan.spiral_strategy = self.spiral_strategy_var.get()
+        self.config.scan.overlap_horizontal_step_steps = max(0.0, float(self.overlap_horizontal_step_var.get()))
+        self.config.scan.overlap_vertical_step_steps = max(0.0, float(self.overlap_vertical_step_var.get()))
+        self.config.scan.overlap_angle_span_urad = max(0.0, float(self.overlap_angle_span_var.get()))
         self._update_scale_summary()
 
     def _save_config(self) -> None:
         self._pull_ui_into_config()
         self.config.save(self.config_path)
         self._log(f"Saved config to {self.config_path}")
+
+    def _apply_coarse_recovery_defaults(self) -> None:
+        self.write_mode_var.set(True)
+        self.safe_mode_var.set(False)
+        self.signal_preset_var.set("visual_only")
+        self.signal_label_var.set("Visual only")
+        self.signal_pv_var.set("none")
+        self.max_step_var.set(100.0)
+        self.delay_var.set(0.05)
+        self.settle_var.set(0.05)
+        self.max_delta_var.set(5000.0)
+        self.max_absolute_move_var.set(5000.0)
+        self.spiral_target_var.set("mirror2")
+        self.spiral_strategy_var.set("bounded_spiral")
+        self.spiral_step_x_var.set(100.0)
+        self.spiral_step_y_var.set(100.0)
+        self.spiral_radius_x_var.set(1500.0)
+        self.spiral_radius_y_var.set(1500.0)
+        self.spiral_turns_var.set(60)
+        self.dwell_var.set(0.15)
+        self.samples_var.set(1)
+        self.manual_delta_var.set(100.0)
+        self.overlap_horizontal_step_var.set(100.0)
+        self.overlap_vertical_step_var.set(200.0)
+        self.overlap_angle_span_var.set(300.0)
+        self.overlap_diagonal_var.set("upper_left_to_lower_right")
+        self._pull_ui_into_config()
+        self._log("Applied coarse recovery defaults for visual laser search.")
+        self.status_var.set("Coarse recovery defaults applied. Reconnect if backend settings changed.")
 
     def _browse_output_root(self) -> None:
         chosen = filedialog.askdirectory(initialdir=self.output_root_var.get() or str(self.config_path.parent))
@@ -1105,6 +1211,14 @@ class LaserMirrorApp:
         targets[key] = current[key] + delta
         self._move_motor_targets(targets, f"Manual relative move {key} by {delta:.2f} steps")
 
+    def _manual_nudge_key(self, key: str, direction: int) -> None:
+        self.manual_motor_var.set(key)
+        delta = float(self.manual_delta_var.get()) * float(direction)
+        current = self.controller.current_steps()
+        targets = dict(current)
+        targets[key] = current[key] + delta
+        self._move_motor_targets(targets, f"Manual nudge {key} by {delta:.2f} steps")
+
     def _manual_absolute_move(self) -> None:
         key = self.manual_motor_var.get()
         target = float(self.manual_absolute_var.get())
@@ -1271,10 +1385,11 @@ class LaserMirrorApp:
             axis,
             self.overlap_position_target_var.get(),
             max(1, int(self.overlap_position_points_var.get())),
-            float(self.overlap_position_step_var.get()),
+            self._overlap_position_spacing_steps(axis),
             max(1, int(self.overlap_angle_points_var.get())),
             float(self.overlap_angle_span_var.get()),
             self.overlap_solve_mode_var.get(),
+            self.overlap_diagonal_var.get(),
         )
 
     def _preview_overlap_scan(self) -> None:
@@ -1299,6 +1414,11 @@ class LaserMirrorApp:
         self.overlap_status_var.set("Overlap scan running...")
         self._active_scan_view = "overlap"
         self.scan_runner.start_custom("overlap_scan", points, context, self._on_measurement_thread, self._on_finish_thread)
+
+    def _overlap_position_spacing_steps(self, axis: str) -> float:
+        if axis == "vertical":
+            return float(self.overlap_vertical_step_var.get())
+        return float(self.overlap_horizontal_step_var.get())
 
     def _start_scan_common(self, mode: str) -> None:
         self._refresh_active_signal_backend()
@@ -1356,6 +1476,17 @@ class LaserMirrorApp:
     def _stop_scan(self) -> None:
         self.scan_runner.request_stop()
         self.status_var.set("Stop requested after current point.")
+
+    def _pause_scan(self) -> None:
+        if not self.scan_runner.is_running():
+            self.status_var.set("No running scan to pause.")
+            return
+        self.scan_runner.request_pause()
+        self.status_var.set("Scan pause requested. Current motor move will finish first.")
+
+    def _resume_scan(self) -> None:
+        self.scan_runner.resume()
+        self.status_var.set("Scan resumed.")
 
     def _move_to_best_point(self) -> None:
         if self.best_point is None:
@@ -1643,7 +1774,7 @@ class LaserMirrorApp:
     def _seed_manual_limits_from_current(self) -> None:
         if not hasattr(self, "controller"):
             return
-        margin = max(250.0, float(self.max_absolute_move_var.get()))
+        margin = max(5000.0, float(self.max_absolute_move_var.get()))
         for key, snapshot in {s.key: s for s in self.controller.motor_snapshots()}.items():
             self.manual_limit_vars[key]["llm"].set(snapshot.rbv - margin)
             self.manual_limit_vars[key]["hlm"].set(snapshot.rbv + margin)
@@ -1688,6 +1819,20 @@ class LaserMirrorApp:
                     snapshot.egu,
                 ),
             )
+            if hasattr(self, "manual_tree"):
+                self.manual_tree.item(
+                    snapshot.key,
+                    values=(
+                        MOTOR_LABELS.get(snapshot.key, snapshot.key),
+                        snapshot.base,
+                        f"{snapshot.rbv:.3f}",
+                        f"{snapshot.val:.3f}",
+                        snapshot.dmov,
+                        snapshot.movn,
+                        snapshot.stat,
+                        snapshot.sevr,
+                    ),
+                )
 
     def _export_diagnostics(self) -> None:
         diagnostics_path = self.output_root / ("laser_mirror_diagnostics_" + time.strftime("%Y%m%d_%H%M%S") + ".json")
@@ -2583,7 +2728,7 @@ def main(argv: list[str] | None = None) -> int:
         root,
         Path(args.config),
         force_safe_mode=args.safe_mode,
-        force_write_mode=args.write_mode,
+        force_write_mode=args.write_mode or (not args.safe_mode and not args.demo_mode),
         force_demo_mode=args.demo_mode,
     )
     root.protocol("WM_DELETE_WINDOW", app.on_close)

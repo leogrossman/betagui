@@ -35,6 +35,7 @@ MANUAL_LIMIT_FIELD_MAP = {
 
 
 SIGNAL_PRESETS = {
+    "visual_only": ("Visual only / no signal PV", ""),
     "p1_h1_raw": ("P1 raw", "SCOPE1ZULP:h1p1:rdAmpl"),
     "p1_h1_avg": ("P1 avg", "SCOPE1ZULP:h1p1:rdAmplAv"),
     "p1_h1_std": ("P1 std", "SCOPE1ZULP:h1p1:rdAmplDev"),
@@ -237,6 +238,15 @@ class DisconnectedSignalBackend:
 
     def read(self) -> SignalReading:
         return SignalReading(self.label, self.pv_name, math.nan, False)
+
+
+class VisualOnlySignalBackend:
+    def __init__(self):
+        self.label = "Visual only"
+        self.pv_name = "none"
+
+    def read(self) -> SignalReading:
+        return SignalReading(self.label, self.pv_name, math.nan, True)
 
 
 class MirrorController:
@@ -594,6 +604,8 @@ def build_signal_backend(
     manual_pv: str | None,
     factory: PVFactory,
 ) -> object:
+    if preset_key == "visual_only" or manual_pv == "none":
+        return VisualOnlySignalBackend()
     if manual_pv:
         return SignalBackend(manual_pv, manual_pv, factory)
     if preset_key and preset_key in SIGNAL_PRESETS:

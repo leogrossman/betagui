@@ -4,9 +4,30 @@ Standalone control-room GUI for **laser-mirror steering, angle scans, recovery, 
 
 This folder lives next to `SSMB_experiment/` on purpose. The goal is one `git pull` in the control room, with the mirror tool kept modular enough that it can evolve independently.
 
+## Quick use guide
+
+Most control-room use now starts with coarse visual recovery, not a fine beam-overlap optimization.
+
+```bash
+cd /path/to/betagui/laser_mirrors
+python3 laser_mirrors_gui.py
+```
+
+By default this enables real EPICS motor writes. Use `--safe-mode` for readback-only checks, or `--demo-mode` away from EPICS.
+
+Recommended coarse workflow:
+
+1. In `Overview`, click `Capture current RBV`.
+2. Click `Use coarse recovery defaults`.
+3. Open `Position search`.
+4. Search `mirror2` first with a bounded spiral. Typical coarse values are 100 step increments and 1500-2000 step outer radius.
+5. Click `Pause` as soon as the laser is visible. Save the motor state. Click `Resume` if you want the search to continue.
+6. Open `Two-mirror scan` for the strip scan that checks angle overlap around the visible position.
+7. Use `Manual control` for single-axis nudges; it shows all four live motor readbacks and uses the same logged motion path as scans.
+
 ## What this tool is for
 
-Carsten's measurement idea is:
+The standard measurement idea is:
 
 - vary the **interaction angle** of the laser at the undulator, usually in one plane at a time
 - hold the **interaction point in space** as fixed as possible with the second mirror
@@ -30,9 +51,9 @@ The tool is organized around two standard jobs:
    - use the `Angle scan` tab
    - run a vertical-only or horizontal-only compensated scan
    - use the best position from step 1 as your center/reference
-3. **Run the diagonal overlap scan from the reference figure style**
+3. **Run the diagonal two-mirror overlap scan**
    - move to the best position first
-   - use the `Overlap scan` tab
+   - use the `Two-mirror scan` tab
    - choose `vertical` or `horizontal`
    - choose which mirror provides the fixed strip coordinate
    - step that mirror slightly above and below the current best position
@@ -55,7 +76,7 @@ The tool also includes:
 
 The mirror controller/IOC has already shown instability in the past. This tool is intentionally conservative:
 
-- default real mode is **read-only** unless `--write-mode` is used
+- default real mode is **write-enabled** so `python3 laser_mirrors_gui.py` works directly in the control room
 - `--safe-mode` means **real EPICS readback/signal, but no motor writes**
 - `--demo-mode` means **fully offline simulated motors and simulated signal**
 - all real moves are split into small EPICS `.VAL` ramps
@@ -73,15 +94,15 @@ Important:
 
 Recommended commissioning pattern:
 
-1. start in read-only mode
+1. start with `--safe-mode` if you only want readback checks
 2. check live readbacks and alarm fields
 3. capture current RBV as reference
 4. preview scan commands
-5. only then enable `--write-mode`
+5. restart without `--safe-mode` when the preview looks sensible
 6. use `Position search` first to find the best mirror position
 7. use `local refine` if needed to tighten around the best point
 8. then start with a small `vertical_only` scan in a primary solve mode
-9. if you want the figure-style strip map, use the `Overlap scan` tab after moving to the current best position
+9. if you want the two-mirror strip map, use the `Two-mirror scan` tab after moving to the current best position
 10. check the `Optics / Geometry` tab for the step-scale estimate before committing to a larger span
 
 ### If IOC HLM/LLM are broken
@@ -96,11 +117,11 @@ Recommended control-room sequence when this happens:
 1. start with `--safe-mode`
 2. verify the current RBVs match the actual working mirror position
 3. in `Overview`, either:
-   - click `Seed around current RBV ±250`, or
+   - click `Seed around current RBV ±5000`, or
    - enter the real manual LLM/HLM values yourself
 4. enable `Use manual motor limits`
 5. click `Reconnect backends`
-6. preview the scan again before using `--write-mode`
+6. preview the scan again before running without `--safe-mode`
 
 The motor table now shows the *effective* LLM/HLM and whether they came from the IOC or the manual override.
 
@@ -117,6 +138,12 @@ Control room, real writes:
 
 ```bash
 cd /path/to/betagui/laser_mirrors
+python3 laser_mirrors_gui.py
+```
+
+The explicit form still works:
+
+```bash
 python3 laser_mirrors_gui.py --write-mode
 ```
 
@@ -230,7 +257,7 @@ For the `Overlap scan` tab the plotted coordinates are different on purpose:
 - `y` axis = mirror 2 deflection angle in the chosen plane
 - point color = measured signal average at that strip point
 
-This matches the Fig.-7 style strip logic better:
+This matches the two-mirror strip-scan logic:
 
 - keep one mirror angle fixed for a strip
 - sweep the other mirror angle across it
@@ -281,11 +308,7 @@ So the result is a family of strips in `(deflection angle 1, deflection angle 2)
 
 ### Which solve mode is the literal fixed-position angle scan?
 
-Carsten's wording was:
-
-> vary one mirror angle and keep the same point in space with the other mirror.
-
-That means the most literal implementation is **not** `two_mirror_target`.
+For a fixed-position angle scan, vary one mirror angle and counter-steer with the other mirror to keep the same point in space. That means the most literal implementation is **not** `two_mirror_target`.
 The most literal implementation is one of the **primary** modes:
 
 - `mirror1_primary`
@@ -322,7 +345,7 @@ That means the most likely first commissioning settings are:
 The 2D mode is still useful, but it is better understood as an extension:
 
 - use it when you want the full 2D response landscape
-- not when you want the strictest reading of Carsten's original request
+- not when you want the strictest fixed-position one-plane scan
 
 ### Recommended tab sequence in the control room
 
@@ -535,7 +558,7 @@ Then:
 2. inspect motor table alarms and RBVs
 3. `Capture current RBV as reference`
 4. `Preview commands`
-5. restart with `--write-mode` only when the preview looks sensible
+5. continue in the default write-enabled mode only when the preview looks sensible
 
 Recommended first scan sequence:
 
@@ -551,7 +574,7 @@ Recommended first scan sequence:
 After a horizontal-only run and a vertical-only run in the same GUI session:
 
 - the angle canvas can combine them into a quasi-2D cross map
-- this is a good compromise when you want something Fig. 7-like without committing immediately to a full 2D raster
+- this is a good compromise when you want a quick two-axis picture without committing immediately to a full 2D raster
 
 ## Output
 
@@ -638,7 +661,7 @@ Be honest before beam time:
 |---|---|
 | Motor sign convention of all four axes | Not fully verified |
 | `µrad / step` calibration on the live controller | Not fully verified |
-| Exact best default solve mode for Carsten's scan | Not fully verified |
+| Exact best default solve mode for the fixed-position angle scan | Not fully verified |
 | Whether `DMOV=1` is always a sufficient settle indicator | Not fully verified |
 | Maximum safe command rate before IOC/controller stress | Not fully verified |
 | Separate encoder PV mapping for live GUI monitoring | Not fully verified |
@@ -651,8 +674,8 @@ Be honest before beam time:
 | Feature | Status | Notes |
 |---|---|---|
 | Real EPICS motor-record backend | Implemented | Uses `.VAL/.RBV/.DMOV/.STOP` |
-| Read-only by default | Implemented | `--write-mode` required for real writes |
-| Safe mode | Implemented | Simulated motors + simulated signal |
+| Write-enabled default launcher | Implemented | `python3 laser_mirrors_gui.py` enables real writes |
+| Safe mode | Implemented | Real EPICS readback/signal, motor writes disabled |
 | Real signal presets | Implemented | P1, P3, QPD sigma and center |
 | Manual control | Implemented | Nudge, absolute move, emergency stop |
 | Save/restore current motor state | Implemented | JSON recovery file |

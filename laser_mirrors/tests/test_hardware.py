@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from laser_mirrors_app.config import ControllerConfig
-from laser_mirrors_app.hardware import MirrorController, PVFactory, SignalBackend, build_signal_backend
+from laser_mirrors_app.hardware import MirrorController, PVFactory, SignalBackend, VisualOnlySignalBackend, build_signal_backend
 
 
 class HardwareTests(unittest.TestCase):
@@ -27,6 +27,14 @@ class HardwareTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertTrue(errors)
 
+    def test_default_limits_allow_coarse_2000_step_moves(self) -> None:
+        config = ControllerConfig(safe_mode=True)
+        controller = MirrorController(config, PVFactory(True))
+        controller.reference_steps = {"m1_horizontal": 0.0, "m1_vertical": 0.0, "m2_horizontal": 0.0, "m2_vertical": 0.0}
+        targets = {"m1_horizontal": 0.0, "m1_vertical": 0.0, "m2_horizontal": 2000.0, "m2_vertical": -2000.0}
+        ok, errors = controller.validate_targets(targets)
+        self.assertTrue(ok, errors)
+
     def test_move_absolute_group_updates_safe_mode_rbv(self) -> None:
         config = ControllerConfig(safe_mode=True, max_step_per_put=100.0, inter_put_delay_s=0.0, settle_s=0.0, max_delta_from_reference=500.0)
         controller = MirrorController(config, PVFactory(True))
@@ -40,6 +48,13 @@ class HardwareTests(unittest.TestCase):
     def test_build_signal_backend_does_not_simulate_main_gui_signal(self) -> None:
         backend = build_signal_backend(False, "p1_h1_avg", None, PVFactory(True))
         self.assertIsInstance(backend, SignalBackend)
+
+    def test_visual_only_signal_backend_does_not_require_pv(self) -> None:
+        backend = build_signal_backend(False, "visual_only", None, PVFactory(True))
+        self.assertIsInstance(backend, VisualOnlySignalBackend)
+        reading = backend.read()
+        self.assertTrue(reading.ok)
+        self.assertEqual(reading.pv, "none")
 
     def test_completion_tolerance_has_margin(self) -> None:
         factory = PVFactory(True)

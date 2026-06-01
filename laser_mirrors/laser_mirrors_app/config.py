@@ -20,7 +20,7 @@ class GeometryConfig:
 @dataclass
 class ControllerConfig:
     safe_mode: bool = False
-    write_mode: bool = False
+    write_mode: bool = True
     output_root: str = "laser_mirror_runs"
     state_file_path: str = "src_materials/MirrorControl/mirror_state.ini"
     motor_recovery_path: str = "laser_mirror_motor_state.json"
@@ -33,22 +33,22 @@ class ControllerConfig:
     signal_label: str = "P1 avg"
     p1_poll_interval_ms: int = 300
     p1_average_samples: int = 30
-    max_step_per_put: float = 8.0
-    inter_put_delay_s: float = 0.35
-    wait_timeout_s: float = 30.0
-    settle_s: float = 0.8
-    max_delta_from_reference: float = 500.0
-    max_absolute_move_steps: float = 1200.0
+    max_step_per_put: float = 100.0
+    inter_put_delay_s: float = 0.05
+    wait_timeout_s: float = 15.0
+    settle_s: float = 0.05
+    max_delta_from_reference: float = 5000.0
+    max_absolute_move_steps: float = 5000.0
     use_manual_motor_limits: bool = False
     ignore_invalid_ioc_limits: bool = True
-    m1_vertical_llm: float = -500.0
-    m1_vertical_hlm: float = 500.0
-    m1_horizontal_llm: float = -500.0
-    m1_horizontal_hlm: float = 500.0
-    m2_vertical_llm: float = -500.0
-    m2_vertical_hlm: float = 500.0
-    m2_horizontal_llm: float = -500.0
-    m2_horizontal_hlm: float = 500.0
+    m1_vertical_llm: float = -5000.0
+    m1_vertical_hlm: float = 5000.0
+    m1_horizontal_llm: float = -5000.0
+    m1_horizontal_hlm: float = 5000.0
+    m2_vertical_llm: float = -5000.0
+    m2_vertical_hlm: float = 5000.0
+    m2_horizontal_llm: float = -5000.0
+    m2_horizontal_hlm: float = 5000.0
     preview_required: bool = True
     alarm_lockout: bool = True
     passive_log_enabled: bool = True
@@ -72,18 +72,23 @@ class ScanConfig:
     span_angle_y_urad: float = 50.0
     points_x: int = 9
     points_y: int = 9
-    dwell_s: float = 1.0
-    p1_samples_per_point: int = 5
+    dwell_s: float = 0.05
+    p1_samples_per_point: int = 1
     serpentine: bool = True
     objective: str = "max"
     solve_mode: str = "mirror1_primary"
     offset_x_mm: float = 0.0
     offset_y_mm: float = 0.0
-    spiral_step_x: float = 6.0
-    spiral_step_y: float = 8.0
-    spiral_turns: int = 20
+    spiral_step_x: float = 100.0
+    spiral_step_y: float = 100.0
+    spiral_turns: int = 60
+    spiral_radius_x: float = 1500.0
+    spiral_radius_y: float = 1500.0
     spiral_target: str = "mirror2"
-    spiral_strategy: str = "classic_spiral"
+    spiral_strategy: str = "bounded_spiral"
+    overlap_horizontal_step_steps: float = 100.0
+    overlap_vertical_step_steps: float = 200.0
+    overlap_angle_span_urad: float = 300.0
 
 
 @dataclass

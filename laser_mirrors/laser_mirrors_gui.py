@@ -10,7 +10,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="SSMB laser mirror scan tool")
     parser.add_argument("--safe-mode", action="store_true", help="Use real EPICS readback/signal, but keep motor writes disabled")
     parser.add_argument("--demo-mode", action="store_true", help="Run fully offline with simulated motors and simulated signal")
-    parser.add_argument("--write-mode", action="store_true", help="Enable real motor writes")
+    parser.add_argument("--write-mode", action="store_true", help="Enable real motor writes (default unless --safe-mode or --demo-mode is used)")
     parser.add_argument("--config", default="laser_mirrors_config.json", help="Path to JSON config file")
     return parser
 
@@ -25,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
         forwarded.append("--safe-mode")
     if args.demo_mode:
         forwarded.append("--demo-mode")
-    if args.write_mode:
+    if args.write_mode or (not args.safe_mode and not args.demo_mode):
         forwarded.append("--write-mode")
     forwarded.extend(["--config", args.config])
     return gui_main(forwarded)

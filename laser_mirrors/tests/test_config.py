@@ -15,6 +15,13 @@ class ConfigTests(unittest.TestCase):
     def test_default_scan_mode_is_vertical_only(self) -> None:
         loaded = AppConfig()
         self.assertEqual(loaded.scan.mode, "vertical_only")
+        self.assertTrue(loaded.controller.write_mode)
+        self.assertEqual(loaded.controller.max_step_per_put, 100.0)
+        self.assertEqual(loaded.controller.max_delta_from_reference, 5000.0)
+        self.assertEqual(loaded.controller.max_absolute_move_steps, 5000.0)
+        self.assertEqual(loaded.scan.spiral_radius_x, 1500.0)
+        self.assertEqual(loaded.scan.overlap_vertical_step_steps, 200.0)
+        self.assertEqual(loaded.scan.overlap_horizontal_step_steps, 100.0)
 
     def test_load_ignores_unknown_keys_from_older_configs(self) -> None:
         root = Path(tempfile.mkdtemp())

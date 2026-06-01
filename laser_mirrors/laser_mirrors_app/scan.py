@@ -44,6 +44,22 @@ def rectangular_spiral(step_x: float, step_y: float, turns: int) -> list[tuple[f
     return points
 
 
+def bounded_rectangular_spiral(step_x: float, step_y: float, radius_x: float, radius_y: float, max_turns: int) -> list[tuple[float, float]]:
+    """Rectangular spiral clipped to a requested outer search radius."""
+
+    radius_x = abs(float(radius_x))
+    radius_y = abs(float(radius_y))
+    if radius_x <= 0.0 and radius_y <= 0.0:
+        return rectangular_spiral(step_x, step_y, max_turns)
+    raw = rectangular_spiral(step_x, step_y, max_turns)
+    points = [
+        (x, y)
+        for x, y in raw
+        if (radius_x <= 0.0 or abs(x) <= radius_x) and (radius_y <= 0.0 or abs(y) <= radius_y)
+    ]
+    return points or [(0.0, 0.0)]
+
+
 def build_angle_scan_points(config: AppConfig, geometry: LaserMirrorGeometry, reference_steps: dict[str, float]) -> list[ScanPoint]:
     scan = config.scan
     xs = linspace(scan.center_angle_x_urad, scan.span_angle_x_urad, scan.points_x)
@@ -95,6 +111,7 @@ def build_overlap_scan_points(
     angle_points: int,
     angle_span_urad: float,
     solve_mode: Literal["mirror1_primary", "mirror2_primary", "two_mirror_target"],
+    diagonal_direction: Literal["upper_left_to_lower_right", "lower_left_to_upper_right"] = "upper_left_to_lower_right",
 ) -> list[ScanPoint]:
     axis_code = "x" if axis == "horizontal" else "y"
     motor_axis = "horizontal" if axis == "horizontal" else "vertical"
@@ -106,6 +123,7 @@ def build_overlap_scan_points(
     position_offsets = sorted(
         linspace(0.0, position_span, max(1, int(position_points))),
         key=lambda value: geometry.steps_to_angle_delta(value, axis_code, fixed_mirror),
+        reverse=diagonal_direction == "upper_left_to_lower_right",
     )
     points: list[ScanPoint] = []
     index = 0
@@ -125,6 +143,8 @@ def build_overlap_scan_points(
             sweep_values = sorted(linspace(center_mirror1_urad, float(angle_span_urad), max(1, int(angle_points))))
         else:
             sweep_values = sorted(linspace(center_mirror2_urad, float(angle_span_urad), max(1, int(angle_points))))
+        if diagonal_direction == "upper_left_to_lower_right":
+            sweep_values.reverse()
 
         for sweep_angle_urad in sweep_values:
             if sweep_mirror == 1:
@@ -161,7 +181,16 @@ def build_spiral_scan_points(
     center_targets: MotorTargets | None = None,
     step_scale: float = 1.0,
 ) -> list[ScanPoint]:
-    coords = rectangular_spiral(config.scan.spiral_step_x, config.scan.spiral_step_y, config.scan.spiral_turns)
+    if config.scan.spiral_strategy == "bounded_spiral":
+        coords = bounded_rectangular_spiral(
+            config.scan.spiral_step_x,
+            config.scan.spiral_step_y,
+            config.scan.spiral_radius_x,
+            config.scan.spiral_radius_y,
+            config.scan.spiral_turns,
+        )
+    else:
+        coords = rectangular_spiral(config.scan.spiral_step_x, config.scan.spiral_step_y, config.scan.spiral_turns)
     target_pair = target_pair or config.scan.spiral_target
     center = center_targets.as_dict() if center_targets is not None else dict(reference_steps)
     points: list[ScanPoint] = []
@@ -319,6 +348,7 @@ class ScanRunner:
         self.output_root = output_root
         self._thread: threading.Thread | None = None
         self._stop_requested = threading.Event()
+        self._pause_requested = threading.Event()
         self.measurements: list[MeasurementRecord] = []
         self.command_log: list[CommandRecord] = []
         self.session_dir: Path | None = None
@@ -330,8 +360,18 @@ class ScanRunner:
     def request_stop(self) -> None:
         self._stop_requested.set()
 
+    def request_pause(self) -> None:
+        self._pause_requested.set()
+
+    def resume(self) -> None:
+        self._pause_requested.clear()
+
+    def is_paused(self) -> bool:
+        return self._pause_requested.is_set()
+
     def clear_stop(self) -> None:
         self._stop_requested.clear()
+        self._pause_requested.clear()
 
     def join(self, timeout: float | None = None) -> None:
         if self._thread is not None:
@@ -426,6 +466,8 @@ class ScanRunner:
                 if self._stop_requested.is_set():
                     self.debug("Stop requested before next point. Ending scan gracefully.")
                     break
+                if not self._wait_if_paused():
+                    break
                 targets = point.targets.as_dict()
                 self.debug(
                     "Point "
@@ -443,6 +485,8 @@ class ScanRunner:
                 if not moved:
                     self.debug(f"Move aborted at point {point.index + 1}/{total_points}.")
                     break
+                if not self._wait_if_paused():
+                    break
                 if hasattr(self.signal_backend, "update_target") and point.angle_x_urad == point.angle_x_urad:
                     self.signal_backend.update_target(point.angle_x_urad, point.angle_y_urad)
                 dwell_s = max(0.0, self.config.scan.dwell_s)
@@ -452,6 +496,10 @@ class ScanRunner:
                     if self._stop_requested.is_set():
                         self.debug("Stop requested during dwell. Ending scan gracefully after current move.")
                         break
+                    if self._pause_requested.is_set():
+                        if not self._wait_if_paused():
+                            break
+                        end_time = time.perf_counter() + dwell_s
                     time.sleep(min(0.05, max(0.0, end_time - time.perf_counter())))
                 if self._stop_requested.is_set():
                     break
@@ -459,6 +507,8 @@ class ScanRunner:
                 for _ in range(max(1, self.config.scan.p1_samples_per_point)):
                     if self._stop_requested.is_set():
                         self.debug("Stop requested during sampling. Ending scan gracefully.")
+                        break
+                    if not self._wait_if_paused():
                         break
                     reading = self.signal_backend.read()
                     if reading.ok:
@@ -534,3 +584,15 @@ class ScanRunner:
         best = choose_best_point(self.measurements, self.config.scan.objective)
         if best is not None:
             (self.session_dir / "best_point.json").write_text(json.dumps(asdict(best), indent=2, sort_keys=True))
+
+    def _wait_if_paused(self) -> bool:
+        if not self._pause_requested.is_set():
+            return True
+        self.debug("Scan paused. Use Resume to continue or Request stop to end after the pause.")
+        while self._pause_requested.is_set():
+            if self._stop_requested.is_set():
+                self.debug("Stop requested while paused. Ending scan.")
+                return False
+            time.sleep(0.05)
+        self.debug("Scan resumed.")
+        return True
