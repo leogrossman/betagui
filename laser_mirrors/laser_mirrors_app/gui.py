@@ -5,6 +5,7 @@ import csv
 import json
 import math
 import statistics
+import sys
 import threading
 import time
 from collections import deque
@@ -24,6 +25,7 @@ from .hardware import (
     MirrorController,
     SignalBackend,
     SimulatedSignalBackend,
+    build_passive_signal_backends,
     build_signal_backend,
 )
 from .layout import default_optics_layout
@@ -49,6 +51,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--write-mode", action="store_true", help="Enable real motor writes (default unless --safe-mode or --demo-mode is used)")
     parser.add_argument("--config", default="laser_mirrors_config.json", help="Path to JSON config file")
     return parser
+
+
+def apply_launch_mode(
+    config: AppConfig,
+    force_safe_mode: bool = False,
+    force_write_mode: bool = False,
+    force_demo_mode: bool = False,
+) -> None:
+    """Apply CLI mode flags with deterministic precedence over saved config."""
+
+    if force_demo_mode or force_safe_mode:
+        config.controller.safe_mode = True
+        config.controller.write_mode = False
+    elif force_write_mode:
+        config.controller.safe_mode = False
+        config.controller.write_mode = True
 
 
 class ToolTip:
@@ -113,14 +131,12 @@ class LaserMirrorApp:
         self.config_path = config_path
         self.config = AppConfig.load(config_path)
         self.demo_mode = force_demo_mode
-        if force_demo_mode:
-            self.config.controller.safe_mode = True
-            self.config.controller.write_mode = False
-        if force_safe_mode:
-            self.config.controller.safe_mode = True
-            self.config.controller.write_mode = False
-        if force_write_mode:
-            self.config.controller.write_mode = True
+        apply_launch_mode(
+            self.config,
+            force_safe_mode=force_safe_mode,
+            force_write_mode=force_write_mode,
+            force_demo_mode=force_demo_mode,
+        )
         self.geometry = LaserMirrorGeometry(self.config.geometry)
         self.output_root = self._resolve_output_root(self.config.controller.output_root)
         self.output_root.mkdir(parents=True, exist_ok=True)
@@ -856,7 +872,9 @@ class LaserMirrorApp:
         return "p1_h1_avg"
 
     def _passive_metric_choices(self) -> list[str]:
-        return ["selected_signal"] + list(SIGNAL_PRESETS.keys())
+        return ["selected_signal"] + [
+            key for key, (_label, pv) in SIGNAL_PRESETS.items() if pv and pv != "none"
+        ]
 
     def _scan_mode_help_text(self) -> str:
         return (
@@ -1084,7 +1102,11 @@ class LaserMirrorApp:
             self.controller = MirrorController(self.config.controller, self.factory, self._log)
             self.current_reference_steps = self.controller.capture_reference()
             self.signal_backend = SimulatedSignalBackend(self.signal_label_var.get() or "Simulated signal")
-            self.passive_signal_backends = {key: SimulatedSignalBackend(label) for key, (label, _pv) in SIGNAL_PRESETS.items()}
+            self.passive_signal_backends = {
+                key: SimulatedSignalBackend(label)
+                for key, (label, pv) in SIGNAL_PRESETS.items()
+                if pv and pv != "none"
+            }
             self.scan_runner = ScanRunner(self.config, self.geometry, self.controller, self.signal_backend, self._log, self.output_root)
             self.runtime_var.set(
                 "Offline demo backend ready\n"
@@ -1099,21 +1121,34 @@ class LaserMirrorApp:
             self.factory = PVFactory(False)
             self.controller = MirrorController(self.config.controller, self.factory, self._log)
             self.current_reference_steps = self.controller.capture_reference()
+        except Exception as exc:  # noqa: BLE001
+            self._set_disconnected_controller(exc)
+            return
+
+        signal_error: str | None = None
+        try:
             self.signal_backend = build_signal_backend(
                 False,
                 self.signal_preset_var.get(),
                 self.signal_pv_var.get(),
                 self.factory,
             )
-            self.passive_signal_backends = {
-                key: SignalBackend(label, pv, self.factory)
-                for key, (label, pv) in SIGNAL_PRESETS.items()
-            }
-            if hasattr(self.signal_backend, "label"):
-                self.signal_label_var.set(getattr(self.signal_backend, "label"))
-            if hasattr(self.signal_backend, "pv_name"):
-                self.signal_pv_var.set(getattr(self.signal_backend, "pv_name"))
-            self.scan_runner = ScanRunner(self.config, self.geometry, self.controller, self.signal_backend, self._log, self.output_root)
+        except Exception as exc:  # noqa: BLE001
+            signal_error = str(exc)
+            print(f"Laser mirror signal connection failed: {exc}", file=sys.stderr, flush=True)
+            self.signal_backend = DisconnectedSignalBackend(
+                self.signal_label_var.get() or "Signal",
+                self.signal_pv_var.get() or "disconnected",
+                signal_error,
+            )
+
+        self.passive_signal_backends = build_passive_signal_backends(self.factory, self._log)
+        if hasattr(self.signal_backend, "label"):
+            self.signal_label_var.set(getattr(self.signal_backend, "label"))
+        if hasattr(self.signal_backend, "pv_name"):
+            self.signal_pv_var.set(getattr(self.signal_backend, "pv_name"))
+        self.scan_runner = ScanRunner(self.config, self.geometry, self.controller, self.signal_backend, self._log, self.output_root)
+        if signal_error is None:
             self.runtime_var.set(
                 "EPICS backend ready\n"
                 f"safe_mode={self.config.controller.safe_mode}, write_mode={self.controller.write_mode}\n"
@@ -1121,27 +1156,77 @@ class LaserMirrorApp:
                 f"output_root={self.output_root}"
             )
             self.status_var.set("Backends connected.")
-            self.reference_var.set("Reference RBV: " + ", ".join(f"{key}={value:.2f}" for key, value in self.current_reference_steps.items()))
-            self._refresh_motor_table()
-        except Exception as exc:  # noqa: BLE001
-            self.factory = None
-            self.controller = DisconnectedController(self.config.controller, str(exc), self._log)
-            self.current_reference_steps = self.controller.capture_reference()
-            self.signal_backend = DisconnectedSignalBackend(
-                self.signal_label_var.get() or "Signal",
-                self.signal_pv_var.get() or "disconnected",
-                str(exc),
+        else:
+            self.runtime_var.set(
+                "Motor EPICS backend ready; selected signal unavailable\n"
+                f"safe_mode={self.config.controller.safe_mode}, write_mode={self.controller.write_mode}\n"
+                f"signal_error={signal_error}\n"
+                f"output_root={self.output_root}"
             )
-            self.passive_signal_backends = {
-                key: DisconnectedSignalBackend(label, pv, str(exc))
-                for key, (label, pv) in SIGNAL_PRESETS.items()
-            }
-            self.scan_runner = ScanRunner(self.config, self.geometry, self.controller, self.signal_backend, self._log, self.output_root)
-            self.runtime_var.set(f"Backend connection failed; UI kept in disconnected read-only state.\nReason: {exc}")
-            self.status_var.set("Disconnected / read-only.")
-            self.reference_var.set("Reference RBV unavailable: EPICS disconnected.")
-            self._refresh_motor_table()
-            self._log(f"Backend connection failed; using disconnected read-only state: {exc}")
+            self.status_var.set("Motors connected; selected signal unavailable.")
+        self.reference_var.set("Reference RBV: " + ", ".join(f"{key}={value:.2f}" for key, value in self.current_reference_steps.items()))
+        self._refresh_motor_table()
+
+    def _set_disconnected_controller(self, exc: Exception) -> None:
+        reason = str(exc)
+        print(f"Laser mirror EPICS connection failed: {reason}", file=sys.stderr, flush=True)
+        self.factory = None
+        self.controller = DisconnectedController(self.config.controller, reason, self._log)
+        self.current_reference_steps = self.controller.capture_reference()
+        self.signal_backend = DisconnectedSignalBackend(
+            self.signal_label_var.get() or "Signal",
+            self.signal_pv_var.get() or "disconnected",
+            reason,
+        )
+        self.passive_signal_backends = {
+            key: DisconnectedSignalBackend(label, pv, reason)
+            for key, (label, pv) in SIGNAL_PRESETS.items()
+            if pv and pv != "none"
+        }
+        self.scan_runner = ScanRunner(self.config, self.geometry, self.controller, self.signal_backend, self._log, self.output_root)
+        self.runtime_var.set(f"Backend connection failed; UI kept in disconnected read-only state.\nReason: {reason}")
+        self.status_var.set("Disconnected / read-only.")
+        self.reference_var.set("Reference RBV unavailable: EPICS disconnected.")
+        self._refresh_motor_table()
+        self._log(f"Backend connection failed; using disconnected read-only state: {reason}")
+        self.root.after(
+            0,
+            lambda reason=reason: messagebox.showerror(
+                "EPICS connection failed",
+                "The laser mirror motors are not connected.\n\n"
+                f"Reason: {reason}\n\n"
+                "No motor commands will be sent. Check the terminal and EPICS environment, then use Reconnect backends.",
+            ),
+        )
+
+    def _controller_ready(self, action: str) -> bool:
+        if getattr(self.controller, "connected", True):
+            return True
+        reason = getattr(self.controller, "reason", "unknown EPICS connection error")
+        message = (
+            f"Cannot {action} because the motor backend is disconnected.\n\n"
+            f"Reason: {reason}\n\n"
+            "Check the terminal message, EPICS environment, and motor PV reachability, then use Reconnect backends."
+        )
+        self.status_var.set("Motor backend disconnected.")
+        self._log(message.replace("\n", " "))
+        messagebox.showerror("Motor backend disconnected", message)
+        return False
+
+    def _build_preview_or_report(
+        self,
+        points: list[ScanPoint],
+        reference_steps: dict[str, float],
+        action: str,
+    ) -> list[dict[str, object]] | None:
+        if not self._controller_ready(action):
+            return None
+        try:
+            return self.scan_runner.build_preview(points, reference_steps)
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"Could not build {action} preview: {exc}")
+            messagebox.showerror("Preview unavailable", f"Could not build {action} preview.\n\n{exc}")
+            return None
 
     def _restore_legacy_state(self) -> None:
         snapshot = load_state(self.legacy_state_path)
@@ -1266,13 +1351,17 @@ class LaserMirrorApp:
     def _preview_angle_scan(self) -> None:
         self._pull_ui_into_config()
         points = build_angle_scan_points(self.config, self.geometry, self.current_reference_steps)
-        preview = self.scan_runner.build_preview(points, self.current_reference_steps)
+        preview = self._build_preview_or_report(points, self.current_reference_steps, "preview the angle scan")
+        if preview is None:
+            return
         self._show_scan_preview(preview, "Angle scan preview")
 
     def _preview_spiral_scan(self) -> None:
         self._pull_ui_into_config()
         points = build_spiral_scan_points(self.config, self.current_reference_steps, target_pair=self.spiral_target_var.get())
-        preview = self.scan_runner.build_preview(points, self.current_reference_steps)
+        preview = self._build_preview_or_report(points, self.current_reference_steps, "preview the position search")
+        if preview is None:
+            return
         self._show_scan_preview(preview, "Position search preview")
 
     def _show_scan_preview(self, preview_rows: list[dict[str, object]], title: str) -> bool:
@@ -1303,15 +1392,21 @@ class LaserMirrorApp:
     def _start_angle_scan(self) -> None:
         self._pull_ui_into_config()
         points = build_angle_scan_points(self.config, self.geometry, self.current_reference_steps)
-        preview = self.scan_runner.build_preview(points, self.current_reference_steps)
+        preview = self._build_preview_or_report(points, self.current_reference_steps, "start the angle scan")
+        if preview is None:
+            return
         if self.config.controller.preview_required and not self._show_scan_preview(preview, "Approve angle scan"):
             return
         self._start_scan_common("angle")
 
     def _start_spiral_scan(self) -> None:
         self._refresh_active_signal_backend()
+        if not self._controller_ready("start the position search"):
+            return
         points = build_spiral_scan_points(self.config, self.current_reference_steps, target_pair=self.spiral_target_var.get())
-        preview = self.scan_runner.build_preview(points, self.current_reference_steps)
+        preview = self._build_preview_or_report(points, self.current_reference_steps, "start the position search")
+        if preview is None:
+            return
         if self.config.controller.preview_required and not self._show_scan_preview(preview, "Approve position search"):
             return
         self.pending_refine_preview = []
@@ -1323,7 +1418,9 @@ class LaserMirrorApp:
         points = self._build_local_refine_points()
         if points is None:
             return
-        preview = self.scan_runner.build_preview(points, self.current_reference_steps)
+        preview = self._build_preview_or_report(points, self.current_reference_steps, "preview the local refine scan")
+        if preview is None:
+            return
         self.pending_refine_preview = points
         self._draw_spiral_map()
         self._show_scan_preview(preview, "Local refine preview")
@@ -1333,7 +1430,9 @@ class LaserMirrorApp:
         points = self._build_local_refine_points()
         if points is None:
             return
-        preview = self.scan_runner.build_preview(points, self.current_reference_steps)
+        preview = self._build_preview_or_report(points, self.current_reference_steps, "start the local refine scan")
+        if preview is None:
+            return
         if self.config.controller.preview_required and not self._show_scan_preview(preview, "Approve local refine"):
             return
         self.pending_refine_preview = points
@@ -1393,14 +1492,22 @@ class LaserMirrorApp:
         )
 
     def _preview_overlap_scan(self) -> None:
+        if not self._controller_ready("preview the two-mirror scan"):
+            return
         points = self._build_overlap_points()
-        preview = self.scan_runner.build_preview(points, self.overlap_reference_steps)
+        preview = self._build_preview_or_report(points, self.overlap_reference_steps, "preview the two-mirror scan")
+        if preview is None:
+            return
         self._show_scan_preview(preview, "Overlap scan preview")
 
     def _start_overlap_scan(self) -> None:
         self._refresh_active_signal_backend()
+        if not self._controller_ready("start the two-mirror scan"):
+            return
         points = self._build_overlap_points()
-        preview = self.scan_runner.build_preview(points, self.overlap_reference_steps)
+        preview = self._build_preview_or_report(points, self.overlap_reference_steps, "start the two-mirror scan")
+        if preview is None:
+            return
         if self.config.controller.preview_required and not self._show_scan_preview(preview, "Approve overlap scan"):
             return
         if self.scan_runner.is_running():

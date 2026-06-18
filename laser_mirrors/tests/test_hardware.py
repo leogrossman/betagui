@@ -2,13 +2,23 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from laser_mirrors_app.config import ControllerConfig
-from laser_mirrors_app.hardware import MirrorController, PVFactory, SignalBackend, VisualOnlySignalBackend, build_signal_backend
+from laser_mirrors_app.hardware import (
+    DisconnectedController,
+    MirrorController,
+    PVFactory,
+    SignalBackend,
+    VisualOnlySignalBackend,
+    build_passive_signal_backends,
+    build_signal_backend,
+)
 
 
 class HardwareTests(unittest.TestCase):
@@ -55,6 +65,73 @@ class HardwareTests(unittest.TestCase):
         reading = backend.read()
         self.assertTrue(reading.ok)
         self.assertEqual(reading.pv, "none")
+
+    def test_passive_backends_exclude_visual_only_empty_pv(self) -> None:
+        backends = build_passive_signal_backends(PVFactory(True))
+        self.assertNotIn("visual_only", backends)
+        self.assertTrue(backends)
+        self.assertTrue(all(backend.pv_name for backend in backends.values()))
+
+    def test_real_epics_factory_never_receives_empty_passive_pv_name(self) -> None:
+        created_names = []
+
+        class StrictPV:
+            def __init__(self, name, connection_timeout=1.0):
+                if not name:
+                    raise ValueError("empty EPICS PV name")
+                created_names.append(name)
+
+        fake_epics = types.SimpleNamespace(PV=StrictPV)
+        with patch.dict(sys.modules, {"epics": fake_epics}):
+            factory = PVFactory(False)
+            backends = build_passive_signal_backends(factory)
+
+        self.assertNotIn("", created_names)
+        self.assertNotIn("none", created_names)
+        self.assertEqual(len(backends), len(created_names))
+        self.assertNotIn("visual_only", backends)
+
+    def test_real_epics_connection_bundle_sees_all_four_motors(self) -> None:
+        class FakePV:
+            def __init__(self, name, connection_timeout=1.0):
+                if not name or name == "none":
+                    raise ValueError(f"invalid EPICS PV name: {name!r}")
+                self.name = name
+
+            def get(self, timeout=None):
+                if self.name.endswith(".DMOV"):
+                    return 1
+                if self.name.endswith(".DESC"):
+                    return self.name.split(".", 1)[0]
+                if self.name.endswith(".EGU"):
+                    return "steps"
+                if self.name.endswith(".STAT") or self.name.endswith(".SEVR"):
+                    return "NO_ALARM"
+                if self.name.endswith(".RTYP"):
+                    return "motor"
+                return 0.0
+
+            def put(self, value, wait=False, timeout=None):
+                return True
+
+        fake_epics = types.SimpleNamespace(PV=FakePV)
+        with patch.dict(sys.modules, {"epics": fake_epics}):
+            factory = PVFactory(False)
+            controller = MirrorController(ControllerConfig(write_mode=False), factory)
+            signal = build_signal_backend(False, "visual_only", "none", factory)
+            passive = build_passive_signal_backends(factory)
+
+        self.assertEqual(
+            set(controller.current_steps()),
+            {"m1_horizontal", "m1_vertical", "m2_horizontal", "m2_vertical"},
+        )
+        self.assertIsInstance(signal, VisualOnlySignalBackend)
+        self.assertNotIn("visual_only", passive)
+
+    def test_disconnected_controller_preview_fails_cleanly(self) -> None:
+        controller = DisconnectedController(ControllerConfig(), "test connection failure")
+        with self.assertRaisesRegex(RuntimeError, "EPICS motor backend unavailable"):
+            controller.plan_absolute_move({}, {})
 
     def test_completion_tolerance_has_margin(self) -> None:
         factory = PVFactory(True)

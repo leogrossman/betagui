@@ -125,6 +125,17 @@ Recommended control-room sequence when this happens:
 
 The motor table now shows the *effective* LLM/HLM and whether they came from the IOC or the manual override.
 
+### If the GUI says the motor backend is disconnected
+
+The application now prints the underlying EPICS exception in the terminal and shows it in a dialog. It will not attempt scan previews or motor commands while disconnected.
+
+1. Read the `Laser mirror EPICS connection failed:` line in the terminal.
+2. Confirm the four motor bases `MNF1C1L2RP`, `MNF1C2L2RP`, `MNF2C1L2RP`, and `MNF2C2L2RP` are reachable.
+3. Confirm the control-room EPICS environment is loaded.
+4. Click `Reconnect backends` after correcting the connection problem.
+
+`Visual only` is a UI mode and does not create an EPICS signal PV. Selecting it must not disconnect the motor controller.
+
 ## Launch modes
 
 Control room, read-only:

@@ -35,7 +35,7 @@ MANUAL_LIMIT_FIELD_MAP = {
 
 
 SIGNAL_PRESETS = {
-    "visual_only": ("Visual only / no signal PV", ""),
+    "visual_only": ("Visual only / no signal PV", "none"),
     "p1_h1_raw": ("P1 raw", "SCOPE1ZULP:h1p1:rdAmpl"),
     "p1_h1_avg": ("P1 avg", "SCOPE1ZULP:h1p1:rdAmplAv"),
     "p1_h1_std": ("P1 std", "SCOPE1ZULP:h1p1:rdAmplDev"),
@@ -270,6 +270,7 @@ class MirrorController:
         self.motors = {key: EpicsMotor(key, pv, factory) for key, pv in MOTOR_PVS.items()}
         self.reference_steps = self.capture_reference()
         self.last_move_error: str | None = None
+        self.connected = True
 
     def capture_reference(self) -> dict[str, float]:
         reference = {}
@@ -528,6 +529,7 @@ class DisconnectedController:
         self.reason = reason
         self.debug = debug or (lambda message: None)
         self.write_mode = False
+        self.connected = False
         self.reference_steps = {key: math.nan for key in MOTOR_PVS}
         self.last_move_error: str | None = reason
 
@@ -575,6 +577,13 @@ class DisconnectedController:
     def validate_targets(self, targets: dict[str, float]) -> tuple[bool, list[str]]:
         return False, [f"EPICS backend unavailable: {self.reason}"]
 
+    def plan_absolute_move(
+        self,
+        current_steps: dict[str, float],
+        targets: dict[str, float],
+    ) -> dict[str, list[PreviewCommand]]:
+        raise RuntimeError(f"EPICS motor backend unavailable: {self.reason}")
+
     def completion_tolerance_steps(self) -> float:
         """Conservative completion tolerance for real motor RBV checks.
 
@@ -613,3 +622,25 @@ def build_signal_backend(
         return SignalBackend(label, pv, factory)
     label, pv = SIGNAL_PRESETS["p1_h1_avg"]
     return SignalBackend(label, pv, factory)
+
+
+def build_passive_signal_backends(
+    factory: PVFactory,
+    on_error: Callable[[str], None] | None = None,
+) -> dict[str, SignalBackend]:
+    """Build only presets backed by real, non-empty EPICS PV names.
+
+    UI-only choices such as ``visual_only`` share the preset table so they can
+    appear in the selector, but they must never be passed to ``epics.PV``.
+    """
+
+    backends: dict[str, SignalBackend] = {}
+    for key, (label, pv) in SIGNAL_PRESETS.items():
+        if not pv or pv == "none":
+            continue
+        try:
+            backends[key] = SignalBackend(label, pv, factory)
+        except Exception as exc:  # noqa: BLE001
+            if on_error is not None:
+                on_error(f"Optional passive signal {key} ({pv}) unavailable: {exc}")
+    return backends
