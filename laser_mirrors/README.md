@@ -58,8 +58,8 @@ The tool is organized around two standard jobs:
    - choose the pattern: perpendicular cross-lines, horizontal strips, or vertical strips
    - choose how many points to sample along the diagonal center line
    - choose how many points to sample across that line and set the cross-line spacing
-   - use the fixed-position slope estimate, invert the slope, or type a custom slope
-   - leave `Update slope when plane changes` on if you want the GUI to load the horizontal/vertical slope sign automatically
+   - use the negative fixed-position slope estimate, invert the slope, or type a custom slope
+   - leave serpentine strip order on for the shortest motor path
    - load the scan start from current RBV, captured reference, or the current optimum
    - use the live estimate to check approximate scan time, motor range, beam-position offset, and angle range before starting
    - inspect the mirror-1 vs mirror-2 deflection-angle map, the marked start point, the requested diagonal, the fitted measured diagonal, and the recommended optimum
@@ -322,12 +322,16 @@ It builds a diagonal center line in mirror-angle space and samples around it:
    - `vertical_strips` keeps mirror 1 fixed inside each strip and sweeps mirror 2; use it mainly as an orthogonal diagnostic if horizontal strips miss the useful response direction
 4. choose the number of center-line points and the line span
 5. choose the number of cross-line points and the cross-line spacing
-6. use the fixed-position slope estimate or set a custom positive/negative slope
+6. use the negative fixed-position slope estimate or set a custom positive/negative slope
 7. load the scan start from current RBV, captured reference, or optimum
 
 The result is a focused diagonal family in `(mirror 1 deflection angle, mirror 2 deflection angle)` space. The live estimate shows point count, approximate time, angle range, motor target range around the chosen start, and approximate beam-position offset before the scan is run.
 
-The fixed-position slope magnitude is set mainly by the mirror-to-undulator distances, so horizontal and vertical are similar in size. The sign can differ by plane because mirror 2 has a separate horizontal/vertical sign convention. With the current geometry defaults, vertical is about `+1.38` and horizontal is about `-1.38`.
+The fixed-position slope magnitude is set mainly by the mirror-to-undulator distances, so horizontal and vertical are similar in size. For the current beamline workflow the preset uses the negative branch in both planes, about `-1.38`.
+
+`right_to_left` and `left_to_right` measure the same points; they only choose which end of the diagonal is visited first. Serpentine strip order is usually most efficient because every other strip is swept in reverse, avoiding a flyback to the same edge before the next strip. Turn serpentine off only when you deliberately want every strip approached from the same side to check backlash or hysteresis.
+
+After an overlap scan, the GUI loads the recommended optimum into the next two-mirror scan start fields and prints all four motor PV targets with deltas from the previous start. Running the same scan again from that loaded start is the intended verification step.
 
 ### Which solve mode is the literal fixed-position angle scan?
 

@@ -224,7 +224,7 @@ class LaserMirrorApp:
         self.overlap_diagonal_var = tk.StringVar(value="right_to_left")
         self.overlap_slope_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_diagonal_slope", fixed_position_diagonal_slope(self.geometry, "vertical")))
         self.overlap_pattern_var = tk.StringVar(value=getattr(self.config.scan, "overlap_pattern", "horizontal_strips"))
-        self.overlap_auto_plane_defaults_var = tk.BooleanVar(value=True)
+        self.overlap_serpentine_var = tk.BooleanVar(value=getattr(self.config.scan, "overlap_serpentine", True))
         self.overlap_status_var = tk.StringVar(value="No overlap scan run yet.")
         self.overlap_estimate_var = tk.StringVar(value="Enter scan settings to see the estimated range and time.")
         self.overlap_start_vars: dict[str, tk.DoubleVar] = {key: tk.DoubleVar(value=0.0) for key in MOTOR_PVS}
@@ -609,9 +609,9 @@ class LaserMirrorApp:
         )
         self._add_labeled_combo(pattern_box, "Scan direction", self.overlap_diagonal_var, ["right_to_left", "left_to_right"], 2)
         self._add_labeled_entry(pattern_box, "Diagonal slope m2/m1", self.overlap_slope_var, 3)
-        ttk.Button(pattern_box, text="Use fixed-position slope", command=self._set_overlap_physical_slope).grid(row=4, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(pattern_box, text="Use negative fixed-position slope", command=self._set_overlap_physical_slope).grid(row=4, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(pattern_box, text="Invert slope", command=self._invert_overlap_slope).grid(row=4, column=1, sticky="ew", pady=(8, 0))
-        ttk.Checkbutton(pattern_box, text="Update slope when plane changes", variable=self.overlap_auto_plane_defaults_var).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Checkbutton(pattern_box, text="Serpentine strip order", variable=self.overlap_serpentine_var).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         size_box = ttk.LabelFrame(controls, text="Scan size", padding=10)
         size_box.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
@@ -914,6 +914,7 @@ class LaserMirrorApp:
             self.plot_dot_radius_var,
             self.overlap_axis_var,
             self.overlap_pattern_var,
+            self.overlap_serpentine_var,
             self.overlap_position_points_var,
             self.overlap_angle_points_var,
             self.overlap_angle_span_var,
@@ -935,8 +936,6 @@ class LaserMirrorApp:
         self._refresh_plots()
 
     def _overlap_plane_changed(self) -> None:
-        if self.overlap_auto_plane_defaults_var.get():
-            self._set_overlap_physical_slope(update_config=False, announce=False)
         self._refresh_overlap_estimate()
         self._refresh_plots()
 
@@ -1045,9 +1044,10 @@ class LaserMirrorApp:
                 "• perpendicular cross-lines are still available, but they can move both motors more aggressively\n"
                 "• vertical strips are an orthogonal diagnostic: mirror 1 stays fixed inside a strip while mirror 2 sweeps\n"
                 "• sample several points along that diagonal and several points across each center point\n"
+                "• serpentine order minimizes flyback between strips; turn it off only for same-approach hysteresis checks\n"
                 "• load the scan start from current RBV, reference, optimum, or typed motor values\n"
                 "• plot the measured signal against mirror-1 and mirror-2 deflection angles\n\n"
-                "The default slope is the fixed-position ballpark from the mirror geometry. Change its magnitude or sign if the observed laser response says the useful diagonal is different. "
+                "The slope preset uses the negative fixed-position ballpark in both planes. Change its magnitude or invert it if the observed laser response says the useful diagonal is different. "
                 "The live estimate shows point count, approximate time, motor range, beam-position offset, and angle range before you start."
             ),
         )
@@ -1109,6 +1109,7 @@ class LaserMirrorApp:
         self.config.scan.overlap_line_span_urad = max(0.0, float(self.overlap_angle_span_var.get()))
         self.config.scan.overlap_diagonal_slope = float(self.overlap_slope_var.get())
         self.config.scan.overlap_pattern = self.overlap_pattern_var.get()
+        self.config.scan.overlap_serpentine = bool(self.overlap_serpentine_var.get())
         self._update_scale_summary()
         self._refresh_overlap_estimate()
 
@@ -1155,7 +1156,7 @@ class LaserMirrorApp:
         if update_config:
             self._pull_ui_into_config()
         if announce:
-            self.overlap_status_var.set(f"Using fixed-position diagonal slope m2/m1 ~= {slope:.3f}.")
+            self.overlap_status_var.set(f"Using negative fixed-position diagonal slope m2/m1 ~= {slope:.3f}.")
 
     def _invert_overlap_slope(self) -> None:
         self.overlap_slope_var.set(-float(self.overlap_slope_var.get()))
@@ -1191,6 +1192,23 @@ class LaserMirrorApp:
             return
         self._move_motor_targets(self._overlap_start_steps_from_vars(), "Move to two-mirror scan start")
 
+    def _overlap_next_start_recommendation(self, best_point: BestPointRecommendation, fit: object | None) -> str:
+        targets = best_point.targets.as_dict()
+        deltas = {key: targets[key] - self.overlap_reference_steps.get(key, 0.0) for key in MOTOR_PVS}
+        next_start = ", ".join(f"{key}={targets[key]:.1f} ({deltas[key]:+.1f})" for key in MOTOR_PVS)
+        accuracy_note = ""
+        if fit is not None and hasattr(fit, "weighted_rms_distance_urad"):
+            plane_axis = "x" if any(row.mode == "overlap_horizontal" for row in self.measurements) else "y"
+            step_scale = self.geometry.steps_to_urad(1.0, plane_axis, 1)
+            rms_steps = getattr(fit, "weighted_rms_distance_urad") / max(abs(step_scale), 1e-9)
+            accuracy_note = f" Fit scatter is about {getattr(fit, 'weighted_rms_distance_urad'):.1f} urad (~{rms_steps:.1f} motor steps)."
+        return (
+            " Next verification start loaded from optimum: "
+            + next_start
+            + ". Run the same scan again to verify the peak stays near the center."
+            + accuracy_note
+        )
+
     def _overlap_scan_points_from_vars(self) -> list[ScanPoint]:
         axis = self.overlap_axis_var.get()
         return build_overlap_scan_points(
@@ -1206,6 +1224,7 @@ class LaserMirrorApp:
             self.overlap_diagonal_var.get(),
             float(self.overlap_slope_var.get()),
             self.overlap_pattern_var.get(),
+            bool(self.overlap_serpentine_var.get()),
         )
 
     def _refresh_overlap_estimate(self) -> None:
@@ -1874,6 +1893,8 @@ class LaserMirrorApp:
                         + f" Measured diagonal slope={fit.slope:.3f} (target {fit.ideal_slope:.3f}, delta={fit.slope_error:+.3f}); "
                         f"weighted RMS distance={fit.weighted_rms_distance_urad:.1f} urad."
                     )
+                self._set_overlap_start_vars(best_point.targets.as_dict())
+                self.overlap_status_var.set(self.overlap_status_var.get() + self._overlap_next_start_recommendation(best_point, fit))
             else:
                 self.overlap_status_var.set("Overlap scan finished without a valid optimum.")
         self._save_legacy_state()

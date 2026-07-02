@@ -34,10 +34,8 @@ class ScanContext:
 
 
 def fixed_position_diagonal_slope(geometry: LaserMirrorGeometry, axis: Literal["horizontal", "vertical"]) -> float:
-    """Ballpark mirror2/mirror1 angle slope for holding downstream position fixed."""
-    axis_code = "x" if axis == "horizontal" else "y"
-    sign = geometry.config.mirror2_x_sign if axis_code == "x" else geometry.config.mirror2_y_sign
-    return sign * (geometry.config.undulator_distance_mm + geometry.config.mirror_distance_mm) / geometry.config.undulator_distance_mm
+    """Ballpark negative mirror2/mirror1 angle slope for holding downstream position fixed."""
+    return -abs((geometry.config.undulator_distance_mm + geometry.config.mirror_distance_mm) / geometry.config.undulator_distance_mm)
 
 
 def rectangular_spiral(step_x: float, step_y: float, turns: int) -> list[tuple[float, float]]:
@@ -131,6 +129,7 @@ def build_overlap_scan_points(
     diagonal_direction: Literal["right_to_left", "left_to_right", "upper_left_to_lower_right", "lower_left_to_upper_right"] = "right_to_left",
     diagonal_slope: float | None = None,
     pattern: str = "perpendicular_cross",
+    serpentine: bool = True,
 ) -> list[ScanPoint]:
     axis_code = "x" if axis == "horizontal" else "y"
     motor_axis = "horizontal" if axis == "horizontal" else "vertical"
@@ -154,7 +153,8 @@ def build_overlap_scan_points(
     index = 0
     for group_index, center_m1_urad in enumerate(line_m1_values):
         center_m2_urad = slope * center_m1_urad
-        for cross_urad in cross_values:
+        strip_cross_values = list(reversed(cross_values)) if serpentine and group_index % 2 else cross_values
+        for cross_urad in strip_cross_values:
             if pattern == "horizontal_strips":
                 mirror1_angle_urad = center_m1_urad + cross_urad
                 mirror2_angle_urad = center_m2_urad

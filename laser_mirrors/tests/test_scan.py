@@ -334,8 +334,32 @@ class ScanTests(unittest.TestCase):
     def test_fixed_position_diagonal_slope_uses_geometry(self) -> None:
         config = AppConfig()
         geometry = LaserMirrorGeometry(config.geometry)
-        self.assertAlmostEqual(fixed_position_diagonal_slope(geometry, 'vertical'), 1.3802, places=3)
+        self.assertAlmostEqual(fixed_position_diagonal_slope(geometry, 'vertical'), -1.3802, places=3)
         self.assertAlmostEqual(fixed_position_diagonal_slope(geometry, 'horizontal'), -1.3802, places=3)
+
+    def test_overlap_serpentine_reverses_every_other_strip(self) -> None:
+        config = AppConfig()
+        geometry = LaserMirrorGeometry(config.geometry)
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        points = build_overlap_scan_points(
+            geometry,
+            controller.capture_reference(),
+            'vertical',
+            'mirror2',
+            2,
+            8.0,
+            3,
+            40.0,
+            'mirror1_primary',
+            diagonal_slope=-1.5,
+            pattern='horizontal_strips',
+            serpentine=True,
+        )
+        first_strip = [point.angle_x_urad for point in points if point.group_index == 0]
+        second_strip = [point.angle_x_urad for point in points if point.group_index == 1]
+        self.assertLess(first_strip[0], first_strip[-1])
+        self.assertGreater(second_strip[0], second_strip[-1])
 
     def test_fit_overlap_diagonal_estimates_measured_slope(self) -> None:
         from laser_mirrors_app.models import MeasurementRecord
