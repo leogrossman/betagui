@@ -317,9 +317,9 @@ It builds a diagonal center line in mirror-angle space and samples around it:
 1. use `Position search` first and move to the best spatial overlap
 2. choose a plane, usually `vertical` first
 3. choose the pattern:
-   - `perpendicular_cross` samples across the diagonal normal; this is the newer diagonal method
-   - `horizontal_strips` keeps mirror 2 fixed inside each strip and sweeps mirror 1
-   - `vertical_strips` keeps mirror 1 fixed inside each strip and sweeps mirror 2
+   - `horizontal_strips` is the default; mirror 2 stays fixed inside each strip and mirror 1 sweeps
+   - `perpendicular_cross` samples across the diagonal normal, but can move both motors more
+   - `vertical_strips` keeps mirror 1 fixed inside each strip and sweeps mirror 2; use it mainly as an orthogonal diagnostic if horizontal strips miss the useful response direction
 4. choose the number of center-line points and the line span
 5. choose the number of cross-line points and the cross-line spacing
 6. use the fixed-position slope estimate or set a custom positive/negative slope

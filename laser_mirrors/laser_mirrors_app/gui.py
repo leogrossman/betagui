@@ -223,7 +223,7 @@ class LaserMirrorApp:
         self.overlap_angle_span_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_line_span_urad", self.config.scan.overlap_angle_span_urad))
         self.overlap_diagonal_var = tk.StringVar(value="right_to_left")
         self.overlap_slope_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_diagonal_slope", fixed_position_diagonal_slope(self.geometry, "vertical")))
-        self.overlap_pattern_var = tk.StringVar(value=getattr(self.config.scan, "overlap_pattern", "perpendicular_cross"))
+        self.overlap_pattern_var = tk.StringVar(value=getattr(self.config.scan, "overlap_pattern", "horizontal_strips"))
         self.overlap_auto_plane_defaults_var = tk.BooleanVar(value=True)
         self.overlap_status_var = tk.StringVar(value="No overlap scan run yet.")
         self.overlap_estimate_var = tk.StringVar(value="Enter scan settings to see the estimated range and time.")
@@ -306,12 +306,15 @@ class LaserMirrorApp:
 
     def _build_overview(self) -> None:
         left = ttk.Frame(self.overview_frame)
+        center = ttk.Frame(self.overview_frame)
         right = ttk.Frame(self.overview_frame)
         left.grid(row=0, column=0, sticky="nsew")
-        right.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+        center.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+        right.grid(row=0, column=2, sticky="nsew", padx=(12, 0))
         self.overview_frame.columnconfigure(0, weight=2)
         self.overview_frame.columnconfigure(1, weight=1)
-        self.overview_frame.rowconfigure(0, weight=1)
+        self.overview_frame.columnconfigure(2, weight=1)
+        self.overview_frame.rowconfigure(1, weight=1)
 
         workflow = ttk.LabelFrame(left, text="Standard coarse recovery workflow", padding=10)
         workflow.pack(fill="x")
@@ -362,7 +365,7 @@ class LaserMirrorApp:
             "In write mode every move still goes through the same ramped, DMOV-waiting safety path.",
         )
 
-        target = ttk.LabelFrame(left, text="Reference and saved positions", padding=10)
+        target = ttk.LabelFrame(center, text="Reference and saved positions", padding=10)
         target.pack(fill="x", pady=(10, 0))
         self._add_labeled_entry(target, "Offset X [mm]", self.offset_x_var, 0)
         self._add_labeled_entry(target, "Offset Y [mm]", self.offset_y_var, 1)
@@ -378,7 +381,7 @@ class LaserMirrorApp:
             "Always capture a fresh reference when the controller has been restarted or when you are unsure whether the saved center is still valid.",
         )
 
-        limits = ttk.LabelFrame(left, text="Motor limits / overrides", padding=10)
+        limits = ttk.LabelFrame(center, text="Motor limits / overrides", padding=10)
         limits.pack(fill="x", pady=(10, 0))
         ttk.Label(limits, text="Motor").grid(row=0, column=0, sticky="w")
         ttk.Label(limits, text="Manual LLM").grid(row=0, column=1, sticky="e")
@@ -394,10 +397,10 @@ class LaserMirrorApp:
         ttk.Label(limits, text="If IOC HLM/LLM are 0 or otherwise broken, enable manual limits here and reconnect.", wraplength=640, justify="left").grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
         self.motor_tree = ttk.Treeview(
-            left,
+            self.overview_frame,
             columns=("motor", "pv", "rbv", "val", "llm", "hlm", "limit_src", "dmov", "movn", "stat", "sevr", "egu"),
             show="headings",
-            height=8,
+            height=5,
         )
         for key, title, width in [
             ("motor", "Motor", 150),
@@ -415,7 +418,7 @@ class LaserMirrorApp:
         ]:
             self.motor_tree.heading(key, text=title)
             self.motor_tree.column(key, width=width)
-        self.motor_tree.pack(fill="x", pady=(10, 0))
+        self.motor_tree.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         for key, pv in MOTOR_PVS.items():
             self.motor_tree.insert(
                 "",
@@ -588,17 +591,20 @@ class LaserMirrorApp:
         controls.grid(row=0, column=0, sticky="nsew")
         plots = ttk.LabelFrame(self.overlap_frame, text="Overlap maps", padding=10)
         plots.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+        self.overlap_frame.columnconfigure(0, weight=1, minsize=520)
         self.overlap_frame.columnconfigure(1, weight=1)
         self.overlap_frame.rowconfigure(0, weight=1)
+        controls.columnconfigure(0, weight=1)
+        controls.columnconfigure(1, weight=1)
 
         pattern_box = ttk.LabelFrame(controls, text="Scan pattern", padding=10)
-        pattern_box.pack(fill="x")
+        pattern_box.grid(row=0, column=0, sticky="nsew")
         self._add_labeled_combo(pattern_box, "Plane", self.overlap_axis_var, ["vertical", "horizontal"], 0)
         self._add_labeled_combo(
             pattern_box,
             "Pattern",
             self.overlap_pattern_var,
-            ["perpendicular_cross", "horizontal_strips", "vertical_strips"],
+            ["horizontal_strips", "perpendicular_cross", "vertical_strips"],
             1,
         )
         self._add_labeled_combo(pattern_box, "Scan direction", self.overlap_diagonal_var, ["right_to_left", "left_to_right"], 2)
@@ -608,7 +614,7 @@ class LaserMirrorApp:
         ttk.Checkbutton(pattern_box, text="Update slope when plane changes", variable=self.overlap_auto_plane_defaults_var).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         size_box = ttk.LabelFrame(controls, text="Scan size", padding=10)
-        size_box.pack(fill="x", pady=(8, 0))
+        size_box.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
         self._add_labeled_entry(size_box, "Center-line points", self.overlap_position_points_var, 0)
         self._add_labeled_entry(size_box, "Cross-line points", self.overlap_angle_points_var, 1)
         self._add_labeled_entry(size_box, "Line span [µrad]", self.overlap_angle_span_var, 2)
@@ -625,7 +631,7 @@ class LaserMirrorApp:
         ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         start_box = ttk.LabelFrame(controls, text="Scan start position", padding=10)
-        start_box.pack(fill="x", pady=(8, 0))
+        start_box.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
         for row, key in enumerate(MOTOR_PVS):
             self._add_labeled_entry(start_box, MOTOR_LABELS.get(key, key), self.overlap_start_vars[key], row, width=12)
         ttk.Button(start_box, text="Use current RBV", command=self._load_overlap_start_current).grid(row=4, column=0, sticky="ew", pady=(8, 0))
@@ -634,11 +640,11 @@ class LaserMirrorApp:
         ttk.Button(start_box, text="Move to start", command=self._move_to_overlap_start).grid(row=5, column=1, sticky="ew", pady=(8, 0))
 
         estimate_box = ttk.LabelFrame(controls, text="Live estimate", padding=10)
-        estimate_box.pack(fill="x", pady=(8, 0))
+        estimate_box.grid(row=1, column=1, sticky="nsew", padx=(8, 0), pady=(8, 0))
         ttk.Label(estimate_box, textvariable=self.overlap_estimate_var, wraplength=340, justify="left").pack(anchor="w")
 
         action_box = ttk.LabelFrame(controls, text="Run", padding=10)
-        action_box.pack(fill="x", pady=(8, 0))
+        action_box.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         ttk.Button(action_box, text="Explain scan", command=self._show_overlap_theory).grid(row=0, column=0, sticky="ew")
         ttk.Button(action_box, text="Preview commands", command=self._preview_overlap_scan).grid(row=0, column=1, sticky="ew", padx=(6, 0))
         ttk.Button(action_box, text="Start scan", command=self._start_overlap_scan).grid(row=1, column=0, sticky="ew", pady=(8, 0))
@@ -1035,7 +1041,9 @@ class LaserMirrorApp:
                 "How it works now:\n"
                 "• choose one plane, vertical or horizontal\n"
                 "• create a diagonal center line in mirror-1 vs mirror-2 angle space\n"
-                "• choose perpendicular cross-lines, horizontal strips, or vertical strips\n"
+                "• horizontal strips are the calmer default: mirror 2 stays fixed inside a strip while mirror 1 sweeps\n"
+                "• perpendicular cross-lines are still available, but they can move both motors more aggressively\n"
+                "• vertical strips are an orthogonal diagnostic: mirror 1 stays fixed inside a strip while mirror 2 sweeps\n"
                 "• sample several points along that diagonal and several points across each center point\n"
                 "• load the scan start from current RBV, reference, optimum, or typed motor values\n"
                 "• plot the measured signal against mirror-1 and mirror-2 deflection angles\n\n"
@@ -1134,7 +1142,7 @@ class LaserMirrorApp:
         self.overlap_vertical_step_var.set(200.0)
         self.overlap_angle_span_var.set(300.0)
         self.overlap_diagonal_var.set("right_to_left")
-        self.overlap_pattern_var.set("perpendicular_cross")
+        self.overlap_pattern_var.set("horizontal_strips")
         self.plot_dot_radius_var.set(7.0)
         self._set_overlap_physical_slope(update_config=False, announce=False)
         self._pull_ui_into_config()
