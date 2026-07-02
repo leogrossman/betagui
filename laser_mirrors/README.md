@@ -327,11 +327,11 @@ It builds a diagonal center line in mirror-angle space and samples around it:
 
 The result is a focused diagonal family in `(mirror 1 deflection angle, mirror 2 deflection angle)` space. The live estimate shows point count, approximate time, angle range, motor target range around the chosen start, and approximate beam-position offset before the scan is run.
 
-The default strip scan uses a narrow strip width and a wide strip-center range: `M1 span = 30 steps`, `M2 span = 300 steps`. In the default vertical plane this is about `56.7 µrad` by `567 µrad`. This gives visibly separated strips without making each strip too wide.
+The default strip scan uses a moderately wide strip and a wide strip-center range: `M1 span = 100 steps`, `M2 span = 1000 steps`. In the default vertical plane this is about `189 µrad` by `1890 µrad`. This keeps the useful 1:10 strip-width to strip-spacing-range shape without making the horizontal strip too narrow.
 
 The fixed-position slope magnitude is set mainly by the mirror-to-undulator distances, so horizontal and vertical are similar in size. For the current beamline workflow the preset uses the negative branch in both planes, about `-1.38`.
 
-`right_to_left` and `left_to_right` measure the same points; they only choose which end of the diagonal is visited first. Serpentine strip order is usually most efficient because every other strip is swept in reverse, avoiding a flyback to the same edge before the next strip. Turn serpentine off only when you deliberately want every strip approached from the same side to check backlash or hysteresis.
+`right_to_left` and `left_to_right` measure the same points; they choose both which end of the diagonal is visited first and which side of each strip is entered first. With `right_to_left`, each horizontal strip starts on its right edge before serpentine alternation. With `left_to_right`, it starts on its left edge. Serpentine strip order is usually most efficient because every other strip is swept in reverse, avoiding a flyback to the same edge before the next strip. Turn serpentine off only when you deliberately want every strip approached from the same side to check backlash or hysteresis.
 
 After an overlap scan, the GUI prints the recommended optimum as all four motor PV targets with deltas from the previous start. The scan start stays at the reference/typed value until you explicitly press `Move to optimum` or `Use optimum`; then running the same scan again is the intended verification step.
 

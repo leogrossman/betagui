@@ -396,8 +396,32 @@ class ScanTests(unittest.TestCase):
         )
         first_strip = [point.angle_x_urad for point in points if point.group_index == 0]
         second_strip = [point.angle_x_urad for point in points if point.group_index == 1]
-        self.assertLess(first_strip[0], first_strip[-1])
-        self.assertGreater(second_strip[0], second_strip[-1])
+        self.assertGreater(first_strip[0], first_strip[-1])
+        self.assertLess(second_strip[0], second_strip[-1])
+
+    def test_overlap_left_to_right_starts_each_strip_on_left_when_not_serpentine(self) -> None:
+        config = AppConfig()
+        geometry = LaserMirrorGeometry(config.geometry)
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        points = build_overlap_scan_points(
+            geometry,
+            controller.capture_reference(),
+            'vertical',
+            'mirror2',
+            2,
+            8.0,
+            3,
+            40.0,
+            'mirror1_primary',
+            'left_to_right',
+            diagonal_slope=-1.5,
+            pattern='horizontal_strips',
+            serpentine=False,
+        )
+        for group_index in (0, 1):
+            strip = [point.angle_x_urad for point in points if point.group_index == group_index]
+            self.assertLess(strip[0], strip[-1])
 
     def test_fit_overlap_diagonal_estimates_measured_slope(self) -> None:
         from laser_mirrors_app.models import MeasurementRecord

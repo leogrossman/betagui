@@ -156,6 +156,9 @@ def build_overlap_scan_points(
     if diagonal_direction in ("right_to_left", "upper_left_to_lower_right"):
         line_m1_values.reverse()
     cross_values = linspace(0.0, cross_span, cross_count)
+    cross_values_descending = diagonal_direction in ("right_to_left", "upper_left_to_lower_right")
+    if cross_values_descending:
+        cross_values.reverse()
     normal_scale = math.sqrt(slope * slope + 1.0)
     normal_m1 = -slope / normal_scale
     normal_m2 = 1.0 / normal_scale
@@ -163,7 +166,7 @@ def build_overlap_scan_points(
     index = 0
     for group_index, center_m1_urad in enumerate(line_m1_values):
         center_m2_urad = slope * center_m1_urad
-        strip_cross_values = list(reversed(cross_values)) if serpentine and group_index % 2 else cross_values
+        strip_cross_values = list(reversed(cross_values)) if serpentine and group_index % 2 else list(cross_values)
         for cross_urad in strip_cross_values:
             if pattern == "horizontal_strips":
                 mirror1_angle_urad = center_m1_urad + cross_urad
