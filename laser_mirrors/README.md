@@ -55,9 +55,12 @@ The tool is organized around two standard jobs:
    - move to the best position first
    - use the `Two-mirror scan` tab
    - choose `vertical` or `horizontal`
+   - choose the pattern: perpendicular cross-lines, horizontal strips, or vertical strips
    - choose how many points to sample along the diagonal center line
    - choose how many points to sample across that line and set the cross-line spacing
    - use the fixed-position slope estimate, invert the slope, or type a custom slope
+   - load the scan start from current RBV, captured reference, or the current optimum
+   - use the live estimate to check approximate scan time, motor range, beam-position offset, and angle range before starting
    - inspect the mirror-1 vs mirror-2 deflection-angle map, the marked start point, the requested diagonal, the fitted measured diagonal, and the recommended optimum
 
 The tool also includes:
@@ -266,15 +269,16 @@ For the `Overlap scan` tab the plotted coordinates are different on purpose:
 
 - `x` axis = mirror 1 deflection angle in the chosen plane
 - `y` axis = mirror 2 deflection angle in the chosen plane
-- point color = measured signal average at that strip point
+- point color = measured signal average at that measured point
 
-This matches the two-mirror strip-scan logic:
+This matches the two-mirror diagonal-scan logic:
 
-- keep one mirror angle fixed for a strip
-- sweep the other mirror angle across it
-- then move to the next strip
+- define a diagonal center line through the chosen start position
+- optionally sample perpendicular cross-lines around that diagonal
+- or use horizontal / vertical strip modes where one mirror coordinate stays fixed within a strip
+- compare the requested diagonal with the measured signal-weighted fitted diagonal
 
-The start point before the scan is marked on the plot, and the recommended optimum is marked separately.
+The start point before the scan is marked on the plot, the requested diagonal is dashed blue, the measured fit is red, and the recommended optimum is marked separately. The global plot-dot radius in `Overview` changes the dot size live without rerunning a scan.
 
 The optional interpolated background in the GUI is only a visual guide.
 The measured dots remain the ground truth.
@@ -311,11 +315,16 @@ It builds a diagonal center line in mirror-angle space and samples around it:
 
 1. use `Position search` first and move to the best spatial overlap
 2. choose a plane, usually `vertical` first
-3. choose the number of center-line points and the line span
-4. choose the number of cross-line points and the cross-line spacing
-5. use the fixed-position slope estimate or set a custom positive/negative slope
+3. choose the pattern:
+   - `perpendicular_cross` samples across the diagonal normal; this is the newer diagonal method
+   - `horizontal_strips` keeps mirror 2 fixed inside each strip and sweeps mirror 1
+   - `vertical_strips` keeps mirror 1 fixed inside each strip and sweeps mirror 2
+4. choose the number of center-line points and the line span
+5. choose the number of cross-line points and the cross-line spacing
+6. use the fixed-position slope estimate or set a custom positive/negative slope
+7. load the scan start from current RBV, captured reference, or optimum
 
-The result is a focused diagonal family in `(mirror 1 deflection angle, mirror 2 deflection angle)` space. The map overlays the requested diagonal and, after a signal scan, a signal-weighted fitted diagonal so you can compare the measured response direction with the intended one.
+The result is a focused diagonal family in `(mirror 1 deflection angle, mirror 2 deflection angle)` space. The live estimate shows point count, approximate time, angle range, motor target range around the chosen start, and approximate beam-position offset before the scan is run.
 
 ### Which solve mode is the literal fixed-position angle scan?
 

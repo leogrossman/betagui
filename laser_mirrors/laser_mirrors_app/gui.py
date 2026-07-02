@@ -157,6 +157,7 @@ class LaserMirrorApp:
         self._pen_test_stop = threading.Event()
         self._build_state()
         self._build_ui()
+        self._configure_live_updates()
         self._restore_legacy_state()
         self._connect_backends()
         self._draw_geometry_preview()
@@ -206,6 +207,7 @@ class LaserMirrorApp:
         self.solve_mode_var = tk.StringVar(value=self.config.scan.solve_mode)
         self.objective_var = tk.StringVar(value=self.config.scan.objective)
         self.interpolate_angle_map_var = tk.BooleanVar(value=False)
+        self.plot_dot_radius_var = tk.DoubleVar(value=getattr(self.config.scan, "plot_dot_radius", 6.0))
         self.spiral_step_x_var = tk.DoubleVar(value=self.config.scan.spiral_step_x)
         self.spiral_step_y_var = tk.DoubleVar(value=self.config.scan.spiral_step_y)
         self.spiral_turns_var = tk.IntVar(value=self.config.scan.spiral_turns)
@@ -214,16 +216,17 @@ class LaserMirrorApp:
         self.spiral_target_var = tk.StringVar(value=self.config.scan.spiral_target)
         self.spiral_strategy_var = tk.StringVar(value=self.config.scan.spiral_strategy)
         self.overlap_axis_var = tk.StringVar(value="vertical")
-        self.overlap_position_target_var = tk.StringVar(value="mirror2")
         self.overlap_position_points_var = tk.IntVar(value=7)
         self.overlap_horizontal_step_var = tk.DoubleVar(value=self.config.scan.overlap_horizontal_step_steps)
         self.overlap_vertical_step_var = tk.DoubleVar(value=self.config.scan.overlap_vertical_step_steps)
         self.overlap_angle_points_var = tk.IntVar(value=9)
         self.overlap_angle_span_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_line_span_urad", self.config.scan.overlap_angle_span_urad))
-        self.overlap_solve_mode_var = tk.StringVar(value="mirror1_primary")
-        self.overlap_diagonal_var = tk.StringVar(value="upper_left_to_lower_right")
+        self.overlap_diagonal_var = tk.StringVar(value="right_to_left")
         self.overlap_slope_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_diagonal_slope", -1.38))
+        self.overlap_pattern_var = tk.StringVar(value=getattr(self.config.scan, "overlap_pattern", "perpendicular_cross"))
         self.overlap_status_var = tk.StringVar(value="No overlap scan run yet.")
+        self.overlap_estimate_var = tk.StringVar(value="Enter scan settings to see the estimated range and time.")
+        self.overlap_start_vars: dict[str, tk.DoubleVar] = {key: tk.DoubleVar(value=0.0) for key in MOTOR_PVS}
         self.manual_motor_var = tk.StringVar(value="m2_horizontal")
         self.manual_delta_var = tk.DoubleVar(value=100.0)
         self.manual_absolute_var = tk.DoubleVar(value=0.0)
@@ -338,20 +341,21 @@ class LaserMirrorApp:
         self._add_labeled_entry(top, "Max steps/put", self.max_step_var, 6)
         self._add_labeled_entry(top, "Inter-put delay [s]", self.delay_var, 7)
         self._add_labeled_entry(top, "Settle [s]", self.settle_var, 8)
-        self._add_labeled_entry(top, "Max delta from ref [steps]", self.max_delta_var, 9)
-        self._add_labeled_entry(top, "Max move window [steps]", self.max_absolute_move_var, 10)
-        ttk.Checkbutton(top, text="Use manual motor limits", variable=self.use_manual_motor_limits_var).grid(row=11, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Checkbutton(top, text="Ignore invalid IOC HLM/LLM", variable=self.ignore_invalid_ioc_limits_var).grid(row=12, column=0, columnspan=2, sticky="w")
-        ttk.Label(top, text="Output root").grid(row=13, column=0, sticky="w", pady=(8, 0))
+        self._add_labeled_entry(top, "Plot dot radius [px]", self.plot_dot_radius_var, 9)
+        self._add_labeled_entry(top, "Max delta from ref [steps]", self.max_delta_var, 10)
+        self._add_labeled_entry(top, "Max move window [steps]", self.max_absolute_move_var, 11)
+        ttk.Checkbutton(top, text="Use manual motor limits", variable=self.use_manual_motor_limits_var).grid(row=12, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Checkbutton(top, text="Ignore invalid IOC HLM/LLM", variable=self.ignore_invalid_ioc_limits_var).grid(row=13, column=0, columnspan=2, sticky="w")
+        ttk.Label(top, text="Output root").grid(row=14, column=0, sticky="w", pady=(8, 0))
         output_row = ttk.Frame(top)
-        output_row.grid(row=13, column=1, sticky="ew", pady=(8, 0))
+        output_row.grid(row=14, column=1, sticky="ew", pady=(8, 0))
         ttk.Entry(output_row, textvariable=self.output_root_var, width=28).pack(side="left", fill="x", expand=True)
         ttk.Button(output_row, text="Browse…", command=self._browse_output_root).pack(side="left", padx=(6, 0))
-        ttk.Button(top, text="Reconnect backends", command=self._connect_backends).grid(row=14, column=0, pady=(8, 0), sticky="w")
-        ttk.Button(top, text="Save config", command=self._save_config).grid(row=14, column=1, pady=(8, 0), sticky="e")
+        ttk.Button(top, text="Reconnect backends", command=self._connect_backends).grid(row=15, column=0, pady=(8, 0), sticky="w")
+        ttk.Button(top, text="Save config", command=self._save_config).grid(row=15, column=1, pady=(8, 0), sticky="e")
         self._add_help_button(
             top,
-            14,
+            15,
             "The selected signal preset is what all live plots and scans color by.\n"
             "Safe mode still reads the real EPICS signal and motor readback.\n"
             "In write mode every move still goes through the same ramped, DMOV-waiting safety path.",
@@ -579,40 +583,70 @@ class LaserMirrorApp:
         self.progress_canvas.bind("<Button-1>", lambda event: self._inspect_canvas_point("progress", event))
 
     def _build_overlap(self) -> None:
-        controls = ttk.LabelFrame(self.overlap_frame, text="Two-mirror target scan", padding=10)
+        controls = ttk.Frame(self.overlap_frame)
         controls.grid(row=0, column=0, sticky="nsew")
         plots = ttk.LabelFrame(self.overlap_frame, text="Overlap maps", padding=10)
         plots.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
         self.overlap_frame.columnconfigure(1, weight=1)
         self.overlap_frame.rowconfigure(0, weight=1)
-        self._add_labeled_combo(controls, "Plane", self.overlap_axis_var, ["vertical", "horizontal"], 0)
-        self._add_labeled_entry(controls, "Center-line points", self.overlap_position_points_var, 1)
-        self._add_labeled_entry(controls, "Cross-line points", self.overlap_angle_points_var, 2)
-        self._add_labeled_entry(controls, "Line span [µrad]", self.overlap_angle_span_var, 3)
-        self._add_labeled_entry(controls, "Horizontal cross spacing [steps]", self.overlap_horizontal_step_var, 4)
-        self._add_labeled_entry(controls, "Vertical cross spacing [steps]", self.overlap_vertical_step_var, 5)
-        self._add_labeled_entry(controls, "Diagonal slope m2/m1", self.overlap_slope_var, 6)
-        ttk.Button(controls, text="Use fixed-position slope", command=self._set_overlap_physical_slope).grid(row=7, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Invert slope", command=self._invert_overlap_slope).grid(row=7, column=1, sticky="ew", pady=(8, 0))
-        self._add_labeled_combo(controls, "Scan direction", self.overlap_diagonal_var, ["upper_left_to_lower_right", "lower_left_to_upper_right"], 8)
-        ttk.Button(controls, text="Explain scan", command=self._show_overlap_theory).grid(row=9, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Preview commands", command=self._preview_overlap_scan).grid(row=9, column=1, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Start scan", command=self._start_overlap_scan).grid(row=10, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Pause", command=self._pause_scan).grid(row=10, column=1, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Resume", command=self._resume_scan).grid(row=11, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Request stop", command=self._stop_scan).grid(row=11, column=1, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Move to optimum", command=self._move_to_best_point).grid(row=12, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Save plot (.ps)", command=lambda: self._save_canvas_postscript(self.overlap_canvas, "two_mirror_scan_map.ps")).grid(row=12, column=1, sticky="ew", pady=(8, 0))
-        ttk.Label(controls, textvariable=self.overlap_status_var, wraplength=340, justify="left").grid(row=13, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        pattern_box = ttk.LabelFrame(controls, text="Scan pattern", padding=10)
+        pattern_box.pack(fill="x")
+        self._add_labeled_combo(pattern_box, "Plane", self.overlap_axis_var, ["vertical", "horizontal"], 0)
+        self._add_labeled_combo(
+            pattern_box,
+            "Pattern",
+            self.overlap_pattern_var,
+            ["perpendicular_cross", "horizontal_strips", "vertical_strips"],
+            1,
+        )
+        self._add_labeled_combo(pattern_box, "Scan direction", self.overlap_diagonal_var, ["right_to_left", "left_to_right"], 2)
+        self._add_labeled_entry(pattern_box, "Diagonal slope m2/m1", self.overlap_slope_var, 3)
+        ttk.Button(pattern_box, text="Use fixed-position slope", command=self._set_overlap_physical_slope).grid(row=4, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(pattern_box, text="Invert slope", command=self._invert_overlap_slope).grid(row=4, column=1, sticky="ew", pady=(8, 0))
+
+        size_box = ttk.LabelFrame(controls, text="Scan size", padding=10)
+        size_box.pack(fill="x", pady=(8, 0))
+        self._add_labeled_entry(size_box, "Center-line points", self.overlap_position_points_var, 0)
+        self._add_labeled_entry(size_box, "Cross-line points", self.overlap_angle_points_var, 1)
+        self._add_labeled_entry(size_box, "Line span [µrad]", self.overlap_angle_span_var, 2)
+        self._add_labeled_entry(size_box, "Horizontal cross spacing [steps]", self.overlap_horizontal_step_var, 3)
+        self._add_labeled_entry(size_box, "Vertical cross spacing [steps]", self.overlap_vertical_step_var, 4)
         ttk.Label(
-            controls,
+            size_box,
             text=(
-                "Workflow: first find a visible laser position. Then scan around a diagonal center line in mirror-1 vs mirror-2 angle space. "
-                "Use the slope controls to flip the diagonal or use the fixed-position estimate from the current geometry."
+                "Line span is the length of the diagonal center line in mirror-angle space. "
+                "Cross spacing is the distance between test points across that line; vertical spacing can be larger for coarse recovery."
             ),
             wraplength=340,
             justify="left",
-        ).grid(row=14, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        start_box = ttk.LabelFrame(controls, text="Scan start position", padding=10)
+        start_box.pack(fill="x", pady=(8, 0))
+        for row, key in enumerate(MOTOR_PVS):
+            self._add_labeled_entry(start_box, MOTOR_LABELS.get(key, key), self.overlap_start_vars[key], row, width=12)
+        ttk.Button(start_box, text="Use current RBV", command=self._load_overlap_start_current).grid(row=4, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(start_box, text="Use captured reference", command=self._load_overlap_start_reference).grid(row=4, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(start_box, text="Use optimum", command=self._load_overlap_start_best).grid(row=5, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(start_box, text="Move to start", command=self._move_to_overlap_start).grid(row=5, column=1, sticky="ew", pady=(8, 0))
+
+        estimate_box = ttk.LabelFrame(controls, text="Live estimate", padding=10)
+        estimate_box.pack(fill="x", pady=(8, 0))
+        ttk.Label(estimate_box, textvariable=self.overlap_estimate_var, wraplength=340, justify="left").pack(anchor="w")
+
+        action_box = ttk.LabelFrame(controls, text="Run", padding=10)
+        action_box.pack(fill="x", pady=(8, 0))
+        ttk.Button(action_box, text="Explain scan", command=self._show_overlap_theory).grid(row=0, column=0, sticky="ew")
+        ttk.Button(action_box, text="Preview commands", command=self._preview_overlap_scan).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        ttk.Button(action_box, text="Start scan", command=self._start_overlap_scan).grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(action_box, text="Pause", command=self._pause_scan).grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=(8, 0))
+        ttk.Button(action_box, text="Resume", command=self._resume_scan).grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(action_box, text="Request stop", command=self._stop_scan).grid(row=2, column=1, sticky="ew", padx=(6, 0), pady=(8, 0))
+        ttk.Button(action_box, text="Move to optimum", command=self._move_to_best_point).grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(action_box, text="Save plot (.ps)", command=lambda: self._save_canvas_postscript(self.overlap_canvas, "two_mirror_scan_map.ps")).grid(row=3, column=1, sticky="ew", padx=(6, 0), pady=(8, 0))
+        ttk.Label(action_box, textvariable=self.overlap_status_var, wraplength=340, justify="left").grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
         self.overlap_canvas = tk.Canvas(plots, width=760, height=380, bg="white", highlightthickness=1, highlightbackground="#cccccc")
         self.overlap_canvas.pack(fill="both", expand=True)
         self.overlap_progress_canvas = tk.Canvas(plots, width=760, height=240, bg="white", highlightthickness=1, highlightbackground="#cccccc")
@@ -867,6 +901,36 @@ class LaserMirrorApp:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=2)
         ttk.Label(parent, textvariable=variable).grid(row=row, column=1, sticky="e", pady=2)
 
+    def _configure_live_updates(self) -> None:
+        for variable in (
+            self.plot_dot_radius_var,
+            self.overlap_axis_var,
+            self.overlap_pattern_var,
+            self.overlap_position_points_var,
+            self.overlap_angle_points_var,
+            self.overlap_angle_span_var,
+            self.overlap_horizontal_step_var,
+            self.overlap_vertical_step_var,
+            self.overlap_slope_var,
+            self.overlap_diagonal_var,
+            self.dwell_var,
+            self.samples_var,
+            self.settle_var,
+        ):
+            variable.trace_add("write", lambda *_args: self._on_live_setting_changed())
+        for variable in self.overlap_start_vars.values():
+            variable.trace_add("write", lambda *_args: self._on_live_setting_changed())
+
+    def _on_live_setting_changed(self) -> None:
+        self._refresh_overlap_estimate()
+        self._refresh_plots()
+
+    def _plot_dot_radius(self) -> float:
+        try:
+            return max(1.0, min(20.0, float(self.plot_dot_radius_var.get())))
+        except (tk.TclError, ValueError):
+            return 6.0
+
     def _preset_from_pv(self, pv_name: str) -> str:
         for key, (_label, pv) in SIGNAL_PRESETS.items():
             if pv == pv_name:
@@ -962,10 +1026,12 @@ class LaserMirrorApp:
                 "How it works now:\n"
                 "• choose one plane, vertical or horizontal\n"
                 "• create a diagonal center line in mirror-1 vs mirror-2 angle space\n"
-                "• sample several points along that diagonal\n"
-                "• at each diagonal point, sample a short perpendicular line around it\n"
+                "• choose perpendicular cross-lines, horizontal strips, or vertical strips\n"
+                "• sample several points along that diagonal and several points across each center point\n"
+                "• load the scan start from current RBV, reference, optimum, or typed motor values\n"
                 "• plot the measured signal against mirror-1 and mirror-2 deflection angles\n\n"
-                "The default slope is the fixed-position ballpark from the mirror geometry. Change its magnitude or sign if the observed laser response says the useful diagonal is different."
+                "The default slope is the fixed-position ballpark from the mirror geometry. Change its magnitude or sign if the observed laser response says the useful diagonal is different. "
+                "The live estimate shows point count, approximate time, motor range, beam-position offset, and angle range before you start."
             ),
         )
 
@@ -985,6 +1051,7 @@ class LaserMirrorApp:
         self.config.controller.max_step_per_put = max(0.1, float(self.max_step_var.get()))
         self.config.controller.inter_put_delay_s = max(0.0, float(self.delay_var.get()))
         self.config.controller.settle_s = max(0.0, float(self.settle_var.get()))
+        self.config.scan.plot_dot_radius = self._plot_dot_radius()
         self.config.controller.max_delta_from_reference = max(1.0, float(self.max_delta_var.get()))
         self.config.controller.max_absolute_move_steps = max(1.0, float(self.max_absolute_move_var.get()))
         self.config.controller.use_manual_motor_limits = bool(self.use_manual_motor_limits_var.get())
@@ -1024,7 +1091,9 @@ class LaserMirrorApp:
         self.config.scan.overlap_angle_span_urad = max(0.0, float(self.overlap_angle_span_var.get()))
         self.config.scan.overlap_line_span_urad = max(0.0, float(self.overlap_angle_span_var.get()))
         self.config.scan.overlap_diagonal_slope = float(self.overlap_slope_var.get())
+        self.config.scan.overlap_pattern = self.overlap_pattern_var.get()
         self._update_scale_summary()
+        self._refresh_overlap_estimate()
 
     def _save_config(self) -> None:
         self._pull_ui_into_config()
@@ -1055,7 +1124,9 @@ class LaserMirrorApp:
         self.overlap_horizontal_step_var.set(100.0)
         self.overlap_vertical_step_var.set(200.0)
         self.overlap_angle_span_var.set(300.0)
-        self.overlap_diagonal_var.set("upper_left_to_lower_right")
+        self.overlap_diagonal_var.set("right_to_left")
+        self.overlap_pattern_var.set("perpendicular_cross")
+        self.plot_dot_radius_var.set(7.0)
         self._set_overlap_physical_slope(update_config=False)
         self._pull_ui_into_config()
         self._log("Applied coarse recovery defaults for visual laser search.")
@@ -1072,6 +1143,86 @@ class LaserMirrorApp:
         self.overlap_slope_var.set(-float(self.overlap_slope_var.get()))
         self._pull_ui_into_config()
         self.overlap_status_var.set(f"Diagonal slope inverted to {float(self.overlap_slope_var.get()):.3f}.")
+
+    def _set_overlap_start_vars(self, steps: dict[str, float]) -> None:
+        for key in MOTOR_PVS:
+            self.overlap_start_vars[key].set(float(steps.get(key, 0.0)))
+        self._refresh_overlap_estimate()
+
+    def _overlap_start_steps_from_vars(self) -> dict[str, float]:
+        return {key: float(variable.get()) for key, variable in self.overlap_start_vars.items()}
+
+    def _load_overlap_start_current(self) -> None:
+        self._set_overlap_start_vars(self.controller.current_steps())
+        self.overlap_status_var.set("Two-mirror scan start loaded from current motor RBVs.")
+
+    def _load_overlap_start_reference(self) -> None:
+        self._set_overlap_start_vars(self.current_reference_steps)
+        self.overlap_status_var.set("Two-mirror scan start loaded from captured reference.")
+
+    def _load_overlap_start_best(self) -> None:
+        if self.best_point is None:
+            messagebox.showinfo("No optimum", "Run a scan first, or use current RBV/reference as the start.")
+            return
+        self._set_overlap_start_vars(self.best_point.targets.as_dict())
+        self.overlap_status_var.set("Two-mirror scan start loaded from the current recommended optimum.")
+
+    def _move_to_overlap_start(self) -> None:
+        if self.scan_runner.is_running():
+            messagebox.showinfo("Scan running", "Stop the running scan first.")
+            return
+        self._move_motor_targets(self._overlap_start_steps_from_vars(), "Move to two-mirror scan start")
+
+    def _overlap_scan_points_from_vars(self) -> list[ScanPoint]:
+        axis = self.overlap_axis_var.get()
+        return build_overlap_scan_points(
+            self.geometry,
+            self._overlap_start_steps_from_vars(),
+            axis,
+            "mirror2",
+            max(1, int(self.overlap_position_points_var.get())),
+            self._overlap_position_spacing_steps(axis),
+            max(1, int(self.overlap_angle_points_var.get())),
+            float(self.overlap_angle_span_var.get()),
+            "mirror1_primary",
+            self.overlap_diagonal_var.get(),
+            float(self.overlap_slope_var.get()),
+            self.overlap_pattern_var.get(),
+        )
+
+    def _refresh_overlap_estimate(self) -> None:
+        if not hasattr(self, "overlap_estimate_var"):
+            return
+        try:
+            points = self._overlap_scan_points_from_vars()
+            if not points:
+                self.overlap_estimate_var.set("No two-mirror scan points with the current settings.")
+                return
+            axis = self.overlap_axis_var.get()
+            axis_code = "x" if axis == "horizontal" else "y"
+            targets_by_key = [point.targets.as_dict() for point in points]
+            motor_ranges = []
+            for key in ("m1_horizontal", "m2_horizontal") if axis == "horizontal" else ("m1_vertical", "m2_vertical"):
+                values = [target[key] for target in targets_by_key]
+                start = self._overlap_start_steps_from_vars()[key]
+                motor_ranges.append(f"{key}: {min(values) - start:+.0f}..{max(values) - start:+.0f} steps")
+            mirror1 = [point.angle_x_urad for point in points]
+            mirror2 = [point.angle_y_urad for point in points]
+            targets = [self.geometry.to_undulator_target(MirrorAngles(point.angle_x_urad, point.angle_y_urad), axis_code) for point in points]
+            offsets = [target.offset_mm for target in targets]
+            angles = [target.angle_urad for target in targets]
+            per_point_s = max(0.0, float(self.dwell_var.get())) + max(1, int(self.samples_var.get())) * 0.02 + max(0.0, float(self.settle_var.get()))
+            total_s = len(points) * per_point_s
+            self.overlap_estimate_var.set(
+                f"{len(points)} points, about {total_s:.1f} s plus motor travel.\n"
+                f"Mirror-angle range: m1 {min(mirror1):+.1f}..{max(mirror1):+.1f} µrad, "
+                f"m2 {min(mirror2):+.1f}..{max(mirror2):+.1f} µrad.\n"
+                f"Approx beam target in {axis}: offset {min(offsets):+.3f}..{max(offsets):+.3f} mm, "
+                f"angle {min(angles):+.1f}..{max(angles):+.1f} µrad.\n"
+                + "; ".join(motor_ranges)
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.overlap_estimate_var.set(f"Estimate unavailable: {exc}")
 
     def _browse_output_root(self) -> None:
         chosen = filedialog.askdirectory(initialdir=self.output_root_var.get() or str(self.config_path.parent))
@@ -1131,6 +1282,7 @@ class LaserMirrorApp:
             )
             self.status_var.set("Demo mode connected.")
             self.reference_var.set("Reference RBV: " + ", ".join(f"{key}={value:.2f}" for key, value in self.current_reference_steps.items()))
+            self._set_overlap_start_vars(self.current_reference_steps)
             self._refresh_motor_table()
             return
         try:
@@ -1181,6 +1333,7 @@ class LaserMirrorApp:
             )
             self.status_var.set("Motors connected; selected signal unavailable.")
         self.reference_var.set("Reference RBV: " + ", ".join(f"{key}={value:.2f}" for key, value in self.current_reference_steps.items()))
+        self._set_overlap_start_vars(self.current_reference_steps)
         self._refresh_motor_table()
 
     def _set_disconnected_controller(self, exc: Exception) -> None:
@@ -1203,6 +1356,7 @@ class LaserMirrorApp:
         self.runtime_var.set(f"Backend connection failed; UI kept in disconnected read-only state.\nReason: {reason}")
         self.status_var.set("Disconnected / read-only.")
         self.reference_var.set("Reference RBV unavailable: EPICS disconnected.")
+        self._set_overlap_start_vars(self.current_reference_steps)
         self._refresh_motor_table()
         self._log(f"Backend connection failed; using disconnected read-only state: {reason}")
         self.root.after(
@@ -1286,6 +1440,7 @@ class LaserMirrorApp:
     def _capture_reference(self) -> None:
         self.current_reference_steps = self.controller.capture_reference()
         self.reference_var.set("Reference RBV: " + ", ".join(f"{key}={value:.2f}" for key, value in self.current_reference_steps.items()))
+        self._set_overlap_start_vars(self.current_reference_steps)
         self._log("Captured current motor RBV values as the new reference.")
 
     def _return_to_reference(self) -> None:
@@ -1490,23 +1645,10 @@ class LaserMirrorApp:
         self.scan_runner = ScanRunner(self.config, self.geometry, self.controller, self.signal_backend, self._log, self.output_root)
 
     def _build_overlap_points(self) -> list[ScanPoint]:
-        axis = self.overlap_axis_var.get()
         self._pull_ui_into_config()
-        base_steps = self.controller.current_steps()
+        base_steps = self._overlap_start_steps_from_vars()
         self.overlap_reference_steps = dict(base_steps)
-        return build_overlap_scan_points(
-            self.geometry,
-            base_steps,
-            axis,
-            self.overlap_position_target_var.get(),
-            max(1, int(self.overlap_position_points_var.get())),
-            self._overlap_position_spacing_steps(axis),
-            max(1, int(self.overlap_angle_points_var.get())),
-            float(self.overlap_angle_span_var.get()),
-            self.overlap_solve_mode_var.get(),
-            self.overlap_diagonal_var.get(),
-            float(self.overlap_slope_var.get()),
-        )
+        return self._overlap_scan_points_from_vars()
 
     def _preview_overlap_scan(self) -> None:
         if not self._controller_ready("preview the two-mirror scan"):
@@ -2170,7 +2312,7 @@ class LaserMirrorApp:
             px = margin + (row.angle_x_urad - (center_x - span_x / 2.0)) / span_x * (w - 2 * margin)
             py = h - margin - (row.angle_y_urad - (center_y - span_y / 2.0)) / span_y * (h - 2 * margin)
             color = self._color_for_value((row.signal_average - lo) / span if row.signal_average == row.signal_average else 0.0)
-            radius = 5
+            radius = self._plot_dot_radius()
             canvas.create_oval(px - radius, py - radius, px + radius, py + radius, fill=color, outline="")
             points_meta.append({"x": px, "y": py, "payload": self._measurement_payload(row)})
         if self.best_point is not None:
@@ -2207,7 +2349,8 @@ class LaserMirrorApp:
             if prev is not None:
                 canvas.create_line(prev[0], prev[1], px, py, fill="#1d4ed8", width=2)
             color = self._color_for_value((row.signal_average - lo) / span if row.signal_average == row.signal_average else 0.0)
-            canvas.create_oval(px - 5, py - 5, px + 5, py + 5, fill=color, outline="")
+            radius = self._plot_dot_radius()
+            canvas.create_oval(px - radius, py - radius, px + radius, py + radius, fill=color, outline="")
             prev = (px, py)
             points_meta.append({"x": px, "y": py, "payload": self._measurement_payload(row)})
         if self.best_point is not None:
@@ -2273,7 +2416,8 @@ class LaserMirrorApp:
             px = margin + (row.angle_x_urad - (center_x - span_x / 2.0)) / span_x * (width - 2 * margin)
             py = height - margin - (row.angle_y_urad - (center_y - span_y / 2.0)) / span_y * (h - 2 * margin)
             color = self._color_for_value((row.signal_average - lo) / span if row.signal_average == row.signal_average else 0.0)
-            canvas.create_oval(px - 5, py - 5, px + 5, py + 5, fill=color, outline="")
+            radius = self._plot_dot_radius()
+            canvas.create_oval(px - radius, py - radius, px + radius, py + radius, fill=color, outline="")
             points_meta.append({"x": px, "y": py, "payload": self._measurement_payload(row)})
         canvas.create_line(
             margin,
@@ -2340,7 +2484,8 @@ class LaserMirrorApp:
             py = h - margin - (row.signal_average - lo) / span * (h - 2 * margin)
             if prev is not None:
                 canvas.create_line(prev[0], prev[1], px, py, fill="#1d4ed8", width=2)
-            canvas.create_oval(px - 3, py - 3, px + 3, py + 3, fill="#c2410c", outline="")
+            radius = self._plot_dot_radius()
+            canvas.create_oval(px - radius, py - radius, px + radius, py + radius, fill="#c2410c", outline="")
             prev = (px, py)
             points_meta.append(
                 {
@@ -2392,7 +2537,8 @@ class LaserMirrorApp:
             px = margin + (getattr(row, x_attr) - min(xs)) / vx * (w - 2 * margin)
             py = h - margin - (getattr(row, y_attr) - min(ys)) / vy * (h - 2 * margin)
             color = self._color_for_value((row.signal_average - lo) / span if row.signal_average == row.signal_average else 0.0)
-            canvas.create_oval(px - 4, py - 4, px + 4, py + 4, fill=color, outline="")
+            radius = self._plot_dot_radius()
+            canvas.create_oval(px - radius, py - radius, px + radius, py + radius, fill=color, outline="")
             points_meta.append(
                 {
                     "x": px,
@@ -2461,7 +2607,7 @@ class LaserMirrorApp:
             px = map_x(xval)
             py = map_y(yval)
             color = self._color_for_value((row.signal_average - lo) / vspan if row.signal_average == row.signal_average else 0.0)
-            radius = 4
+            radius = self._plot_dot_radius()
             canvas.create_oval(px - radius, py - radius, px + radius, py + radius, fill=color, outline="")
             points_meta.append({"x": px, "y": py, "payload": self._measurement_payload(row) | {"mirror1_mrad": xval, "mirror2_mrad": yval}})
 
@@ -2505,6 +2651,14 @@ class LaserMirrorApp:
                 width=2,
             )
 
+        legend_x = w - margin - 170
+        legend_y = margin + 14
+        canvas.create_line(legend_x, legend_y, legend_x + 26, legend_y, fill="#2563eb", width=2, dash=(6, 4))
+        canvas.create_text(legend_x + 34, legend_y, anchor="w", text="requested diagonal", fill="#1e40af")
+        canvas.create_line(legend_x, legend_y + 18, legend_x + 26, legend_y + 18, fill="#dc2626", width=2)
+        canvas.create_text(legend_x + 34, legend_y + 18, anchor="w", text="measured fit", fill="#991b1b")
+        canvas.create_text(legend_x, legend_y + 36, anchor="w", text="X start  + optimum", fill="#374151")
+
         for frac, value in ((0.0, xlo), (0.5, 0.5 * (xlo + xhi)), (1.0, xhi)):
             tick_x = margin + frac * (w - 2 * margin)
             canvas.create_line(tick_x, h - margin, tick_x, h - margin + 6, fill="#6b7280")
@@ -2541,7 +2695,8 @@ class LaserMirrorApp:
             py = h - margin - (row.signal_average - lo) / span * (h - 2 * margin)
             if prev is not None:
                 canvas.create_line(prev[0], prev[1], px, py, fill="#1d4ed8", width=2)
-            canvas.create_oval(px - 3, py - 3, px + 3, py + 3, fill="#c2410c", outline="")
+            radius = self._plot_dot_radius()
+            canvas.create_oval(px - radius, py - radius, px + radius, py + radius, fill="#c2410c", outline="")
             prev = (px, py)
             points_meta.append({"x": px, "y": py, "payload": self._measurement_payload(row)})
         canvas.create_text(w // 2, 18, text=f"{self.signal_label_var.get()} during overlap scan", font=("Helvetica", 11, "bold"))
@@ -2577,7 +2732,8 @@ class LaserMirrorApp:
                 if prev is not None:
                     canvas.create_line(prev[0], prev[1], px, py, fill="#1d4ed8", width=2)
                 color = self._color_for_value((metric - lo) / v_span)
-                canvas.create_oval(px - 3, py - 3, px + 3, py + 3, fill=color, outline="")
+                radius = self._plot_dot_radius()
+                canvas.create_oval(px - radius, py - radius, px + radius, py + radius, fill=color, outline="")
                 prev = (px, py)
                 points_meta.append({"x": px, "y": py, "payload": self._passive_payload(sample, metric_name, metric)})
             canvas.create_text(w // 2, 18, text=f"Passive {metric_name} vs time", font=("Helvetica", 11, "bold"))
@@ -2601,7 +2757,8 @@ class LaserMirrorApp:
             px = margin + (getattr(sample, x_key) - min(xs)) / x_span * (w - 2 * margin)
             py = h - margin - (getattr(sample, y_key) - min(ys)) / y_span * (h - 2 * margin)
             color = self._color_for_value((metric - lo) / v_span if metric == metric else 0.0)
-            canvas.create_oval(px - 3, py - 3, px + 3, py + 3, fill=color, outline="")
+            radius = self._plot_dot_radius()
+            canvas.create_oval(px - radius, py - radius, px + radius, py + radius, fill=color, outline="")
             points_meta.append({"x": px, "y": py, "payload": self._passive_payload(sample, metric_name, metric)})
         best_x = margin + (getattr(best, x_key) - min(xs)) / x_span * (w - 2 * margin)
         best_y = h - margin - (getattr(best, y_key) - min(ys)) / y_span * (h - 2 * margin)
@@ -2810,7 +2967,8 @@ class LaserMirrorApp:
             py = h - margin - (float(row["signal_value"]) - lo) / span * (h - 2 * margin)
             if prev is not None:
                 canvas.create_line(prev[0], prev[1], px, py, fill="#7c3aed", width=2)
-            canvas.create_oval(px - 3, py - 3, px + 3, py + 3, fill="#ea580c", outline="")
+            radius = self._plot_dot_radius()
+            canvas.create_oval(px - radius, py - radius, px + radius, py + radius, fill="#ea580c", outline="")
             prev = (px, py)
         canvas.create_text(w // 2, 18, text="Pen-test signal response", font=("Helvetica", 11, "bold"))
 

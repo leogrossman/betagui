@@ -128,8 +128,9 @@ def build_overlap_scan_points(
     angle_points: int,
     angle_span_urad: float,
     solve_mode: Literal["mirror1_primary", "mirror2_primary", "two_mirror_target"],
-    diagonal_direction: Literal["upper_left_to_lower_right", "lower_left_to_upper_right"] = "upper_left_to_lower_right",
+    diagonal_direction: Literal["right_to_left", "left_to_right", "upper_left_to_lower_right", "lower_left_to_upper_right"] = "right_to_left",
     diagonal_slope: float | None = None,
+    pattern: str = "perpendicular_cross",
 ) -> list[ScanPoint]:
     axis_code = "x" if axis == "horizontal" else "y"
     motor_axis = "horizontal" if axis == "horizontal" else "vertical"
@@ -142,7 +143,7 @@ def build_overlap_scan_points(
     if not math.isfinite(slope) or abs(slope) < 1e-9:
         slope = fixed_position_diagonal_slope(geometry, axis)
     line_m1_values = linspace(0.0, line_span, line_count)
-    if diagonal_direction == "upper_left_to_lower_right":
+    if diagonal_direction in ("right_to_left", "upper_left_to_lower_right"):
         line_m1_values.reverse()
     cross_span = abs(geometry.steps_to_angle_delta(float(position_step_steps), axis_code, 1)) * max(0, cross_count - 1)
     cross_values = linspace(0.0, cross_span, cross_count)
@@ -154,8 +155,18 @@ def build_overlap_scan_points(
     for group_index, center_m1_urad in enumerate(line_m1_values):
         center_m2_urad = slope * center_m1_urad
         for cross_urad in cross_values:
-            mirror1_angle_urad = center_m1_urad + cross_urad * normal_m1
-            mirror2_angle_urad = center_m2_urad + cross_urad * normal_m2
+            if pattern == "horizontal_strips":
+                mirror1_angle_urad = center_m1_urad + cross_urad
+                mirror2_angle_urad = center_m2_urad
+                group_label = f"horizontal strip {group_index + 1}"
+            elif pattern == "vertical_strips":
+                mirror1_angle_urad = center_m1_urad
+                mirror2_angle_urad = center_m2_urad + cross_urad
+                group_label = f"vertical strip {group_index + 1}"
+            else:
+                mirror1_angle_urad = center_m1_urad + cross_urad * normal_m1
+                mirror2_angle_urad = center_m2_urad + cross_urad * normal_m2
+                group_label = f"cross-line {group_index + 1}"
             targets = dict(reference_steps)
             targets[m1_key] = reference_steps[m1_key] + geometry.urad_to_steps(mirror1_angle_urad, axis_code, 1)
             targets[m2_key] = reference_steps[m2_key] + geometry.urad_to_steps(mirror2_angle_urad, axis_code, 2)
@@ -169,7 +180,7 @@ def build_overlap_scan_points(
                     offset_y_mm=math.nan,
                     targets=MotorTargets(**targets),
                     group_index=group_index,
-                    group_label=f"line {group_index + 1}",
+                    group_label=group_label,
                 )
             )
             index += 1

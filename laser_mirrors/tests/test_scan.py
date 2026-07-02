@@ -235,6 +235,7 @@ class ScanTests(unittest.TestCase):
             40.0,
             'mirror1_primary',
             diagonal_slope=slope,
+            pattern='perpendicular_cross',
         )
         strips: dict[int, list] = {}
         for point in points:
@@ -245,6 +246,58 @@ class ScanTests(unittest.TestCase):
             self.assertAlmostEqual(point.angle_y_urad, slope * point.angle_x_urad, places=6)
         for strip_points in strips.values():
             self.assertGreater(len({round(point.angle_x_urad, 8) for point in strip_points}), 1)
+            self.assertGreater(len({round(point.angle_y_urad, 8) for point in strip_points}), 1)
+
+    def test_build_overlap_scan_points_can_make_horizontal_strips(self) -> None:
+        config = AppConfig()
+        geometry = LaserMirrorGeometry(config.geometry)
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        points = build_overlap_scan_points(
+            geometry,
+            controller.capture_reference(),
+            'vertical',
+            'mirror2',
+            3,
+            8.0,
+            5,
+            40.0,
+            'mirror1_primary',
+            diagonal_slope=-1.5,
+            pattern='horizontal_strips',
+        )
+        strips: dict[int, list] = {}
+        for point in points:
+            strips.setdefault(point.group_index, []).append(point)
+        self.assertEqual(len(strips), 3)
+        for strip_points in strips.values():
+            self.assertGreater(len({round(point.angle_x_urad, 8) for point in strip_points}), 1)
+            self.assertEqual(len({round(point.angle_y_urad, 8) for point in strip_points}), 1)
+
+    def test_build_overlap_scan_points_can_make_vertical_strips(self) -> None:
+        config = AppConfig()
+        geometry = LaserMirrorGeometry(config.geometry)
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        points = build_overlap_scan_points(
+            geometry,
+            controller.capture_reference(),
+            'vertical',
+            'mirror2',
+            3,
+            8.0,
+            5,
+            40.0,
+            'mirror1_primary',
+            diagonal_slope=-1.5,
+            pattern='vertical_strips',
+        )
+        strips: dict[int, list] = {}
+        for point in points:
+            strips.setdefault(point.group_index, []).append(point)
+        self.assertEqual(len(strips), 3)
+        for strip_points in strips.values():
+            self.assertEqual(len({round(point.angle_x_urad, 8) for point in strip_points}), 1)
             self.assertGreater(len({round(point.angle_y_urad, 8) for point in strip_points}), 1)
 
     def test_overlap_direction_can_be_reversed(self) -> None:
