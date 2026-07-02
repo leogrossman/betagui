@@ -23,7 +23,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded.scan.overlap_vertical_step_steps, 200.0)
         self.assertEqual(loaded.scan.overlap_horizontal_step_steps, 100.0)
         self.assertEqual(loaded.scan.overlap_line_span_urad, 300.0)
-        self.assertLess(loaded.scan.overlap_diagonal_slope, 0.0)
+        self.assertGreater(loaded.scan.overlap_diagonal_slope, 0.0)
         self.assertEqual(loaded.scan.overlap_pattern, "perpendicular_cross")
         self.assertEqual(loaded.scan.plot_dot_radius, 6.0)
 

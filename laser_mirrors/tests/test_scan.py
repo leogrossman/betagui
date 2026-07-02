@@ -334,7 +334,8 @@ class ScanTests(unittest.TestCase):
     def test_fixed_position_diagonal_slope_uses_geometry(self) -> None:
         config = AppConfig()
         geometry = LaserMirrorGeometry(config.geometry)
-        self.assertAlmostEqual(abs(fixed_position_diagonal_slope(geometry, 'vertical')), 1.3802, places=3)
+        self.assertAlmostEqual(fixed_position_diagonal_slope(geometry, 'vertical'), 1.3802, places=3)
+        self.assertAlmostEqual(fixed_position_diagonal_slope(geometry, 'horizontal'), -1.3802, places=3)
 
     def test_fit_overlap_diagonal_estimates_measured_slope(self) -> None:
         from laser_mirrors_app.models import MeasurementRecord

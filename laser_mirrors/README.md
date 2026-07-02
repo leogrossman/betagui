@@ -59,6 +59,7 @@ The tool is organized around two standard jobs:
    - choose how many points to sample along the diagonal center line
    - choose how many points to sample across that line and set the cross-line spacing
    - use the fixed-position slope estimate, invert the slope, or type a custom slope
+   - leave `Update slope when plane changes` on if you want the GUI to load the horizontal/vertical slope sign automatically
    - load the scan start from current RBV, captured reference, or the current optimum
    - use the live estimate to check approximate scan time, motor range, beam-position offset, and angle range before starting
    - inspect the mirror-1 vs mirror-2 deflection-angle map, the marked start point, the requested diagonal, the fitted measured diagonal, and the recommended optimum
@@ -325,6 +326,8 @@ It builds a diagonal center line in mirror-angle space and samples around it:
 7. load the scan start from current RBV, captured reference, or optimum
 
 The result is a focused diagonal family in `(mirror 1 deflection angle, mirror 2 deflection angle)` space. The live estimate shows point count, approximate time, angle range, motor target range around the chosen start, and approximate beam-position offset before the scan is run.
+
+The fixed-position slope magnitude is set mainly by the mirror-to-undulator distances, so horizontal and vertical are similar in size. The sign can differ by plane because mirror 2 has a separate horizontal/vertical sign convention. With the current geometry defaults, vertical is about `+1.38` and horizontal is about `-1.38`.
 
 ### Which solve mode is the literal fixed-position angle scan?
 

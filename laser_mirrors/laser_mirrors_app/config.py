@@ -90,7 +90,7 @@ class ScanConfig:
     overlap_vertical_step_steps: float = 200.0
     overlap_angle_span_urad: float = 300.0
     overlap_line_span_urad: float = 300.0
-    overlap_diagonal_slope: float = -1.38
+    overlap_diagonal_slope: float = 1.38
     overlap_pattern: str = "perpendicular_cross"
     plot_dot_radius: float = 6.0
 

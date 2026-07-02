@@ -222,8 +222,9 @@ class LaserMirrorApp:
         self.overlap_angle_points_var = tk.IntVar(value=9)
         self.overlap_angle_span_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_line_span_urad", self.config.scan.overlap_angle_span_urad))
         self.overlap_diagonal_var = tk.StringVar(value="right_to_left")
-        self.overlap_slope_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_diagonal_slope", -1.38))
+        self.overlap_slope_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_diagonal_slope", fixed_position_diagonal_slope(self.geometry, "vertical")))
         self.overlap_pattern_var = tk.StringVar(value=getattr(self.config.scan, "overlap_pattern", "perpendicular_cross"))
+        self.overlap_auto_plane_defaults_var = tk.BooleanVar(value=True)
         self.overlap_status_var = tk.StringVar(value="No overlap scan run yet.")
         self.overlap_estimate_var = tk.StringVar(value="Enter scan settings to see the estimated range and time.")
         self.overlap_start_vars: dict[str, tk.DoubleVar] = {key: tk.DoubleVar(value=0.0) for key in MOTOR_PVS}
@@ -604,6 +605,7 @@ class LaserMirrorApp:
         self._add_labeled_entry(pattern_box, "Diagonal slope m2/m1", self.overlap_slope_var, 3)
         ttk.Button(pattern_box, text="Use fixed-position slope", command=self._set_overlap_physical_slope).grid(row=4, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(pattern_box, text="Invert slope", command=self._invert_overlap_slope).grid(row=4, column=1, sticky="ew", pady=(8, 0))
+        ttk.Checkbutton(pattern_box, text="Update slope when plane changes", variable=self.overlap_auto_plane_defaults_var).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         size_box = ttk.LabelFrame(controls, text="Scan size", padding=10)
         size_box.pack(fill="x", pady=(8, 0))
@@ -920,8 +922,15 @@ class LaserMirrorApp:
             variable.trace_add("write", lambda *_args: self._on_live_setting_changed())
         for variable in self.overlap_start_vars.values():
             variable.trace_add("write", lambda *_args: self._on_live_setting_changed())
+        self.overlap_axis_var.trace_add("write", lambda *_args: self._overlap_plane_changed())
 
     def _on_live_setting_changed(self) -> None:
+        self._refresh_overlap_estimate()
+        self._refresh_plots()
+
+    def _overlap_plane_changed(self) -> None:
+        if self.overlap_auto_plane_defaults_var.get():
+            self._set_overlap_physical_slope(update_config=False, announce=False)
         self._refresh_overlap_estimate()
         self._refresh_plots()
 
@@ -1127,16 +1136,17 @@ class LaserMirrorApp:
         self.overlap_diagonal_var.set("right_to_left")
         self.overlap_pattern_var.set("perpendicular_cross")
         self.plot_dot_radius_var.set(7.0)
-        self._set_overlap_physical_slope(update_config=False)
+        self._set_overlap_physical_slope(update_config=False, announce=False)
         self._pull_ui_into_config()
         self._log("Applied coarse recovery defaults for visual laser search.")
         self.status_var.set("Coarse recovery defaults applied. Reconnect if backend settings changed.")
 
-    def _set_overlap_physical_slope(self, update_config: bool = True) -> None:
-        slope = -abs(fixed_position_diagonal_slope(self.geometry, self.overlap_axis_var.get()))
+    def _set_overlap_physical_slope(self, update_config: bool = True, announce: bool = True) -> None:
+        slope = fixed_position_diagonal_slope(self.geometry, self.overlap_axis_var.get())
         self.overlap_slope_var.set(round(slope, 4))
         if update_config:
             self._pull_ui_into_config()
+        if announce:
             self.overlap_status_var.set(f"Using fixed-position diagonal slope m2/m1 ~= {slope:.3f}.")
 
     def _invert_overlap_slope(self) -> None:
