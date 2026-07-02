@@ -91,10 +91,10 @@ class ScanConfig:
     overlap_angle_span_urad: float = 300.0
     overlap_line_span_urad: float = 300.0
     overlap_m1_span_urad: float = 600.0
-    overlap_m2_span_urad: float = 300.0
+    overlap_m2_span_urad: float = 600.0
     overlap_m1_span_steps: float = 300.0
-    overlap_m2_span_steps: float = 150.0
-    overlap_diagonal_slope: float = -0.5
+    overlap_m2_span_steps: float = 300.0
+    overlap_diagonal_slope: float = -1.38
     overlap_pattern: str = "horizontal_strips"
     overlap_serpentine: bool = True
     plot_dot_radius: float = 6.0

@@ -57,7 +57,7 @@ The tool is organized around two standard jobs:
    - choose `vertical` or `horizontal`
    - choose the pattern: perpendicular cross-lines, horizontal strips, or vertical strips
    - set the M1 and M2 spans as whole motor steps; the µrad fields show the converted physical mirror-angle span
-   - use the span-derived negative diagonal slope, invert the slope, or type a custom slope
+   - use the fixed-position diagonal slope, invert the slope, or type a custom slope; changing spans does not change the slope
    - leave serpentine strip order on for the shortest motor path
    - load the scan start from current RBV, captured reference, or the current optimum
    - use the live estimate to check approximate scan time, motor range, beam-position offset, and angle range before starting
@@ -320,8 +320,8 @@ It builds a diagonal center line in mirror-angle space and samples around it:
    - `perpendicular_cross` samples across the diagonal normal, but can move both motors more
    - `vertical_strips` keeps mirror 1 fixed inside each strip and sweeps mirror 2; use it mainly as an orthogonal diagnostic if horizontal strips miss the useful response direction
 4. choose the number of strip centers and points per strip
-5. set M1 and M2 plot spans in either µrad or steps; the corresponding unit updates live
-6. use the span-derived negative diagonal slope or set a custom positive/negative slope
+5. set M1 and M2 spans in either µrad or steps; the corresponding unit updates live, but the diagonal slope stays fixed
+6. use the fixed-position negative diagonal slope or set a custom positive/negative slope
 7. load the scan start from current RBV, captured reference, or optimum
 
 The result is a focused diagonal family in `(mirror 1 deflection angle, mirror 2 deflection angle)` space. The live estimate shows point count, approximate time, angle range, motor target range around the chosen start, and approximate beam-position offset before the scan is run.
