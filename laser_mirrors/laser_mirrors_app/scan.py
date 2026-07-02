@@ -156,7 +156,7 @@ def build_overlap_scan_points(
         strip_cross_values = list(reversed(cross_values)) if serpentine and group_index % 2 else cross_values
         for cross_urad in strip_cross_values:
             if pattern == "horizontal_strips":
-                mirror1_angle_urad = center_m1_urad + cross_urad
+                mirror1_angle_urad = cross_urad
                 mirror2_angle_urad = center_m2_urad
                 group_label = f"horizontal strip {group_index + 1}"
             elif pattern == "vertical_strips":

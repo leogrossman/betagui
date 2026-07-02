@@ -56,9 +56,8 @@ The tool is organized around two standard jobs:
    - use the `Two-mirror scan` tab
    - choose `vertical` or `horizontal`
    - choose the pattern: perpendicular cross-lines, horizontal strips, or vertical strips
-   - choose how many points to sample along the diagonal center line
-   - choose how many points to sample across that line and set the cross-line spacing
-   - use the negative fixed-position slope estimate, invert the slope, or type a custom slope
+   - set the M1 and M2 plot spans in either µrad or steps; the paired fields update each other
+   - use the span-derived negative diagonal slope, invert the slope, or type a custom slope
    - leave serpentine strip order on for the shortest motor path
    - load the scan start from current RBV, captured reference, or the current optimum
    - use the live estimate to check approximate scan time, motor range, beam-position offset, and angle range before starting
@@ -320,9 +319,9 @@ It builds a diagonal center line in mirror-angle space and samples around it:
    - `horizontal_strips` is the default; mirror 2 stays fixed inside each strip and mirror 1 sweeps
    - `perpendicular_cross` samples across the diagonal normal, but can move both motors more
    - `vertical_strips` keeps mirror 1 fixed inside each strip and sweeps mirror 2; use it mainly as an orthogonal diagnostic if horizontal strips miss the useful response direction
-4. choose the number of center-line points and the line span
-5. choose the number of cross-line points and the cross-line spacing
-6. use the negative fixed-position slope estimate or set a custom positive/negative slope
+4. choose the number of strip centers and points per strip
+5. set M1 and M2 plot spans in either µrad or steps; the corresponding unit updates live
+6. use the span-derived negative diagonal slope or set a custom positive/negative slope
 7. load the scan start from current RBV, captured reference, or optimum
 
 The result is a focused diagonal family in `(mirror 1 deflection angle, mirror 2 deflection angle)` space. The live estimate shows point count, approximate time, angle range, motor target range around the chosen start, and approximate beam-position offset before the scan is run.
