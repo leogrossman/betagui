@@ -57,6 +57,7 @@ The tool is organized around two standard jobs:
    - choose `vertical` or `horizontal`
    - choose the pattern: perpendicular cross-lines, horizontal strips, or vertical strips
    - set the M1 and M2 spans as whole motor steps; the µrad fields show the converted physical mirror-angle span
+   - leave `Plot axes` on `angle` for the optical view, or switch to `motor_steps` to inspect raw motor positions
    - use the fixed-position diagonal slope, invert the slope, or type a custom slope; changing spans does not change the slope
    - leave serpentine strip order on for the shortest motor path
    - load the scan start from current RBV, captured reference, or the current optimum
@@ -325,6 +326,8 @@ It builds a diagonal center line in mirror-angle space and samples around it:
 7. load the scan start from current RBV, captured reference, or optimum
 
 The result is a focused diagonal family in `(mirror 1 deflection angle, mirror 2 deflection angle)` space. The live estimate shows point count, approximate time, angle range, motor target range around the chosen start, and approximate beam-position offset before the scan is run.
+
+The default strip scan uses a narrow strip width and a wide strip-center range: `M1 span = 30 steps`, `M2 span = 300 steps`. In the default vertical plane this is about `56.7 µrad` by `567 µrad`. This gives visibly separated strips without making each strip too wide.
 
 The fixed-position slope magnitude is set mainly by the mirror-to-undulator distances, so horizontal and vertical are similar in size. For the current beamline workflow the preset uses the negative branch in both planes, about `-1.38`.
 
