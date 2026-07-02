@@ -379,6 +379,38 @@ class ScanTests(unittest.TestCase):
         self.assertAlmostEqual(fit.slope, -1.4, places=6)
         self.assertAlmostEqual(fit.slope_error, -0.02, places=6)
 
+    def test_fit_overlap_diagonal_uses_best_point_per_strip(self) -> None:
+        from laser_mirrors_app.models import MeasurementRecord
+        rows = []
+        base = dict(
+            mode='overlap_vertical', elapsed_s=0.0, offset_x_mm=float('nan'), offset_y_mm=float('nan'),
+            signal_label='P1 avg', signal_pv='pv', signal_value=1.0, signal_std=0.0, samples_used=1,
+            commanded_m1_horizontal=0.0, commanded_m1_vertical=0.0, commanded_m2_horizontal=0.0, commanded_m2_vertical=0.0,
+            rbv_m1_horizontal=0.0, rbv_m1_vertical=0.0, rbv_m2_horizontal=0.0, rbv_m2_vertical=0.0,
+            timestamp_iso='t',
+        )
+        optima = [(0.0, 0.0), (20.0, -10.0), (40.0, -20.0)]
+        index = 0
+        for group_index, (best_x, y) in enumerate(optima):
+            for x, signal in ((-80.0, 1.0), (best_x, 10.0), (80.0, 1.0)):
+                rows.append(
+                    MeasurementRecord(
+                        point_index=index,
+                        angle_x_urad=x,
+                        angle_y_urad=y,
+                        signal_average=signal,
+                        group_index=group_index,
+                        group_label=f'strip {group_index}',
+                        **base,
+                    )
+                )
+                index += 1
+        fit = fit_overlap_diagonal(rows, -0.5)
+        self.assertIsNotNone(fit)
+        assert fit is not None
+        self.assertEqual(fit.points_used, 3)
+        self.assertAlmostEqual(fit.slope, -0.5, places=6)
+
 
 if __name__ == "__main__":
     unittest.main()

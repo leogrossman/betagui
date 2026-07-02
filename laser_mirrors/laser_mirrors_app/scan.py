@@ -188,18 +188,33 @@ def build_overlap_scan_points(
 
 
 def fit_overlap_diagonal(measurements: list[MeasurementRecord], ideal_slope: float) -> DiagonalFit | None:
-    rows = [
+    measured_rows = [
         row for row in measurements
         if row.mode.startswith("overlap_")
         and math.isfinite(row.angle_x_urad)
         and math.isfinite(row.angle_y_urad)
         and math.isfinite(row.signal_average)
     ]
+    groups: dict[int, list[MeasurementRecord]] = {}
+    for row in measured_rows:
+        groups.setdefault(row.group_index, []).append(row)
+    grouped_fit = len(groups) > 1
+    if grouped_fit:
+        rows = [
+            max(group_rows, key=lambda row: row.signal_average)
+            for _group_index, group_rows in sorted(groups.items())
+            if group_rows
+        ]
+    else:
+        rows = measured_rows
     if len(rows) < 2:
         return None
-    values = [row.signal_average for row in rows]
-    lo = min(values)
-    weights = [max(0.0, value - lo) + 1e-9 for value in values]
+    if grouped_fit:
+        weights = [1.0 for _row in rows]
+    else:
+        values = [row.signal_average for row in rows]
+        lo = min(values)
+        weights = [max(0.0, value - lo) + 1e-9 for value in values]
     weight_sum = sum(weights)
     mean_x = sum(weight * row.angle_x_urad for weight, row in zip(weights, rows)) / weight_sum
     mean_y = sum(weight * row.angle_y_urad for weight, row in zip(weights, rows)) / weight_sum

@@ -1937,8 +1937,8 @@ class LaserMirrorApp:
                 if fit is not None:
                     self.overlap_status_var.set(
                         self.overlap_status_var.get()
-                        + f" Measured diagonal slope={fit.slope:.3f} (target {fit.ideal_slope:.3f}, delta={fit.slope_error:+.3f}); "
-                        f"weighted RMS distance={fit.weighted_rms_distance_urad:.1f} urad."
+                        + f" Strip-optimum slope={fit.slope:.3f} (target {fit.ideal_slope:.3f}, delta={fit.slope_error:+.3f}); "
+                        f"ridge RMS distance={fit.weighted_rms_distance_urad:.1f} urad."
                     )
                 self.overlap_status_var.set(self.overlap_status_var.get() + self._overlap_next_start_recommendation(best_point, fit))
             else:
@@ -2741,7 +2741,7 @@ class LaserMirrorApp:
         canvas.create_line(legend_x, legend_y, legend_x + 26, legend_y, fill="#2563eb", width=2, dash=(6, 4))
         canvas.create_text(legend_x + 34, legend_y, anchor="w", text="requested diagonal", fill="#1e40af")
         canvas.create_line(legend_x, legend_y + 18, legend_x + 26, legend_y + 18, fill="#dc2626", width=2)
-        canvas.create_text(legend_x + 34, legend_y + 18, anchor="w", text="measured fit", fill="#991b1b")
+        canvas.create_text(legend_x + 34, legend_y + 18, anchor="w", text="strip-optimum fit", fill="#991b1b")
         canvas.create_text(legend_x, legend_y + 36, anchor="w", text="X start  + optimum", fill="#374151")
 
         for frac, value in ((0.0, xlo), (0.5, 0.5 * (xlo + xhi)), (1.0, xhi)):

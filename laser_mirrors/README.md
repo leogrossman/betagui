@@ -276,9 +276,9 @@ This matches the two-mirror diagonal-scan logic:
 - define a diagonal center line through the chosen start position
 - optionally sample perpendicular cross-lines around that diagonal
 - or use horizontal / vertical strip modes where one mirror coordinate stays fixed within a strip
-- compare the requested diagonal with the measured signal-weighted fitted diagonal
+- compare the requested diagonal with a fitted ridge through the best point from each scan strip / cross-line
 
-The start point before the scan is marked on the plot, the requested diagonal is dashed blue, the measured fit is red, and the recommended optimum is marked separately. The global plot-dot radius in `Overview` changes the dot size live without rerunning a scan.
+The start point before the scan is marked on the plot, the requested diagonal is dashed blue, the strip-optimum ridge fit is red, and the recommended optimum is marked separately. The global plot-dot radius in `Overview` changes the dot size live without rerunning a scan.
 
 The optional interpolated background in the GUI is only a visual guide.
 The measured dots remain the ground truth.
