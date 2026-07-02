@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from laser_mirrors_app.config import AppConfig
 from laser_mirrors_app.geometry import LaserMirrorGeometry
 from laser_mirrors_app.hardware import MirrorController, PVFactory, build_signal_backend
+from laser_mirrors_app.models import SignalReading
 from laser_mirrors_app.scan import ScanContext, ScanRunner, bounded_rectangular_spiral, build_angle_scan_points, build_overlap_scan_points, build_spiral_scan_points, choose_best_point, fit_overlap_diagonal, fixed_position_diagonal_slope
 
 
@@ -80,6 +81,54 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(len(seen), 4)
         self.assertEqual(len(runner.measurements), 4)
         self.assertTrue(finished)
+
+    def test_runner_stop_does_not_publish_partial_overlap_best(self) -> None:
+        config = AppConfig()
+        config.scan.dwell_s = 0.0
+        config.scan.p1_samples_per_point = 1
+        config.scan.overlap_point_min_dwell_s = 0.0
+        config.scan.overlap_strip_start_extra_dwell_s = 0.0
+        config.controller.inter_put_delay_s = 0.0
+        config.controller.settle_s = 0.0
+        config.controller.max_step_per_put = 1000.0
+        geometry = LaserMirrorGeometry(config.geometry)
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        out = Path(tempfile.mkdtemp())
+        runner = ScanRunner(config, geometry, controller, None, lambda msg: None, out)
+
+        class StopAfterFirstRead:
+            label = "test"
+            pv_name = "test"
+
+            def read(self):
+                runner.request_stop()
+                return SignalReading(self.label, self.pv_name, 1.0, True)
+
+        runner.signal_backend = StopAfterFirstRead()
+        points = build_overlap_scan_points(
+            geometry,
+            controller.capture_reference(),
+            'vertical',
+            'mirror2',
+            1,
+            0.0,
+            2,
+            10.0,
+            'mirror1_primary',
+            diagonal_slope=-1.38,
+            pattern='horizontal_strips',
+        )
+        finished = []
+        ctx = ScanContext(reference_steps=controller.capture_reference(), signal_label="test", signal_pv="test")
+        runner.start_custom("overlap_stop", points, ctx, on_measurement=lambda measurement: None, on_finish=lambda path, best: finished.append((path, best)))
+        runner.join(timeout=5.0)
+
+        self.assertTrue(runner.was_stopped_by_user)
+        self.assertTrue(finished)
+        session_dir, best = finished[0]
+        self.assertIsNone(best)
+        self.assertFalse((session_dir / "best_point.json").exists())
 
     def test_primary_mirror_mode_keeps_offset(self) -> None:
         config = AppConfig()

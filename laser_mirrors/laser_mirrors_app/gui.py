@@ -223,7 +223,8 @@ class LaserMirrorApp:
         self.overlap_m1_span_steps_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_m1_span_steps", 350.0))
         self.overlap_m2_span_steps_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_m2_span_steps", 1800.0))
         self.overlap_plot_axis_var = tk.StringVar(value=getattr(self.config.scan, "overlap_plot_axis", "angle"))
-        self.overlap_strip_start_extra_dwell_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_strip_start_extra_dwell_s", 1.0))
+        self.overlap_point_min_dwell_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_point_min_dwell_s", 1.0))
+        self.overlap_strip_start_extra_dwell_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_strip_start_extra_dwell_s", 1.25))
         self.overlap_diagonal_var = tk.StringVar(value="right_to_left")
         self.overlap_slope_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_diagonal_slope", fixed_position_diagonal_slope(self.geometry, "vertical")))
         self.overlap_pattern_var = tk.StringVar(value=getattr(self.config.scan, "overlap_pattern", "horizontal_strips"))
@@ -626,7 +627,8 @@ class LaserMirrorApp:
         self._add_labeled_entry(size_box, "M2 span [steps]", self.overlap_m2_span_steps_var, 4)
         self._add_labeled_entry(size_box, "M2 span [µrad]", self.overlap_m2_span_urad_var, 5)
         self._add_labeled_combo(size_box, "Plot axes", self.overlap_plot_axis_var, ["angle", "motor_steps"], 6)
-        self._add_labeled_entry(size_box, "Strip-start wait [s]", self.overlap_strip_start_extra_dwell_var, 7)
+        self._add_labeled_entry(size_box, "QPD wait / point [s]", self.overlap_point_min_dwell_var, 7)
+        self._add_labeled_entry(size_box, "Extra strip-start wait [s]", self.overlap_strip_start_extra_dwell_var, 8)
         ttk.Label(
             size_box,
             text=(
@@ -637,7 +639,7 @@ class LaserMirrorApp:
             ),
             wraplength=340,
             justify="left",
-        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=9, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         start_box = ttk.LabelFrame(controls, text="Scan start position", padding=10)
         start_box.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
@@ -929,6 +931,7 @@ class LaserMirrorApp:
             self.overlap_slope_var,
             self.overlap_diagonal_var,
             self.overlap_plot_axis_var,
+            self.overlap_point_min_dwell_var,
             self.overlap_strip_start_extra_dwell_var,
             self.dwell_var,
             self.samples_var,
@@ -1151,6 +1154,7 @@ class LaserMirrorApp:
         self.config.scan.overlap_line_span_urad = self.config.scan.overlap_m1_span_urad
         self.config.scan.overlap_diagonal_slope = float(self.overlap_slope_var.get())
         self.config.scan.overlap_plot_axis = self.overlap_plot_axis_var.get()
+        self.config.scan.overlap_point_min_dwell_s = max(0.0, float(self.overlap_point_min_dwell_var.get()))
         self.config.scan.overlap_strip_start_extra_dwell_s = max(0.0, float(self.overlap_strip_start_extra_dwell_var.get()))
         self.config.scan.overlap_pattern = self.overlap_pattern_var.get()
         self.config.scan.overlap_serpentine = bool(self.overlap_serpentine_var.get())
@@ -1188,7 +1192,8 @@ class LaserMirrorApp:
         self.overlap_m1_span_steps_var.set(350.0)
         self.overlap_m2_span_steps_var.set(1800.0)
         self.overlap_plot_axis_var.set("angle")
-        self.overlap_strip_start_extra_dwell_var.set(1.0)
+        self.overlap_point_min_dwell_var.set(1.0)
+        self.overlap_strip_start_extra_dwell_var.set(1.25)
         self.overlap_slope_var.set(round(fixed_position_diagonal_slope(self.geometry, self.overlap_axis_var.get()), 4))
         self.overlap_diagonal_var.set("right_to_left")
         self.overlap_pattern_var.set("horizontal_strips")
@@ -1298,7 +1303,8 @@ class LaserMirrorApp:
             targets = [self.geometry.to_undulator_target(MirrorAngles(point.angle_x_urad, point.angle_y_urad), axis_code) for point in points]
             offsets = [target.offset_mm for target in targets]
             angles = [target.angle_urad for target in targets]
-            per_point_s = max(0.0, float(self.dwell_var.get())) + max(1, int(self.samples_var.get())) * 0.02 + max(0.0, float(self.settle_var.get()))
+            dwell_s = max(max(0.0, float(self.dwell_var.get())), max(0.0, float(self.overlap_point_min_dwell_var.get())))
+            per_point_s = dwell_s + max(1, int(self.samples_var.get())) * 0.02 + max(0.0, float(self.settle_var.get()))
             strip_count = len({point.group_index for point in points if point.mode.startswith("overlap_")})
             strip_extra_s = strip_count * max(0.0, float(self.overlap_strip_start_extra_dwell_var.get()))
             total_s = len(points) * per_point_s + strip_extra_s
@@ -1910,7 +1916,10 @@ class LaserMirrorApp:
                 f"Best {best_point.objective}: {best_point.signal_label}={best_point.signal_value:.6g} "
                 f"at ax={best_point.angle_x_urad:.2f} µrad, ay={best_point.angle_y_urad:.2f} µrad"
             )
-        if self.scan_runner.last_error:
+        stopped_by_user = getattr(self.scan_runner, "was_stopped_by_user", False)
+        if stopped_by_user:
+            self.status_var.set("Scan stopped by user. Partial data saved; scan start unchanged.")
+        elif self.scan_runner.last_error:
             self.status_var.set("Scan finished with warning/error.")
         else:
             self.status_var.set("Scan finished.")
@@ -1956,6 +1965,10 @@ class LaserMirrorApp:
                         f"ridge RMS distance={fit.weighted_rms_distance_urad:.1f} urad."
                     )
                 self.overlap_status_var.set(self.overlap_status_var.get() + self._overlap_next_start_recommendation(best_point, fit))
+            elif stopped_by_user:
+                self.overlap_status_var.set(
+                    "Overlap scan stopped by user. Partial data was saved, but no optimum was loaded and the scan start stayed unchanged."
+                )
             else:
                 self.overlap_status_var.set("Overlap scan finished without a valid optimum.")
         self._save_legacy_state()

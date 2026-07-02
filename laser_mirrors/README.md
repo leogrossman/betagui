@@ -333,7 +333,7 @@ The fixed-position slope magnitude is set mainly by the mirror-to-undulator dist
 
 `right_to_left` and `left_to_right` measure the same points; they choose both which end of the diagonal is visited first and which side of each strip is entered first. With `right_to_left`, each horizontal strip starts on its right edge before serpentine alternation. With `left_to_right`, it starts on its left edge. Serpentine strip order is usually most efficient because every other strip is swept in reverse, avoiding a flyback to the same edge before the next strip. Turn serpentine off only when you deliberately want every strip approached from the same side to check backlash or hysteresis.
 
-The first point of every overlap strip waits an additional `Strip-start wait` before sampling. The default is `1.0 s`, matching the approximate QPD PV update cadence so the first measured value after a strip-to-strip motor move is not stale.
+Every overlap point waits at least `QPD wait / point` before sampling. The default is `1.0 s`, matching the approximate QPD PV update cadence so each measured value is taken after the motor has settled and the QPD PV has had time to publish a fresh value. The first point of every overlap strip also waits an additional `Extra strip-start wait`; the default is `1.25 s` for the larger strip-to-strip motor reposition.
 
 After an overlap scan, the GUI prints the recommended optimum as all four motor PV targets with deltas from the previous start. The scan start stays at the reference/typed value until you explicitly press `Move to optimum` or `Use optimum`; then running the same scan again is the intended verification step.
 
@@ -545,7 +545,8 @@ These defaults are intended for control-room measurement runs without racing the
 - angle spans: `50 µrad`
 - `7 x 7` points
 - `0.50 s` dwell after each completed point move
-- `1.0 s` extra wait on the first point of each overlap strip
+- `1.0 s` minimum QPD wait before every overlap point measurement
+- `1.25 s` extra wait on the first point of each overlap strip
 - `3` samples per point
 - `mirror1_primary` solve mode
 - motion throttle:
@@ -553,7 +554,7 @@ These defaults are intended for control-room measurement runs without racing the
   - `inter_put_delay_s = 0.05`
   - `settle_s = 0.30`
 
-The per-point estimate is roughly `settle_s + dwell_s + 0.02 s * samples`, plus the real motor travel / DMOV wait time. Overlap scans add the strip-start wait once per strip.
+The per-point estimate is roughly `settle_s + max(dwell_s, QPD wait) + 0.02 s * samples`, plus the real motor travel / DMOV wait time. Overlap scans add the strip-start wait once per strip.
 
 ## Control-room run instructions
 

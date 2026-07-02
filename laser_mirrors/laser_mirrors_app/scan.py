@@ -434,6 +434,7 @@ class ScanRunner:
         self.command_log: list[CommandRecord] = []
         self.session_dir: Path | None = None
         self.last_error: str | None = None
+        self.was_stopped_by_user = False
 
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
@@ -492,6 +493,7 @@ class ScanRunner:
         self.measurements.clear()
         self.command_log.clear()
         self.last_error = None
+        self.was_stopped_by_user = False
         self.clear_stop()
         run_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
         self.session_dir = self.output_root / ("laser_mirror_" + mode + "_" + run_id)
@@ -520,6 +522,7 @@ class ScanRunner:
         self.measurements.clear()
         self.command_log.clear()
         self.last_error = None
+        self.was_stopped_by_user = False
         self.clear_stop()
         run_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
         self.session_dir = self.output_root / ("laser_mirror_" + mode + "_" + run_id)
@@ -572,14 +575,22 @@ class ScanRunner:
                 if hasattr(self.signal_backend, "update_target") and point.angle_x_urad == point.angle_x_urad:
                     self.signal_backend.update_target(point.angle_x_urad, point.angle_y_urad)
                 dwell_s = max(0.0, self.config.scan.dwell_s)
-                if point.mode.startswith("overlap_") and point.group_index != previous_group_index:
-                    strip_wait_s = max(0.0, getattr(self.config.scan, "overlap_strip_start_extra_dwell_s", 0.0))
-                    if strip_wait_s > 0.0:
-                        dwell_s += strip_wait_s
+                if point.mode.startswith("overlap_"):
+                    qpd_wait_s = max(0.0, getattr(self.config.scan, "overlap_point_min_dwell_s", 0.0))
+                    if dwell_s < qpd_wait_s:
                         self.debug(
-                            f"Point {point.index + 1}/{total_points}: first point in {point.group_label}; "
-                            f"adding {strip_wait_s:.2f} s strip-start wait before sampling."
+                            f"Point {point.index + 1}/{total_points}: increasing dwell from {dwell_s:.2f} s "
+                            f"to QPD wait {qpd_wait_s:.2f} s before sampling."
                         )
+                        dwell_s = qpd_wait_s
+                    if point.group_index != previous_group_index:
+                        strip_wait_s = max(0.0, getattr(self.config.scan, "overlap_strip_start_extra_dwell_s", 0.0))
+                        if strip_wait_s > 0.0:
+                            dwell_s += strip_wait_s
+                            self.debug(
+                                f"Point {point.index + 1}/{total_points}: first point in {point.group_label}; "
+                                f"adding {strip_wait_s:.2f} s strip-start wait before sampling."
+                            )
                 previous_group_index = point.group_index
                 self.debug(f"Point {point.index + 1}/{total_points}: move complete, dwelling for {dwell_s:.2f} s.")
                 end_time = time.perf_counter() + dwell_s
@@ -647,9 +658,12 @@ class ScanRunner:
         except Exception as exc:  # noqa: BLE001
             self.last_error = str(exc)
             self.debug(f"Scan aborted with error: {exc}")
-        self._write_session(points)
-        best = choose_best_point(self.measurements, self.config.scan.objective)
-        if best is not None:
+        self.was_stopped_by_user = self._stop_requested.is_set()
+        self._write_session(points, write_best=not self.was_stopped_by_user)
+        best = None if self.was_stopped_by_user else choose_best_point(self.measurements, self.config.scan.objective)
+        if self.was_stopped_by_user:
+            self.debug("Scan stopped by user; leaving best point unset so partial data is not promoted.")
+        elif best is not None:
             self.debug(
                 f"Scan finished. Best point: index={best.point_index} "
                 f"angle=({best.angle_x_urad:.2f}, {best.angle_y_urad:.2f}) µrad "
@@ -659,7 +673,7 @@ class ScanRunner:
             self.debug("Scan finished with no valid best point.")
         on_finish(self.session_dir, best)
 
-    def _write_session(self, points: list[ScanPoint]) -> None:
+    def _write_session(self, points: list[ScanPoint], write_best: bool = True) -> None:
         assert self.session_dir is not None
         (self.session_dir / "config.json").write_text(json.dumps(asdict(self.config), indent=2, sort_keys=True))
         (self.session_dir / "plan.json").write_text(json.dumps([asdict(point) for point in points], indent=2))
@@ -672,7 +686,7 @@ class ScanRunner:
                 writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
                 writer.writeheader()
                 writer.writerows(rows)
-        best = choose_best_point(self.measurements, self.config.scan.objective)
+        best = choose_best_point(self.measurements, self.config.scan.objective) if write_best else None
         if best is not None:
             (self.session_dir / "best_point.json").write_text(json.dumps(asdict(best), indent=2, sort_keys=True))
 
