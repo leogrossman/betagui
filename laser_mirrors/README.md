@@ -331,7 +331,7 @@ The fixed-position slope magnitude is set mainly by the mirror-to-undulator dist
 
 `right_to_left` and `left_to_right` measure the same points; they only choose which end of the diagonal is visited first. Serpentine strip order is usually most efficient because every other strip is swept in reverse, avoiding a flyback to the same edge before the next strip. Turn serpentine off only when you deliberately want every strip approached from the same side to check backlash or hysteresis.
 
-After an overlap scan, the GUI loads the recommended optimum into the next two-mirror scan start fields and prints all four motor PV targets with deltas from the previous start. Running the same scan again from that loaded start is the intended verification step.
+After an overlap scan, the GUI prints the recommended optimum as all four motor PV targets with deltas from the previous start. The scan start stays at the reference/typed value until you explicitly press `Move to optimum` or `Use optimum`; then running the same scan again is the intended verification step.
 
 ### Which solve mode is the literal fixed-position angle scan?
 

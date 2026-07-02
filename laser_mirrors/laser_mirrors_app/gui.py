@@ -1203,9 +1203,9 @@ class LaserMirrorApp:
             rms_steps = getattr(fit, "weighted_rms_distance_urad") / max(abs(step_scale), 1e-9)
             accuracy_note = f" Fit scatter is about {getattr(fit, 'weighted_rms_distance_urad'):.1f} urad (~{rms_steps:.1f} motor steps)."
         return (
-            " Next verification start loaded from optimum: "
+            " Recommended optimum targets: "
             + next_start
-            + ". Run the same scan again to verify the peak stays near the center."
+            + ". Use 'Move to optimum' to move there and make it the next scan start, or 'Use optimum' to load it without moving."
             + accuracy_note
         )
 
@@ -1525,19 +1525,19 @@ class LaserMirrorApp:
         self.status_var.set("STOP sent to all motors.")
         self._log("STOP all issued.")
 
-    def _move_motor_targets(self, targets: dict[str, float], description: str) -> None:
+    def _move_motor_targets(self, targets: dict[str, float], description: str) -> bool:
         if self.scan_runner.is_running():
             messagebox.showinfo("Scan running", "Stop the running scan first.")
-            return
+            return False
         self._save_motor_recovery()
         ok, errors = self.controller.validate_targets(targets)
         if not ok:
             messagebox.showerror("Unsafe move blocked", "\n".join(errors))
-            return
+            return False
         preview = self.controller.plan_absolute_move(self.controller.current_steps(), targets)
         if self.config.controller.preview_required and not self._show_command_preview(preview, description):
             self._log("Operator cancelled move preview.")
-            return
+            return False
         try:
             moved = self.controller.move_absolute_group(
                 targets,
@@ -1549,9 +1549,11 @@ class LaserMirrorApp:
                 self.status_var.set(description)
                 self._refresh_motor_table()
                 self._save_legacy_state()
+            return bool(moved)
         except Exception as exc:  # noqa: BLE001
             self._log(f"Motor move failed: {exc}")
             messagebox.showerror("Move failed", str(exc))
+            return False
 
     def _append_command_record(self, record) -> None:
         self._log(json.dumps({"timestamp": record.timestamp, "action": record.action, "payload": record.payload}))
@@ -1795,7 +1797,11 @@ class LaserMirrorApp:
         if self.best_point is None:
             messagebox.showinfo("No best point", "Run a scan first.")
             return
-        self._move_motor_targets(self.best_point.targets.as_dict(), "Move to best point")
+        targets = self.best_point.targets.as_dict()
+        if self._move_motor_targets(targets, "Move to best point"):
+            self._set_overlap_start_vars(targets)
+            if any(row.mode.startswith("overlap_") for row in self.measurements):
+                self.overlap_status_var.set("Moved to optimum and loaded it as the next two-mirror scan start.")
 
     def _on_measurement_thread(self, measurement: MeasurementRecord) -> None:
         self.root.after(0, self._record_measurement, measurement)
@@ -1893,7 +1899,6 @@ class LaserMirrorApp:
                         + f" Measured diagonal slope={fit.slope:.3f} (target {fit.ideal_slope:.3f}, delta={fit.slope_error:+.3f}); "
                         f"weighted RMS distance={fit.weighted_rms_distance_urad:.1f} urad."
                     )
-                self._set_overlap_start_vars(best_point.targets.as_dict())
                 self.overlap_status_var.set(self.overlap_status_var.get() + self._overlap_next_start_recommendation(best_point, fit))
             else:
                 self.overlap_status_var.set("Overlap scan finished without a valid optimum.")
