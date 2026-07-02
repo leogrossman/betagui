@@ -545,7 +545,7 @@ These defaults are intended for control-room measurement runs without racing the
 - angle spans: `50 µrad`
 - `7 x 7` points
 - `0.50 s` dwell after each completed point move
-- `1.0 s` minimum QPD wait before every overlap point measurement
+- `2.0 s` minimum QPD wait before every overlap point measurement
 - `1.25 s` extra wait on the first point of each overlap strip
 - `3` samples per point
 - `mirror1_primary` solve mode
@@ -554,7 +554,7 @@ These defaults are intended for control-room measurement runs without racing the
   - `inter_put_delay_s = 0.05`
   - `settle_s = 0.30`
 
-The per-point estimate is roughly `settle_s + max(dwell_s, QPD wait) + 0.02 s * samples`, plus the real motor travel / DMOV wait time. Overlap scans add the strip-start wait once per strip.
+The per-point estimate is roughly `settle_s + max(dwell_s, QPD wait) + 0.02 s * samples`, plus the real motor travel / DMOV wait time. Overlap scans add the strip-start wait once per strip. The overlap QPD wait happens after the commanded motor move has completed and the controller settle wait has elapsed. With the 1 Hz QPD PV update, the default `2.0 s` wait gives a safer margin so each point is read after a fresh PV update.
 
 ## Control-room run instructions
 
