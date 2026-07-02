@@ -2672,26 +2672,60 @@ class LaserMirrorApp:
         margin = 48
         canvas.create_rectangle(margin, margin, w - margin, h - margin, outline="#999999")
         relevant = [row for row in self.measurements if row.mode.startswith("overlap_")]
-        if not relevant:
-            canvas.create_text(w // 2, h // 2, text="No overlap scan data yet", fill="#666666")
-            return
+        try:
+            planned_points = self._overlap_scan_points_from_vars()
+        except Exception:  # noqa: BLE001
+            planned_points = []
         xs = [row.angle_x_urad / 1000.0 for row in relevant]
         ys = [row.angle_y_urad / 1000.0 for row in relevant]
-        xlo, xhi = min(xs + [0.0]), max(xs + [0.0])
-        ylo, yhi = min(ys + [0.0]), max(ys + [0.0])
-        xspan = max(xhi - xlo, 1e-9)
-        yspan = max(yhi - ylo, 1e-9)
+        planned_xs = [point.angle_x_urad / 1000.0 for point in planned_points]
+        planned_ys = [point.angle_y_urad / 1000.0 for point in planned_points]
+        plot_xs = xs + planned_xs + [0.0]
+        plot_ys = ys + planned_ys + [0.0]
         values = [row.signal_average for row in relevant if row.signal_average == row.signal_average]
         lo = min(values) if values else 0.0
         hi = max(values) if values else 1.0
         vspan = max(hi - lo, 1e-9)
-        plane = "horizontal" if any(row.mode == "overlap_horizontal" for row in relevant) else "vertical"
+        plane = (
+            "horizontal"
+            if any(row.mode == "overlap_horizontal" for row in relevant)
+            else self.overlap_axis_var.get()
+        )
+        ideal_slope_mrad = float(self.overlap_slope_var.get())
+        base_xlo, base_xhi = min(plot_xs), max(plot_xs)
+        plot_ys.extend([ideal_slope_mrad * base_xlo, ideal_slope_mrad * base_xhi])
+        fit = fit_overlap_diagonal(self.measurements, float(self.overlap_slope_var.get()))
+        if fit is not None:
+            fit_intercept_mrad = fit.intercept_urad / 1000.0
+            plot_ys.extend([fit.slope * base_xlo + fit_intercept_mrad, fit.slope * base_xhi + fit_intercept_mrad])
+        xlo, xhi = min(plot_xs), max(plot_xs)
+        xpad = max((xhi - xlo) * 0.08, 0.02)
+        xlo -= xpad
+        xhi += xpad
+        plot_ys.extend([ideal_slope_mrad * xlo, ideal_slope_mrad * xhi])
+        if fit is not None:
+            fit_intercept_mrad = fit.intercept_urad / 1000.0
+            plot_ys.extend([fit.slope * xlo + fit_intercept_mrad, fit.slope * xhi + fit_intercept_mrad])
+        ylo, yhi = min(plot_ys), max(plot_ys)
+        ypad = max((yhi - ylo) * 0.08, 0.02)
+        ylo -= ypad
+        yhi += ypad
+        xspan = max(xhi - xlo, 1e-9)
+        yspan = max(yhi - ylo, 1e-9)
 
         def map_x(value: float) -> float:
             return margin + (value - xlo) / xspan * (w - 2 * margin)
 
         def map_y(value: float) -> float:
             return h - margin - (value - ylo) / yspan * (h - 2 * margin)
+
+        if not relevant:
+            for point in planned_points:
+                px = map_x(point.angle_x_urad / 1000.0)
+                py = map_y(point.angle_y_urad / 1000.0)
+                radius = max(2.0, self._plot_dot_radius() * 0.55)
+                canvas.create_oval(px - radius, py - radius, px + radius, py + radius, outline="#9ca3af", width=1)
+            canvas.create_text(w // 2, margin + 22, text="Planned overlap scan range", fill="#666666")
 
         for row, xval, yval in zip(relevant, xs, ys):
             px = map_x(xval)
@@ -2718,7 +2752,6 @@ class LaserMirrorApp:
             canvas.create_line(px, py - 8, px, py + 8, fill="#111827", width=2)
             canvas.create_text(px + 52, py + 12, text="recommended", fill="#111827")
 
-        ideal_slope_mrad = float(self.overlap_slope_var.get())
         canvas.create_line(
             map_x(xlo),
             map_y(ideal_slope_mrad * xlo),
@@ -2728,7 +2761,6 @@ class LaserMirrorApp:
             width=2,
             dash=(6, 4),
         )
-        fit = fit_overlap_diagonal(self.measurements, float(self.overlap_slope_var.get()))
         if fit is not None:
             fit_slope_mrad = fit.slope
             fit_intercept_mrad = fit.intercept_urad / 1000.0
