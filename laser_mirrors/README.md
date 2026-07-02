@@ -15,15 +15,17 @@ python3 laser_mirrors_gui.py
 
 By default this enables real EPICS motor writes. Use `--safe-mode` for readback-only checks, or `--demo-mode` away from EPICS.
 
-Recommended coarse workflow:
+Recommended calibration workflow:
 
 1. In `Overview`, click `Capture current RBV`.
 2. Click `Use coarse recovery defaults`.
 3. Open `Position search`.
 4. Search `mirror2` first with a bounded spiral. Typical coarse values are 100 step increments and 1500-2000 step outer radius.
-5. Click `Pause` as soon as the laser is visible. Save the motor state. Click `Resume` if you want the search to continue.
-6. Open `Two-mirror scan` for the diagonal two-mirror scan that checks angle overlap around the visible position.
-7. Use `Manual control` for single-axis nudges; it shows all four live motor readbacks and uses the same logged motion path as scans.
+5. When the coarse spiral finishes, inspect the recommended motor targets, click `Move to optimum`, then run `local refine` around that new position.
+6. After local refine confirms the maximum, click `Move to optimum`. This sets the new motor readbacks as the working reference for the angle scans.
+7. Open `Two-mirror scan`, run the vertical angle sweep, click `Move to optimum`, then run the same vertical scan again to verify that the optimum is centered.
+8. Switch to horizontal and repeat: scan, move to optimum, scan again to verify.
+9. Save the motor state once the verified vertical and horizontal scans both look optimized. Use `Manual control` only for single-axis nudges while watching live readbacks.
 
 ## What this tool is for
 
@@ -45,8 +47,9 @@ The tool is organized around two standard jobs:
 1. **Find the best laser position**
    - use the `Position search` tab
    - coarse spiral on mirror 1 or mirror 2
-   - inspect the best point
-   - optionally run `local refine` around that best point
+   - inspect the recommended all-motor target values
+   - move to the recommended optimum
+   - run `local refine` around that optimum to verify the maximum
 2. **Find the best interaction angle while holding position fixed**
    - use the `Angle scan` tab
    - run a vertical-only or horizontal-only compensated scan
@@ -333,7 +336,7 @@ The fixed-position slope magnitude is set mainly by the mirror-to-undulator dist
 
 `right_to_left` and `left_to_right` measure the same points; they choose both which end of the diagonal is visited first and which side of each strip is entered first. With `right_to_left`, each horizontal strip starts on its right edge before serpentine alternation. With `left_to_right`, it starts on its left edge. Serpentine strip order is usually most efficient because every other strip is swept in reverse, avoiding a flyback to the same edge before the next strip. Turn serpentine off only when you deliberately want every strip approached from the same side to check backlash or hysteresis.
 
-Every overlap point waits at least `QPD wait / point` before sampling. The default is `1.0 s`, matching the approximate QPD PV update cadence so each measured value is taken after the motor has settled and the QPD PV has had time to publish a fresh value. The first point of every overlap strip also waits an additional `Extra strip-start wait`; the default is `1.25 s` for the larger strip-to-strip motor reposition.
+Every overlap point waits at least `QPD wait / point` before sampling. The default is `2.0 s`, giving margin for the approximate 1 Hz QPD PV update cadence so each measured value is taken after the motor has settled and the QPD PV has had time to publish a fresh value. The first point of every overlap strip also waits an additional `Extra strip-start wait`; the default is `1.25 s` for the larger strip-to-strip motor reposition.
 
 After an overlap scan, the GUI prints the recommended optimum as all four motor PV targets with deltas from the previous start. The scan start stays at the reference/typed value until you explicitly press `Move to optimum` or `Use optimum`; then running the same scan again is the intended verification step.
 

@@ -11,6 +11,7 @@ from laser_mirrors_app.config import AppConfig
 from laser_mirrors_app.geometry import LaserMirrorGeometry
 from laser_mirrors_app.gui import LaserMirrorApp, apply_launch_mode, build_parser
 from laser_mirrors_app.hardware import DisconnectedController
+from laser_mirrors_app.models import BestPointRecommendation, MotorTargets
 
 
 class FakeVar:
@@ -82,6 +83,38 @@ class GuiContractTests(unittest.TestCase):
         self.assertEqual(app.overlap_m1_span_steps_var.get(), 420.0)
         self.assertAlmostEqual(app.overlap_m1_span_urad_var.get(), 793.8)
         self.assertEqual(app.overlap_slope_var.get(), -1.234)
+
+    def test_recommended_target_summary_reports_all_motor_deltas(self) -> None:
+        app = object.__new__(LaserMirrorApp)
+        app.current_reference_steps = {
+            "m1_horizontal": 10.0,
+            "m1_vertical": 20.0,
+            "m2_horizontal": 30.0,
+            "m2_vertical": 40.0,
+        }
+        best = BestPointRecommendation(
+            objective="max",
+            signal_label="P1",
+            signal_value=1.0,
+            point_index=0,
+            angle_x_urad=0.0,
+            angle_y_urad=0.0,
+            offset_x_mm=0.0,
+            offset_y_mm=0.0,
+            targets=MotorTargets(
+                m1_horizontal=11.0,
+                m1_vertical=22.0,
+                m2_horizontal=27.0,
+                m2_vertical=45.0,
+            ),
+        )
+
+        summary = app._recommended_target_summary(best)
+
+        self.assertIn("m1_horizontal=11.0 (+1.0)", summary)
+        self.assertIn("m1_vertical=22.0 (+2.0)", summary)
+        self.assertIn("m2_horizontal=27.0 (-3.0)", summary)
+        self.assertIn("m2_vertical=45.0 (+5.0)", summary)
 
 
 if __name__ == "__main__":

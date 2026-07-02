@@ -321,16 +321,16 @@ class LaserMirrorApp:
         self.overview_frame.columnconfigure(2, weight=1)
         self.overview_frame.rowconfigure(1, weight=1)
 
-        workflow = ttk.LabelFrame(left, text="Standard coarse recovery workflow", padding=10)
+        workflow = ttk.LabelFrame(left, text="Standard mirror calibration workflow", padding=10)
         workflow.pack(fill="x")
         ttk.Label(
             workflow,
             text=(
                 "1. Capture current RBV as reference.\n"
-                "2. Open Position search and run a mirror-2 bounded spiral until the laser is visible through the beamline.\n"
-                "3. Pause the search when the spot looks good, save the motor state, or resume if you want to continue.\n"
-                "4. Open Two-mirror scan for the coarse diagonal angle-overlap scan.\n"
-                "5. Use Manual control for single-axis nudges while watching the live motor readbacks."
+                "2. Position search: run a coarse mirror-2 spiral, move to the recommended optimum, then run local refine to verify the maximum.\n"
+                "3. Two-mirror scan: run the vertical angle sweep, move to the recommended optimum, then repeat the same scan to verify.\n"
+                "4. Switch to horizontal and repeat: scan, move to optimum, scan again to verify.\n"
+                "5. Save the motor state when the verified vertical and horizontal scans both look optimized."
             ),
             wraplength=660,
             justify="left",
@@ -550,7 +550,7 @@ class LaserMirrorApp:
         ttk.Button(controls, text="Preview commands", command=self._preview_angle_scan).grid(row=13, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(controls, text="Start angle scan", command=self._start_angle_scan).grid(row=13, column=1, sticky="ew", pady=(8, 0))
         ttk.Button(controls, text="Request stop", command=self._stop_scan).grid(row=14, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Move to best point", command=self._move_to_best_point).grid(row=14, column=1, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Move to optimum", command=self._move_to_best_point).grid(row=14, column=1, sticky="ew", pady=(8, 0))
         ttk.Label(controls, textvariable=self.mode_help_var, wraplength=340, justify="left").grid(row=15, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Label(controls, textvariable=self.status_var, wraplength=340, justify="left").grid(row=16, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Label(controls, textvariable=self.best_var, wraplength=340, justify="left").grid(row=17, column=0, columnspan=2, sticky="w", pady=(8, 0))
@@ -755,7 +755,7 @@ class LaserMirrorApp:
         ).pack(anchor="w")
 
     def _build_spiral(self) -> None:
-        controls = ttk.LabelFrame(self.spiral_frame, text="Coarse position search", padding=10)
+        controls = ttk.LabelFrame(self.spiral_frame, text="Position search and refine", padding=10)
         controls.grid(row=0, column=0, sticky="nsew")
         plots = ttk.LabelFrame(self.spiral_frame, text="Position-search map", padding=10)
         plots.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
@@ -776,14 +776,14 @@ class LaserMirrorApp:
         ttk.Button(controls, text="Save motor state now", command=self._save_motor_recovery).grid(row=9, column=1, sticky="ew", pady=(8, 0))
         ttk.Button(controls, text="Preview local refine", command=self._preview_local_refine).grid(row=10, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(controls, text="Start local refine", command=self._start_local_refine).grid(row=10, column=1, sticky="ew", pady=(8, 0))
-        ttk.Button(controls, text="Move to best point", command=self._move_to_best_point).grid(row=11, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Move to optimum", command=self._move_to_best_point).grid(row=11, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(controls, text="Save search plot (.ps)", command=lambda: self._save_canvas_postscript(self.spiral_canvas, "position_search_map.ps")).grid(row=11, column=1, sticky="ew", pady=(8, 0))
         ttk.Label(controls, textvariable=self.search_status_var, wraplength=340, justify="left").grid(row=12, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self._add_help_button(
             controls,
             12,
             "Position finder:\n"
-            "This is the first step after the beamline was rebuilt. Search mirror 2 first with large steps, pause when the beam is visible, save the motor state, then continue or stop.\n"
+            "First run a coarse mirror-2 bounded spiral. After it finishes, the app recommends all four motor targets. Move to that optimum, then run local refine around it to verify the maximum.\n"
             "Bounded spiral uses the requested outer radius directly. Local refine uses the current best point as the center and searches a tighter neighborhood.",
         )
         self.spiral_canvas = tk.Canvas(plots, width=760, height=440, bg="white", highlightthickness=1, highlightbackground="#cccccc")
@@ -1263,6 +1263,12 @@ class LaserMirrorApp:
             + accuracy_note
         )
 
+    def _recommended_target_summary(self, best_point: BestPointRecommendation, reference_steps: dict[str, float] | None = None) -> str:
+        targets = best_point.targets.as_dict()
+        if reference_steps is None:
+            reference_steps = self.current_reference_steps
+        return ", ".join(f"{key}={targets[key]:.1f} ({targets[key] - reference_steps.get(key, 0.0):+.1f})" for key in MOTOR_PVS)
+
     def _overlap_scan_points_from_vars(self) -> list[ScanPoint]:
         axis = self.overlap_axis_var.get()
         return build_overlap_scan_points(
@@ -1540,6 +1546,12 @@ class LaserMirrorApp:
         self.reference_var.set("Reference RBV: " + ", ".join(f"{key}={value:.2f}" for key, value in self.current_reference_steps.items()))
         self._set_overlap_start_vars(self.current_reference_steps)
         self._log("Captured current motor RBV values as the new reference.")
+
+    def _set_reference_from_steps(self, steps: dict[str, float], reason: str) -> None:
+        self.current_reference_steps = {key: float(steps[key]) for key in MOTOR_PVS}
+        self.reference_var.set("Reference RBV: " + ", ".join(f"{key}={value:.2f}" for key, value in self.current_reference_steps.items()))
+        self._set_overlap_start_vars(self.current_reference_steps)
+        self._log(reason + ": " + ", ".join(f"{key}={value:.2f}" for key, value in self.current_reference_steps.items()))
 
     def _return_to_reference(self) -> None:
         if self.scan_runner.is_running():
@@ -1860,10 +1872,23 @@ class LaserMirrorApp:
             messagebox.showinfo("No best point", "Run a scan first.")
             return
         targets = self.best_point.targets.as_dict()
-        if self._move_motor_targets(targets, "Move to best point"):
-            self._set_overlap_start_vars(targets)
-            if any(row.mode.startswith("overlap_") for row in self.measurements):
-                self.overlap_status_var.set("Moved to optimum and loaded it as the next two-mirror scan start.")
+        if self._move_motor_targets(targets, "Move to optimum"):
+            new_reference = self.controller.current_steps()
+            self._set_reference_from_steps(new_reference, "Moved to recommended optimum and set it as the working reference")
+            self._save_motor_recovery()
+            modes = {row.mode for row in self.measurements}
+            if any(mode in ("mirror1_spiral", "mirror2_spiral", "mirror1_refine", "mirror2_refine") for mode in modes):
+                self.search_status_var.set(
+                    "Moved to the recommended position and set it as the reference. "
+                    "Run local refine now to verify the maximum, or start the vertical angle sweep."
+                )
+            elif any(row.mode.startswith("overlap_") for row in self.measurements):
+                self.overlap_status_var.set(
+                    "Moved to optimum, set it as the working reference, and loaded it as the next two-mirror scan start. "
+                    "Run the same scan again to verify."
+                )
+            else:
+                self.status_var.set("Moved to optimum and set it as the working reference. Run the scan again to verify.")
 
     def _on_measurement_thread(self, measurement: MeasurementRecord) -> None:
         self.root.after(0, self._record_measurement, measurement)
@@ -1926,6 +1951,11 @@ class LaserMirrorApp:
         if best_point is not None and any(mode in ("mirror1_spiral", "mirror2_spiral", "mirror1_refine", "mirror2_refine") for mode in {row.mode for row in self.measurements}):
             relevant = [row for row in self.measurements if row.mode in ("mirror1_spiral", "mirror2_spiral", "mirror1_refine", "mirror2_refine")]
             start_row = relevant[0] if relevant else None
+            next_step = (
+                "Move to optimum, then start the vertical angle sweep."
+                if any(row.mode in ("mirror1_refine", "mirror2_refine") for row in relevant)
+                else "Move to optimum, then run local refine to verify the maximum."
+            )
             if start_row is not None:
                 start_signal = start_row.signal_average
                 deviation = best_point.signal_value - start_signal
@@ -1939,12 +1969,14 @@ class LaserMirrorApp:
                 self.search_status_var.set(
                     f"Recommended optimum: {best_point.signal_label}={best_point.signal_value:.6g}; "
                     f"start={start_signal:.6g}; Δsignal={deviation:.6g}; Δsteps=({dx:.1f}, {dy:.1f}). "
-                    "Use local refine for a tighter search around this peak."
+                    f"Targets: {self._recommended_target_summary(best_point)}. "
+                    + next_step
                 )
             else:
                 self.search_status_var.set(
                     f"Recommended optimum: {best_point.signal_label}={best_point.signal_value:.6g}. "
-                    "Use local refine for a tighter search around this peak."
+                    f"Targets: {self._recommended_target_summary(best_point)}. "
+                    + next_step
                 )
         if any(row.mode.startswith("overlap_") for row in self.measurements):
             if best_point is not None:
