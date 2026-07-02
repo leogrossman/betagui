@@ -130,6 +130,7 @@ def build_overlap_scan_points(
     diagonal_slope: float | None = None,
     pattern: str = "perpendicular_cross",
     serpentine: bool = True,
+    mirror2_span_urad: float | None = None,
 ) -> list[ScanPoint]:
     axis_code = "x" if axis == "horizontal" else "y"
     motor_axis = "horizontal" if axis == "horizontal" else "vertical"
@@ -137,14 +138,23 @@ def build_overlap_scan_points(
     m2_key = f"m2_{motor_axis}"
     line_count = max(1, int(position_points))
     cross_count = max(1, int(angle_points))
-    line_span = max(0.0, float(angle_span_urad))
+    m1_span = max(0.0, float(angle_span_urad))
     slope = float(diagonal_slope) if diagonal_slope is not None else fixed_position_diagonal_slope(geometry, axis)
     if not math.isfinite(slope) or abs(slope) < 1e-9:
         slope = fixed_position_diagonal_slope(geometry, axis)
+    m2_span = max(0.0, float(mirror2_span_urad)) if mirror2_span_urad is not None else abs(slope) * m1_span
+    if pattern == "horizontal_strips":
+        line_span = m2_span / max(abs(slope), 1e-9)
+        cross_span = m1_span
+    elif pattern == "vertical_strips":
+        line_span = m1_span
+        cross_span = m2_span
+    else:
+        line_span = m1_span
+        cross_span = m2_span if mirror2_span_urad is not None else abs(geometry.steps_to_angle_delta(float(position_step_steps), axis_code, 1)) * max(0, cross_count - 1)
     line_m1_values = linspace(0.0, line_span, line_count)
     if diagonal_direction in ("right_to_left", "upper_left_to_lower_right"):
         line_m1_values.reverse()
-    cross_span = abs(geometry.steps_to_angle_delta(float(position_step_steps), axis_code, 1)) * max(0, cross_count - 1)
     cross_values = linspace(0.0, cross_span, cross_count)
     normal_scale = math.sqrt(slope * slope + 1.0)
     normal_m1 = -slope / normal_scale
@@ -156,7 +166,7 @@ def build_overlap_scan_points(
         strip_cross_values = list(reversed(cross_values)) if serpentine and group_index % 2 else cross_values
         for cross_urad in strip_cross_values:
             if pattern == "horizontal_strips":
-                mirror1_angle_urad = cross_urad
+                mirror1_angle_urad = center_m1_urad + cross_urad
                 mirror2_angle_urad = center_m2_urad
                 group_label = f"horizontal strip {group_index + 1}"
             elif pattern == "vertical_strips":

@@ -294,9 +294,16 @@ class ScanTests(unittest.TestCase):
         for point in points:
             strips.setdefault(point.group_index, []).append(point)
         self.assertEqual(len(strips), 3)
+        strip_centers = []
         for strip_points in strips.values():
             self.assertGreater(len({round(point.angle_x_urad, 8) for point in strip_points}), 1)
             self.assertEqual(len({round(point.angle_y_urad, 8) for point in strip_points}), 1)
+            mean_x = sum(point.angle_x_urad for point in strip_points) / len(strip_points)
+            mean_y = sum(point.angle_y_urad for point in strip_points) / len(strip_points)
+            strip_centers.append((mean_x, mean_y))
+        self.assertGreater(len({round(center[0], 8) for center in strip_centers}), 1)
+        for mean_x, mean_y in strip_centers:
+            self.assertLessEqual(abs(mean_y - -1.5 * mean_x), 2 * config.geometry.vertical_step_urad)
 
     def test_build_overlap_scan_points_can_make_vertical_strips(self) -> None:
         config = AppConfig()
@@ -320,9 +327,16 @@ class ScanTests(unittest.TestCase):
         for point in points:
             strips.setdefault(point.group_index, []).append(point)
         self.assertEqual(len(strips), 3)
+        strip_centers = []
         for strip_points in strips.values():
             self.assertEqual(len({round(point.angle_x_urad, 8) for point in strip_points}), 1)
             self.assertGreater(len({round(point.angle_y_urad, 8) for point in strip_points}), 1)
+            mean_x = sum(point.angle_x_urad for point in strip_points) / len(strip_points)
+            mean_y = sum(point.angle_y_urad for point in strip_points) / len(strip_points)
+            strip_centers.append((mean_x, mean_y))
+        self.assertGreater(len({round(center[1], 8) for center in strip_centers}), 1)
+        for mean_x, mean_y in strip_centers:
+            self.assertLessEqual(abs(mean_y - -1.5 * mean_x), 2 * config.geometry.vertical_step_urad)
 
     def test_overlap_direction_can_be_reversed(self) -> None:
         config = AppConfig()

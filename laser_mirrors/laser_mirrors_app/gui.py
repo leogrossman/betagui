@@ -1268,6 +1268,7 @@ class LaserMirrorApp:
             float(self.overlap_slope_var.get()),
             self.overlap_pattern_var.get(),
             bool(self.overlap_serpentine_var.get()),
+            mirror2_span_urad=float(self.overlap_m2_span_urad_var.get()),
         )
 
     def _refresh_overlap_estimate(self) -> None:
