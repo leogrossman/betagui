@@ -89,6 +89,8 @@ class ScanConfig:
     overlap_horizontal_step_steps: float = 100.0
     overlap_vertical_step_steps: float = 200.0
     overlap_angle_span_urad: float = 300.0
+    overlap_line_span_urad: float = 300.0
+    overlap_diagonal_slope: float = -1.38
 
 
 @dataclass

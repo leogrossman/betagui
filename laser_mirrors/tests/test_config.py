@@ -22,6 +22,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded.scan.spiral_radius_x, 1500.0)
         self.assertEqual(loaded.scan.overlap_vertical_step_steps, 200.0)
         self.assertEqual(loaded.scan.overlap_horizontal_step_steps, 100.0)
+        self.assertEqual(loaded.scan.overlap_line_span_urad, 300.0)
+        self.assertLess(loaded.scan.overlap_diagonal_slope, 0.0)
 
     def test_load_ignores_unknown_keys_from_older_configs(self) -> None:
         root = Path(tempfile.mkdtemp())

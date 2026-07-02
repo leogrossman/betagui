@@ -22,7 +22,7 @@ Recommended coarse workflow:
 3. Open `Position search`.
 4. Search `mirror2` first with a bounded spiral. Typical coarse values are 100 step increments and 1500-2000 step outer radius.
 5. Click `Pause` as soon as the laser is visible. Save the motor state. Click `Resume` if you want the search to continue.
-6. Open `Two-mirror scan` for the strip scan that checks angle overlap around the visible position.
+6. Open `Two-mirror scan` for the diagonal two-mirror scan that checks angle overlap around the visible position.
 7. Use `Manual control` for single-axis nudges; it shows all four live motor readbacks and uses the same logged motion path as scans.
 
 ## What this tool is for
@@ -55,10 +55,10 @@ The tool is organized around two standard jobs:
    - move to the best position first
    - use the `Two-mirror scan` tab
    - choose `vertical` or `horizontal`
-   - choose which mirror provides the fixed strip coordinate
-   - step that mirror slightly above and below the current best position
-   - for each fixed strip, sweep the other mirror through a short local angle scan
-   - inspect the mirror-1 vs mirror-2 deflection-angle map, the marked start point, and the recommended optimum
+   - choose how many points to sample along the diagonal center line
+   - choose how many points to sample across that line and set the cross-line spacing
+   - use the fixed-position slope estimate, invert the slope, or type a custom slope
+   - inspect the mirror-1 vs mirror-2 deflection-angle map, the marked start point, the requested diagonal, the fitted measured diagonal, and the recommended optimum
 
 The tool also includes:
 
@@ -102,7 +102,7 @@ Recommended commissioning pattern:
 6. use `Position search` first to find the best mirror position
 7. use `local refine` if needed to tighten around the best point
 8. then start with a small `vertical_only` scan in a primary solve mode
-9. if you want the two-mirror strip map, use the `Two-mirror scan` tab after moving to the current best position
+9. if you want the two-mirror diagonal map, use the `Two-mirror scan` tab after moving to the current best position
 10. check the `Optics / Geometry` tab for the step-scale estimate before committing to a larger span
 
 ### If IOC HLM/LLM are broken
@@ -303,19 +303,19 @@ The angle scan supports three solve modes:
 
 This is the key place where the tool now goes beyond the simple early scripts.
 
-### Overlap scan interpretation
+### Two-mirror scan interpretation
 
-The `Overlap scan` tab is no longer a coarse full 2D raster.
+The `Two-mirror scan` tab is not a coarse full 2D raster.
 
-It now implements a strip workflow:
+It builds a diagonal center line in mirror-angle space and samples around it:
 
 1. use `Position search` first and move to the best spatial overlap
 2. choose a plane, usually `vertical` first
-3. choose which mirror provides the fixed strip coordinate, usually `mirror2`
-4. step that mirror through a small set of strip centers
-5. for each strip center, sweep the other mirror through a short 1D angle scan
+3. choose the number of center-line points and the line span
+4. choose the number of cross-line points and the cross-line spacing
+5. use the fixed-position slope estimate or set a custom positive/negative slope
 
-So the result is a family of strips in `(deflection angle 1, deflection angle 2)` space rather than a full grid.
+The result is a focused diagonal family in `(mirror 1 deflection angle, mirror 2 deflection angle)` space. The map overlays the requested diagonal and, after a signal scan, a signal-weighted fitted diagonal so you can compare the measured response direction with the intended one.
 
 ### Which solve mode is the literal fixed-position angle scan?
 

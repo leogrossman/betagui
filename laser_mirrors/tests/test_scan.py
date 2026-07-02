@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from laser_mirrors_app.config import AppConfig
 from laser_mirrors_app.geometry import LaserMirrorGeometry
 from laser_mirrors_app.hardware import MirrorController, PVFactory, build_signal_backend
-from laser_mirrors_app.scan import ScanContext, ScanRunner, bounded_rectangular_spiral, build_angle_scan_points, build_overlap_scan_points, build_spiral_scan_points, choose_best_point
+from laser_mirrors_app.scan import ScanContext, ScanRunner, bounded_rectangular_spiral, build_angle_scan_points, build_overlap_scan_points, build_spiral_scan_points, choose_best_point, fit_overlap_diagonal, fixed_position_diagonal_slope
 
 
 class ScanTests(unittest.TestCase):
@@ -218,11 +218,12 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(len(points), 45)
         self.assertTrue(all(point.mode == 'overlap_vertical' for point in points))
 
-    def test_build_overlap_scan_points_hold_fixed_angle_per_strip(self) -> None:
+    def test_build_overlap_scan_points_sample_around_diagonal_line(self) -> None:
         config = AppConfig()
         geometry = LaserMirrorGeometry(config.geometry)
         factory = PVFactory(True)
         controller = MirrorController(config.controller, factory)
+        slope = -1.5
         points = build_overlap_scan_points(
             geometry,
             controller.capture_reference(),
@@ -233,16 +234,18 @@ class ScanTests(unittest.TestCase):
             5,
             40.0,
             'mirror1_primary',
+            diagonal_slope=slope,
         )
         strips: dict[int, list] = {}
         for point in points:
             strips.setdefault(point.group_index, []).append(point)
         self.assertEqual(len(strips), 3)
+        centers = [strip_points[len(strip_points) // 2] for strip_points in strips.values()]
+        for point in centers:
+            self.assertAlmostEqual(point.angle_y_urad, slope * point.angle_x_urad, places=6)
         for strip_points in strips.values():
-            mirror1_angles = {round(point.angle_x_urad, 8) for point in strip_points}
-            mirror2_angles = {round(point.angle_y_urad, 8) for point in strip_points}
-            self.assertGreater(len(mirror1_angles), 1)
-            self.assertEqual(len(mirror2_angles), 1)
+            self.assertGreater(len({round(point.angle_x_urad, 8) for point in strip_points}), 1)
+            self.assertGreater(len({round(point.angle_y_urad, 8) for point in strip_points}), 1)
 
     def test_overlap_direction_can_be_reversed(self) -> None:
         config = AppConfig()
@@ -274,6 +277,29 @@ class ScanTests(unittest.TestCase):
             'lower_left_to_upper_right',
         )
         self.assertNotEqual([p.targets.m2_vertical for p in a[:3]], [p.targets.m2_vertical for p in b[:3]])
+
+    def test_fixed_position_diagonal_slope_uses_geometry(self) -> None:
+        config = AppConfig()
+        geometry = LaserMirrorGeometry(config.geometry)
+        self.assertAlmostEqual(abs(fixed_position_diagonal_slope(geometry, 'vertical')), 1.3802, places=3)
+
+    def test_fit_overlap_diagonal_estimates_measured_slope(self) -> None:
+        from laser_mirrors_app.models import MeasurementRecord
+        rows = []
+        base = dict(
+            mode='overlap_vertical', elapsed_s=0.0, offset_x_mm=float('nan'), offset_y_mm=float('nan'),
+            signal_label='P1 avg', signal_pv='pv', signal_value=1.0, signal_std=0.0, samples_used=1,
+            commanded_m1_horizontal=0.0, commanded_m1_vertical=0.0, commanded_m2_horizontal=0.0, commanded_m2_vertical=0.0,
+            rbv_m1_horizontal=0.0, rbv_m1_vertical=0.0, rbv_m2_horizontal=0.0, rbv_m2_vertical=0.0,
+            timestamp_iso='t',
+        )
+        for index, x in enumerate((-20.0, -10.0, 0.0, 10.0, 20.0)):
+            rows.append(MeasurementRecord(point_index=index, angle_x_urad=x, angle_y_urad=-1.4 * x + 3.0, signal_average=10.0 + index, **base))
+        fit = fit_overlap_diagonal(rows, -1.38)
+        self.assertIsNotNone(fit)
+        assert fit is not None
+        self.assertAlmostEqual(fit.slope, -1.4, places=6)
+        self.assertAlmostEqual(fit.slope_error, -0.02, places=6)
 
 
 if __name__ == "__main__":

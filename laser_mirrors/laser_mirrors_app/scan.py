@@ -16,11 +16,28 @@ from .hardware import MirrorController
 from .models import BestPointRecommendation, CommandRecord, MeasurementRecord, MirrorAngles, MotorTargets, ScanPoint, UndulatorTarget
 
 
+@dataclass(frozen=True)
+class DiagonalFit:
+    slope: float
+    intercept_urad: float
+    ideal_slope: float
+    slope_error: float
+    weighted_rms_distance_urad: float
+    points_used: int
+
+
 @dataclass
 class ScanContext:
     reference_steps: dict[str, float]
     signal_label: str
     signal_pv: str
+
+
+def fixed_position_diagonal_slope(geometry: LaserMirrorGeometry, axis: Literal["horizontal", "vertical"]) -> float:
+    """Ballpark mirror2/mirror1 angle slope for holding downstream position fixed."""
+    axis_code = "x" if axis == "horizontal" else "y"
+    sign = geometry.config.mirror2_x_sign if axis_code == "x" else geometry.config.mirror2_y_sign
+    return sign * (geometry.config.undulator_distance_mm + geometry.config.mirror_distance_mm) / geometry.config.undulator_distance_mm
 
 
 def rectangular_spiral(step_x: float, step_y: float, turns: int) -> list[tuple[float, float]]:
@@ -112,52 +129,36 @@ def build_overlap_scan_points(
     angle_span_urad: float,
     solve_mode: Literal["mirror1_primary", "mirror2_primary", "two_mirror_target"],
     diagonal_direction: Literal["upper_left_to_lower_right", "lower_left_to_upper_right"] = "upper_left_to_lower_right",
+    diagonal_slope: float | None = None,
 ) -> list[ScanPoint]:
     axis_code = "x" if axis == "horizontal" else "y"
     motor_axis = "horizontal" if axis == "horizontal" else "vertical"
-    fixed_mirror = 1 if position_target == "mirror1" else 2
-    sweep_mirror = 2 if fixed_mirror == 1 else 1
-    fixed_key = f"m{fixed_mirror}_{motor_axis}"
-    sweep_key = f"m{sweep_mirror}_{motor_axis}"
-    position_span = max(0.0, float(position_step_steps)) * max(0, int(position_points) - 1)
-    position_offsets = sorted(
-        linspace(0.0, position_span, max(1, int(position_points))),
-        key=lambda value: geometry.steps_to_angle_delta(value, axis_code, fixed_mirror),
-        reverse=diagonal_direction == "upper_left_to_lower_right",
-    )
+    m1_key = f"m1_{motor_axis}"
+    m2_key = f"m2_{motor_axis}"
+    line_count = max(1, int(position_points))
+    cross_count = max(1, int(angle_points))
+    line_span = max(0.0, float(angle_span_urad))
+    slope = float(diagonal_slope) if diagonal_slope is not None else fixed_position_diagonal_slope(geometry, axis)
+    if not math.isfinite(slope) or abs(slope) < 1e-9:
+        slope = fixed_position_diagonal_slope(geometry, axis)
+    line_m1_values = linspace(0.0, line_span, line_count)
+    if diagonal_direction == "upper_left_to_lower_right":
+        line_m1_values.reverse()
+    cross_span = abs(geometry.steps_to_angle_delta(float(position_step_steps), axis_code, 1)) * max(0, cross_count - 1)
+    cross_values = linspace(0.0, cross_span, cross_count)
+    normal_scale = math.sqrt(slope * slope + 1.0)
+    normal_m1 = -slope / normal_scale
+    normal_m2 = 1.0 / normal_scale
     points: list[ScanPoint] = []
     index = 0
-    for group_index, position_offset_steps in enumerate(position_offsets):
-        fixed_angle_urad = geometry.steps_to_angle_delta(position_offset_steps, axis_code, fixed_mirror)
-        fixed_target_steps = reference_steps[fixed_key] + position_offset_steps
-        if fixed_mirror == 1:
-            center_pair = geometry.solve_mirror2_for_fixed_offset(fixed_angle_urad, 0.0, axis_code)
-            center_mirror1_urad = center_pair.mirror1_urad
-            center_mirror2_urad = center_pair.mirror2_urad
-        else:
-            center_pair = geometry.solve_mirror1_for_fixed_offset(fixed_angle_urad, 0.0, axis_code)
-            center_mirror1_urad = center_pair.mirror1_urad
-            center_mirror2_urad = center_pair.mirror2_urad
-
-        if sweep_mirror == 1:
-            sweep_values = sorted(linspace(center_mirror1_urad, float(angle_span_urad), max(1, int(angle_points))))
-        else:
-            sweep_values = sorted(linspace(center_mirror2_urad, float(angle_span_urad), max(1, int(angle_points))))
-        if diagonal_direction == "upper_left_to_lower_right":
-            sweep_values.reverse()
-
-        for sweep_angle_urad in sweep_values:
-            if sweep_mirror == 1:
-                sweep_target_steps = reference_steps[sweep_key] + geometry.urad_to_steps(sweep_angle_urad, axis_code, 1)
-                mirror1_angle_urad = sweep_angle_urad
-                mirror2_angle_urad = fixed_angle_urad
-            else:
-                sweep_target_steps = reference_steps[sweep_key] + geometry.urad_to_steps(sweep_angle_urad, axis_code, 2)
-                mirror1_angle_urad = fixed_angle_urad
-                mirror2_angle_urad = sweep_angle_urad
+    for group_index, center_m1_urad in enumerate(line_m1_values):
+        center_m2_urad = slope * center_m1_urad
+        for cross_urad in cross_values:
+            mirror1_angle_urad = center_m1_urad + cross_urad * normal_m1
+            mirror2_angle_urad = center_m2_urad + cross_urad * normal_m2
             targets = dict(reference_steps)
-            targets[fixed_key] = fixed_target_steps
-            targets[sweep_key] = sweep_target_steps
+            targets[m1_key] = reference_steps[m1_key] + geometry.urad_to_steps(mirror1_angle_urad, axis_code, 1)
+            targets[m2_key] = reference_steps[m2_key] + geometry.urad_to_steps(mirror2_angle_urad, axis_code, 2)
             points.append(
                 ScanPoint(
                     index=index,
@@ -168,11 +169,48 @@ def build_overlap_scan_points(
                     offset_y_mm=math.nan,
                     targets=MotorTargets(**targets),
                     group_index=group_index,
-                    group_label=f"strip {group_index + 1}",
+                    group_label=f"line {group_index + 1}",
                 )
             )
             index += 1
     return points
+
+
+def fit_overlap_diagonal(measurements: list[MeasurementRecord], ideal_slope: float) -> DiagonalFit | None:
+    rows = [
+        row for row in measurements
+        if row.mode.startswith("overlap_")
+        and math.isfinite(row.angle_x_urad)
+        and math.isfinite(row.angle_y_urad)
+        and math.isfinite(row.signal_average)
+    ]
+    if len(rows) < 2:
+        return None
+    values = [row.signal_average for row in rows]
+    lo = min(values)
+    weights = [max(0.0, value - lo) + 1e-9 for value in values]
+    weight_sum = sum(weights)
+    mean_x = sum(weight * row.angle_x_urad for weight, row in zip(weights, rows)) / weight_sum
+    mean_y = sum(weight * row.angle_y_urad for weight, row in zip(weights, rows)) / weight_sum
+    variance_x = sum(weight * (row.angle_x_urad - mean_x) ** 2 for weight, row in zip(weights, rows))
+    if variance_x <= 1e-12:
+        return None
+    covariance = sum(weight * (row.angle_x_urad - mean_x) * (row.angle_y_urad - mean_y) for weight, row in zip(weights, rows))
+    slope = covariance / variance_x
+    intercept = mean_y - slope * mean_x
+    distance_scale = math.sqrt(slope * slope + 1.0)
+    weighted_distance_sq = sum(
+        weight * ((slope * row.angle_x_urad - row.angle_y_urad + intercept) / distance_scale) ** 2
+        for weight, row in zip(weights, rows)
+    ) / weight_sum
+    return DiagonalFit(
+        slope=slope,
+        intercept_urad=intercept,
+        ideal_slope=ideal_slope,
+        slope_error=slope - ideal_slope,
+        weighted_rms_distance_urad=math.sqrt(max(0.0, weighted_distance_sq)),
+        points_used=len(rows),
+    )
 
 def build_spiral_scan_points(
     config: AppConfig,

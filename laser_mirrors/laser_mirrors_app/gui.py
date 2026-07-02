@@ -40,7 +40,7 @@ from .models import (
 )
 from .monitoring import SessionRecorder
 from .pen_test import build_pen_test_sequence
-from .scan import ScanContext, ScanRunner, build_angle_scan_points, build_overlap_scan_points, build_spiral_scan_points
+from .scan import ScanContext, ScanRunner, build_angle_scan_points, build_overlap_scan_points, build_spiral_scan_points, fit_overlap_diagonal, fixed_position_diagonal_slope
 from .state import load_state, save_state
 
 
@@ -219,9 +219,10 @@ class LaserMirrorApp:
         self.overlap_horizontal_step_var = tk.DoubleVar(value=self.config.scan.overlap_horizontal_step_steps)
         self.overlap_vertical_step_var = tk.DoubleVar(value=self.config.scan.overlap_vertical_step_steps)
         self.overlap_angle_points_var = tk.IntVar(value=9)
-        self.overlap_angle_span_var = tk.DoubleVar(value=self.config.scan.overlap_angle_span_urad)
+        self.overlap_angle_span_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_line_span_urad", self.config.scan.overlap_angle_span_urad))
         self.overlap_solve_mode_var = tk.StringVar(value="mirror1_primary")
         self.overlap_diagonal_var = tk.StringVar(value="upper_left_to_lower_right")
+        self.overlap_slope_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_diagonal_slope", -1.38))
         self.overlap_status_var = tk.StringVar(value="No overlap scan run yet.")
         self.manual_motor_var = tk.StringVar(value="m2_horizontal")
         self.manual_delta_var = tk.DoubleVar(value=100.0)
@@ -316,7 +317,7 @@ class LaserMirrorApp:
                 "1. Capture current RBV as reference.\n"
                 "2. Open Position search and run a mirror-2 bounded spiral until the laser is visible through the beamline.\n"
                 "3. Pause the search when the spot looks good, save the motor state, or resume if you want to continue.\n"
-                "4. Open Two-mirror scan for the coarse angle-overlap strip scan.\n"
+                "4. Open Two-mirror scan for the coarse diagonal angle-overlap scan.\n"
                 "5. Use Manual control for single-axis nudges while watching the live motor readbacks."
             ),
             wraplength=660,
@@ -585,14 +586,15 @@ class LaserMirrorApp:
         self.overlap_frame.columnconfigure(1, weight=1)
         self.overlap_frame.rowconfigure(0, weight=1)
         self._add_labeled_combo(controls, "Plane", self.overlap_axis_var, ["vertical", "horizontal"], 0)
-        self._add_labeled_combo(controls, "Fixed strip mirror", self.overlap_position_target_var, ["mirror2", "mirror1"], 1)
-        self._add_labeled_entry(controls, "Strip count", self.overlap_position_points_var, 2)
-        self._add_labeled_entry(controls, "Horizontal strip spacing [steps]", self.overlap_horizontal_step_var, 3)
-        self._add_labeled_entry(controls, "Vertical strip spacing [steps]", self.overlap_vertical_step_var, 4)
-        self._add_labeled_entry(controls, "Points / strip", self.overlap_angle_points_var, 5)
-        self._add_labeled_entry(controls, "Sweep span [µrad]", self.overlap_angle_span_var, 6)
-        self._add_labeled_combo(controls, "Compensation mode", self.overlap_solve_mode_var, ["mirror1_primary", "mirror2_primary", "two_mirror_target"], 7)
-        self._add_labeled_combo(controls, "Diagonal direction", self.overlap_diagonal_var, ["upper_left_to_lower_right", "lower_left_to_upper_right"], 8)
+        self._add_labeled_entry(controls, "Center-line points", self.overlap_position_points_var, 1)
+        self._add_labeled_entry(controls, "Cross-line points", self.overlap_angle_points_var, 2)
+        self._add_labeled_entry(controls, "Line span [µrad]", self.overlap_angle_span_var, 3)
+        self._add_labeled_entry(controls, "Horizontal cross spacing [steps]", self.overlap_horizontal_step_var, 4)
+        self._add_labeled_entry(controls, "Vertical cross spacing [steps]", self.overlap_vertical_step_var, 5)
+        self._add_labeled_entry(controls, "Diagonal slope m2/m1", self.overlap_slope_var, 6)
+        ttk.Button(controls, text="Use fixed-position slope", command=self._set_overlap_physical_slope).grid(row=7, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(controls, text="Invert slope", command=self._invert_overlap_slope).grid(row=7, column=1, sticky="ew", pady=(8, 0))
+        self._add_labeled_combo(controls, "Scan direction", self.overlap_diagonal_var, ["upper_left_to_lower_right", "lower_left_to_upper_right"], 8)
         ttk.Button(controls, text="Explain scan", command=self._show_overlap_theory).grid(row=9, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(controls, text="Preview commands", command=self._preview_overlap_scan).grid(row=9, column=1, sticky="ew", pady=(8, 0))
         ttk.Button(controls, text="Start scan", command=self._start_overlap_scan).grid(row=10, column=0, sticky="ew", pady=(8, 0))
@@ -605,8 +607,8 @@ class LaserMirrorApp:
         ttk.Label(
             controls,
             text=(
-                "Workflow: first find a visible laser position. Then keep one mirror fixed for a strip while sweeping the other mirror. "
-                "Move the fixed-strip mirror to the next strip and repeat. Use larger strip spacing in vertical if the coarse search needs it."
+                "Workflow: first find a visible laser position. Then scan around a diagonal center line in mirror-1 vs mirror-2 angle space. "
+                "Use the slope controls to flip the diagonal or use the fixed-position estimate from the current geometry."
             ),
             wraplength=340,
             justify="left",
@@ -617,8 +619,8 @@ class LaserMirrorApp:
         self.overlap_progress_canvas.pack(fill="x", pady=(10, 0))
         self._attach_tooltip(
             self.overlap_canvas,
-            "Strip overlap map: x and y are the two mirror deflection angles in the chosen plane. "
-            "Each strip keeps one mirror angle fixed while sweeping the other. The star marks the start point before the scan; the cross marks the recommended optimum.",
+            "Two-mirror overlap map: x and y are the two mirror deflection angles in the chosen plane. "
+            "Dashed blue is the requested diagonal; red is the measured signal-weighted fit after data exists. The star marks the start point before the scan; the cross marks the recommended optimum.",
         )
         self.overlap_canvas.bind("<Button-1>", lambda event: self._inspect_canvas_point("overlap", event))
         self.overlap_progress_canvas.bind("<Button-1>", lambda event: self._inspect_canvas_point("overlap_progress", event))
@@ -956,15 +958,14 @@ class LaserMirrorApp:
         messagebox.showinfo(
             "Why this overlap scan exists",
             (
-                "This scan starts from the current best visible laser position and builds a strip map in mirror-angle space.\n\n"
+                "This scan starts from the current best visible laser position and builds a diagonal map in mirror-angle space.\n\n"
                 "How it works now:\n"
                 "• choose one plane, vertical or horizontal\n"
-                "• choose which mirror supplies the fixed strip coordinate\n"
-                "• step that mirror through a small set of strip centers\n"
-                "• for each strip center, sweep the other mirror through a short local angle scan\n"
+                "• create a diagonal center line in mirror-1 vs mirror-2 angle space\n"
+                "• sample several points along that diagonal\n"
+                "• at each diagonal point, sample a short perpendicular line around it\n"
                 "• plot the measured signal against mirror-1 and mirror-2 deflection angles\n\n"
-                "So angle 2 stays fixed within one strip while angle 1 is scanned. Then angle 2 shifts to the next strip and angle 1 is scanned again.\n\n"
-                "This is intentionally different from a coarse rectangular raster."
+                "The default slope is the fixed-position ballpark from the mirror geometry. Change its magnitude or sign if the observed laser response says the useful diagonal is different."
             ),
         )
 
@@ -1021,6 +1022,8 @@ class LaserMirrorApp:
         self.config.scan.overlap_horizontal_step_steps = max(0.0, float(self.overlap_horizontal_step_var.get()))
         self.config.scan.overlap_vertical_step_steps = max(0.0, float(self.overlap_vertical_step_var.get()))
         self.config.scan.overlap_angle_span_urad = max(0.0, float(self.overlap_angle_span_var.get()))
+        self.config.scan.overlap_line_span_urad = max(0.0, float(self.overlap_angle_span_var.get()))
+        self.config.scan.overlap_diagonal_slope = float(self.overlap_slope_var.get())
         self._update_scale_summary()
 
     def _save_config(self) -> None:
@@ -1053,9 +1056,22 @@ class LaserMirrorApp:
         self.overlap_vertical_step_var.set(200.0)
         self.overlap_angle_span_var.set(300.0)
         self.overlap_diagonal_var.set("upper_left_to_lower_right")
+        self._set_overlap_physical_slope(update_config=False)
         self._pull_ui_into_config()
         self._log("Applied coarse recovery defaults for visual laser search.")
         self.status_var.set("Coarse recovery defaults applied. Reconnect if backend settings changed.")
+
+    def _set_overlap_physical_slope(self, update_config: bool = True) -> None:
+        slope = -abs(fixed_position_diagonal_slope(self.geometry, self.overlap_axis_var.get()))
+        self.overlap_slope_var.set(round(slope, 4))
+        if update_config:
+            self._pull_ui_into_config()
+            self.overlap_status_var.set(f"Using fixed-position diagonal slope m2/m1 ~= {slope:.3f}.")
+
+    def _invert_overlap_slope(self) -> None:
+        self.overlap_slope_var.set(-float(self.overlap_slope_var.get()))
+        self._pull_ui_into_config()
+        self.overlap_status_var.set(f"Diagonal slope inverted to {float(self.overlap_slope_var.get()):.3f}.")
 
     def _browse_output_root(self) -> None:
         chosen = filedialog.askdirectory(initialdir=self.output_root_var.get() or str(self.config_path.parent))
@@ -1489,6 +1505,7 @@ class LaserMirrorApp:
             float(self.overlap_angle_span_var.get()),
             self.overlap_solve_mode_var.get(),
             self.overlap_diagonal_var.get(),
+            float(self.overlap_slope_var.get()),
         )
 
     def _preview_overlap_scan(self) -> None:
@@ -1690,6 +1707,13 @@ class LaserMirrorApp:
                     f"m1={best_point.angle_x_urad / 1000.0:.3f} mrad, m2={best_point.angle_y_urad / 1000.0:.3f} mrad; "
                     f"Δsteps=({m1_delta_steps:.1f}, {m2_delta_steps:.1f}). Use 'Move to overlap optimum' to go there."
                 )
+                fit = fit_overlap_diagonal(self.measurements, float(self.overlap_slope_var.get()))
+                if fit is not None:
+                    self.overlap_status_var.set(
+                        self.overlap_status_var.get()
+                        + f" Measured diagonal slope={fit.slope:.3f} (target {fit.ideal_slope:.3f}, delta={fit.slope_error:+.3f}); "
+                        f"weighted RMS distance={fit.weighted_rms_distance_urad:.1f} urad."
+                    )
             else:
                 self.overlap_status_var.set("Overlap scan finished without a valid optimum.")
         self._save_legacy_state()
@@ -2457,6 +2481,29 @@ class LaserMirrorApp:
             canvas.create_line(px - 8, py, px + 8, py, fill="#111827", width=2)
             canvas.create_line(px, py - 8, px, py + 8, fill="#111827", width=2)
             canvas.create_text(px + 52, py + 12, text="recommended", fill="#111827")
+
+        ideal_slope_mrad = float(self.overlap_slope_var.get())
+        canvas.create_line(
+            map_x(xlo),
+            map_y(ideal_slope_mrad * xlo),
+            map_x(xhi),
+            map_y(ideal_slope_mrad * xhi),
+            fill="#2563eb",
+            width=2,
+            dash=(6, 4),
+        )
+        fit = fit_overlap_diagonal(self.measurements, float(self.overlap_slope_var.get()))
+        if fit is not None:
+            fit_slope_mrad = fit.slope
+            fit_intercept_mrad = fit.intercept_urad / 1000.0
+            canvas.create_line(
+                map_x(xlo),
+                map_y(fit_slope_mrad * xlo + fit_intercept_mrad),
+                map_x(xhi),
+                map_y(fit_slope_mrad * xhi + fit_intercept_mrad),
+                fill="#dc2626",
+                width=2,
+            )
 
         for frac, value in ((0.0, xlo), (0.5, 0.5 * (xlo + xhi)), (1.0, xhi)):
             tick_x = margin + frac * (w - 2 * margin)
