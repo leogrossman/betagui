@@ -423,6 +423,40 @@ class ScanTests(unittest.TestCase):
             strip = [point.angle_x_urad for point in points if point.group_index == group_index]
             self.assertLess(strip[0], strip[-1])
 
+    def test_overlap_strip_reposition_moves_are_uniform(self) -> None:
+        config = AppConfig()
+        geometry = LaserMirrorGeometry(config.geometry)
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        points = build_overlap_scan_points(
+            geometry,
+            controller.capture_reference(),
+            'vertical',
+            'mirror2',
+            7,
+            8.0,
+            9,
+            geometry.steps_to_urad(350.0, 'y', 1),
+            'mirror1_primary',
+            'right_to_left',
+            diagonal_slope=-1.38,
+            pattern='horizontal_strips',
+            serpentine=True,
+            mirror2_span_urad=geometry.steps_to_urad(1800.0, 'y', 2),
+        )
+        strips: dict[int, list] = {}
+        for point in points:
+            strips.setdefault(point.group_index, []).append(point)
+        transition_m1 = []
+        transition_m2 = []
+        for group_index in range(len(strips) - 1):
+            last_point = strips[group_index][-1].targets
+            next_point = strips[group_index + 1][0].targets
+            transition_m1.append(next_point.m1_vertical - last_point.m1_vertical)
+            transition_m2.append(next_point.m2_vertical - last_point.m2_vertical)
+        self.assertLessEqual(max(transition_m1) - min(transition_m1), 1.0)
+        self.assertLessEqual(max(transition_m2) - min(transition_m2), 1.0)
+
     def test_fit_overlap_diagonal_estimates_measured_slope(self) -> None:
         from laser_mirrors_app.models import MeasurementRecord
         rows = []

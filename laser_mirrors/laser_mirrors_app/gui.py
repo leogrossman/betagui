@@ -218,11 +218,12 @@ class LaserMirrorApp:
         self.overlap_axis_var = tk.StringVar(value="vertical")
         self.overlap_position_points_var = tk.IntVar(value=7)
         self.overlap_angle_points_var = tk.IntVar(value=9)
-        self.overlap_m1_span_urad_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_m1_span_urad", 189.0))
-        self.overlap_m2_span_urad_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_m2_span_urad", 1890.0))
-        self.overlap_m1_span_steps_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_m1_span_steps", 100.0))
-        self.overlap_m2_span_steps_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_m2_span_steps", 1000.0))
+        self.overlap_m1_span_urad_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_m1_span_urad", 661.5))
+        self.overlap_m2_span_urad_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_m2_span_urad", 3402.0))
+        self.overlap_m1_span_steps_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_m1_span_steps", 350.0))
+        self.overlap_m2_span_steps_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_m2_span_steps", 1800.0))
         self.overlap_plot_axis_var = tk.StringVar(value=getattr(self.config.scan, "overlap_plot_axis", "angle"))
+        self.overlap_strip_start_extra_dwell_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_strip_start_extra_dwell_s", 1.0))
         self.overlap_diagonal_var = tk.StringVar(value="right_to_left")
         self.overlap_slope_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_diagonal_slope", fixed_position_diagonal_slope(self.geometry, "vertical")))
         self.overlap_pattern_var = tk.StringVar(value=getattr(self.config.scan, "overlap_pattern", "horizontal_strips"))
@@ -625,6 +626,7 @@ class LaserMirrorApp:
         self._add_labeled_entry(size_box, "M2 span [steps]", self.overlap_m2_span_steps_var, 4)
         self._add_labeled_entry(size_box, "M2 span [µrad]", self.overlap_m2_span_urad_var, 5)
         self._add_labeled_combo(size_box, "Plot axes", self.overlap_plot_axis_var, ["angle", "motor_steps"], 6)
+        self._add_labeled_entry(size_box, "Strip-start wait [s]", self.overlap_strip_start_extra_dwell_var, 7)
         ttk.Label(
             size_box,
             text=(
@@ -635,7 +637,7 @@ class LaserMirrorApp:
             ),
             wraplength=340,
             justify="left",
-        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         start_box = ttk.LabelFrame(controls, text="Scan start position", padding=10)
         start_box.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
@@ -927,6 +929,7 @@ class LaserMirrorApp:
             self.overlap_slope_var,
             self.overlap_diagonal_var,
             self.overlap_plot_axis_var,
+            self.overlap_strip_start_extra_dwell_var,
             self.dwell_var,
             self.samples_var,
             self.settle_var,
@@ -1148,6 +1151,7 @@ class LaserMirrorApp:
         self.config.scan.overlap_line_span_urad = self.config.scan.overlap_m1_span_urad
         self.config.scan.overlap_diagonal_slope = float(self.overlap_slope_var.get())
         self.config.scan.overlap_plot_axis = self.overlap_plot_axis_var.get()
+        self.config.scan.overlap_strip_start_extra_dwell_s = max(0.0, float(self.overlap_strip_start_extra_dwell_var.get()))
         self.config.scan.overlap_pattern = self.overlap_pattern_var.get()
         self.config.scan.overlap_serpentine = bool(self.overlap_serpentine_var.get())
         self._update_scale_summary()
@@ -1179,11 +1183,12 @@ class LaserMirrorApp:
         self.dwell_var.set(0.50)
         self.samples_var.set(3)
         self.manual_delta_var.set(100.0)
-        self.overlap_m1_span_urad_var.set(189.0)
-        self.overlap_m2_span_urad_var.set(1890.0)
-        self.overlap_m1_span_steps_var.set(100.0)
-        self.overlap_m2_span_steps_var.set(1000.0)
+        self.overlap_m1_span_urad_var.set(661.5)
+        self.overlap_m2_span_urad_var.set(3402.0)
+        self.overlap_m1_span_steps_var.set(350.0)
+        self.overlap_m2_span_steps_var.set(1800.0)
         self.overlap_plot_axis_var.set("angle")
+        self.overlap_strip_start_extra_dwell_var.set(1.0)
         self.overlap_slope_var.set(round(fixed_position_diagonal_slope(self.geometry, self.overlap_axis_var.get()), 4))
         self.overlap_diagonal_var.set("right_to_left")
         self.overlap_pattern_var.set("horizontal_strips")
@@ -1294,9 +1299,12 @@ class LaserMirrorApp:
             offsets = [target.offset_mm for target in targets]
             angles = [target.angle_urad for target in targets]
             per_point_s = max(0.0, float(self.dwell_var.get())) + max(1, int(self.samples_var.get())) * 0.02 + max(0.0, float(self.settle_var.get()))
-            total_s = len(points) * per_point_s
+            strip_count = len({point.group_index for point in points if point.mode.startswith("overlap_")})
+            strip_extra_s = strip_count * max(0.0, float(self.overlap_strip_start_extra_dwell_var.get()))
+            total_s = len(points) * per_point_s + strip_extra_s
             self.overlap_estimate_var.set(
-                f"{len(points)} points, about {total_s:.1f} s plus motor travel.\n"
+                f"{len(points)} points, about {total_s:.1f} s plus motor travel "
+                f"({strip_count} strip-start waits).\n"
                 f"Mirror-angle range: m1 {min(mirror1):+.1f}..{max(mirror1):+.1f} µrad "
                 f"(span {max(mirror1) - min(mirror1):.1f}), "
                 f"m2 {min(mirror2):+.1f}..{max(mirror2):+.1f} µrad "

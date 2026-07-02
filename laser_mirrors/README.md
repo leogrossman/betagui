@@ -327,11 +327,13 @@ It builds a diagonal center line in mirror-angle space and samples around it:
 
 The result is a focused diagonal family in `(mirror 1 deflection angle, mirror 2 deflection angle)` space. The live estimate shows point count, approximate time, angle range, motor target range around the chosen start, and approximate beam-position offset before the scan is run.
 
-The default strip scan uses a moderately wide strip and a wide strip-center range: `M1 span = 100 steps`, `M2 span = 1000 steps`. In the default vertical plane this is about `189 µrad` by `1890 µrad`. This keeps the useful 1:10 strip-width to strip-spacing-range shape without making the horizontal strip too narrow.
+The default strip scan uses a wide strip and a wider strip-center range: `M1 span = 350 steps`, `M2 span = 1800 steps`. In the default vertical plane this is about `661.5 µrad` by `3402 µrad`. With 9 points per strip and 7 strip centers this gives about `44` steps between points inside a strip and about `300` steps between strip centers.
 
 The fixed-position slope magnitude is set mainly by the mirror-to-undulator distances, so horizontal and vertical are similar in size. For the current beamline workflow the preset uses the negative branch in both planes, about `-1.38`.
 
 `right_to_left` and `left_to_right` measure the same points; they choose both which end of the diagonal is visited first and which side of each strip is entered first. With `right_to_left`, each horizontal strip starts on its right edge before serpentine alternation. With `left_to_right`, it starts on its left edge. Serpentine strip order is usually most efficient because every other strip is swept in reverse, avoiding a flyback to the same edge before the next strip. Turn serpentine off only when you deliberately want every strip approached from the same side to check backlash or hysteresis.
+
+The first point of every overlap strip waits an additional `Strip-start wait` before sampling. The default is `1.0 s`, matching the approximate QPD PV update cadence so the first measured value after a strip-to-strip motor move is not stale.
 
 After an overlap scan, the GUI prints the recommended optimum as all four motor PV targets with deltas from the previous start. The scan start stays at the reference/typed value until you explicitly press `Move to optimum` or `Use optimum`; then running the same scan again is the intended verification step.
 
@@ -543,6 +545,7 @@ These defaults are intended for control-room measurement runs without racing the
 - angle spans: `50 µrad`
 - `7 x 7` points
 - `0.50 s` dwell after each completed point move
+- `1.0 s` extra wait on the first point of each overlap strip
 - `3` samples per point
 - `mirror1_primary` solve mode
 - motion throttle:
@@ -550,7 +553,7 @@ These defaults are intended for control-room measurement runs without racing the
   - `inter_put_delay_s = 0.05`
   - `settle_s = 0.30`
 
-The per-point estimate is roughly `settle_s + dwell_s + 0.02 s * samples`, plus the real motor travel / DMOV wait time.
+The per-point estimate is roughly `settle_s + dwell_s + 0.02 s * samples`, plus the real motor travel / DMOV wait time. Overlap scans add the strip-start wait once per strip.
 
 ## Control-room run instructions
 

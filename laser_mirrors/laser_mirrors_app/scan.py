@@ -542,6 +542,7 @@ class ScanRunner:
         start = time.perf_counter()
         total_points = len(points)
         self.debug(f"Starting {points[0].mode if points else 'scan'} with {total_points} points. Session dir: {self.session_dir}")
+        previous_group_index: int | None = None
         try:
             for point in points:
                 if self._stop_requested.is_set():
@@ -571,6 +572,15 @@ class ScanRunner:
                 if hasattr(self.signal_backend, "update_target") and point.angle_x_urad == point.angle_x_urad:
                     self.signal_backend.update_target(point.angle_x_urad, point.angle_y_urad)
                 dwell_s = max(0.0, self.config.scan.dwell_s)
+                if point.mode.startswith("overlap_") and point.group_index != previous_group_index:
+                    strip_wait_s = max(0.0, getattr(self.config.scan, "overlap_strip_start_extra_dwell_s", 0.0))
+                    if strip_wait_s > 0.0:
+                        dwell_s += strip_wait_s
+                        self.debug(
+                            f"Point {point.index + 1}/{total_points}: first point in {point.group_label}; "
+                            f"adding {strip_wait_s:.2f} s strip-start wait before sampling."
+                        )
+                previous_group_index = point.group_index
                 self.debug(f"Point {point.index + 1}/{total_points}: move complete, dwelling for {dwell_s:.2f} s.")
                 end_time = time.perf_counter() + dwell_s
                 while time.perf_counter() < end_time:
