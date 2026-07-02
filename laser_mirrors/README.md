@@ -535,22 +535,22 @@ If the GUI crashes, the intended workflow is:
 
 ## Current standard defaults
 
-These defaults are intentionally conservative:
+These defaults are intended for control-room measurement runs without racing the motors or the signal readback:
 
 - `safe_mode = False`
-- `write_mode = False`
+- `write_mode = True`
 - signal preset: `P1 avg`
 - angle spans: `50 µrad`
 - `7 x 7` points
-- `1.0 s` dwell
-- `5` samples per point
+- `0.50 s` dwell after each completed point move
+- `3` samples per point
 - `mirror1_primary` solve mode
 - motion throttle:
-  - `max_step_per_put = 8`
-  - `inter_put_delay_s = 0.35`
-  - `settle_s = 0.8`
+  - `max_step_per_put = 100`
+  - `inter_put_delay_s = 0.05`
+  - `settle_s = 0.30`
 
-Those are deliberately slower and gentler than a “fast” scan. You can relax them later after you confirm that the controller stays stable.
+The per-point estimate is roughly `settle_s + dwell_s + 0.02 s * samples`, plus the real motor travel / DMOV wait time.
 
 ## Control-room run instructions
 

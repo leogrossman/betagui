@@ -36,7 +36,7 @@ class ControllerConfig:
     max_step_per_put: float = 100.0
     inter_put_delay_s: float = 0.05
     wait_timeout_s: float = 15.0
-    settle_s: float = 0.05
+    settle_s: float = 0.30
     max_delta_from_reference: float = 5000.0
     max_absolute_move_steps: float = 5000.0
     use_manual_motor_limits: bool = False
@@ -72,8 +72,8 @@ class ScanConfig:
     span_angle_y_urad: float = 50.0
     points_x: int = 9
     points_y: int = 9
-    dwell_s: float = 0.05
-    p1_samples_per_point: int = 1
+    dwell_s: float = 0.50
+    p1_samples_per_point: int = 3
     serpentine: bool = True
     objective: str = "max"
     solve_mode: str = "mirror1_primary"
