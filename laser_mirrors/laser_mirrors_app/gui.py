@@ -220,8 +220,8 @@ class LaserMirrorApp:
         self.overlap_angle_points_var = tk.IntVar(value=9)
         self.overlap_m1_span_urad_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_m1_span_urad", 600.0))
         self.overlap_m2_span_urad_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_m2_span_urad", 300.0))
-        self.overlap_m1_span_steps_var = tk.DoubleVar(value=0.0)
-        self.overlap_m2_span_steps_var = tk.DoubleVar(value=0.0)
+        self.overlap_m1_span_steps_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_m1_span_steps", 300.0))
+        self.overlap_m2_span_steps_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_m2_span_steps", 150.0))
         self.overlap_diagonal_var = tk.StringVar(value="right_to_left")
         self.overlap_slope_var = tk.DoubleVar(value=getattr(self.config.scan, "overlap_diagonal_slope", fixed_position_diagonal_slope(self.geometry, "vertical")))
         self.overlap_pattern_var = tk.StringVar(value=getattr(self.config.scan, "overlap_pattern", "horizontal_strips"))
@@ -619,14 +619,15 @@ class LaserMirrorApp:
         size_box.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
         self._add_labeled_entry(size_box, "Center-line points", self.overlap_position_points_var, 0)
         self._add_labeled_entry(size_box, "Cross-line points", self.overlap_angle_points_var, 1)
-        self._add_labeled_entry(size_box, "M1 span [µrad]", self.overlap_m1_span_urad_var, 2)
-        self._add_labeled_entry(size_box, "M1 span [steps]", self.overlap_m1_span_steps_var, 3)
-        self._add_labeled_entry(size_box, "M2 span [µrad]", self.overlap_m2_span_urad_var, 4)
-        self._add_labeled_entry(size_box, "M2 span [steps]", self.overlap_m2_span_steps_var, 5)
+        self._add_labeled_entry(size_box, "M1 span [steps]", self.overlap_m1_span_steps_var, 2)
+        self._add_labeled_entry(size_box, "M1 span [µrad]", self.overlap_m1_span_urad_var, 3)
+        self._add_labeled_entry(size_box, "M2 span [steps]", self.overlap_m2_span_steps_var, 4)
+        self._add_labeled_entry(size_box, "M2 span [µrad]", self.overlap_m2_span_urad_var, 5)
         ttk.Label(
             size_box,
             text=(
-                "These spans are the intended plot dimensions in mirror-angle space. "
+                "Step spans are the physical command spans and are rounded to whole motor steps. "
+                "The µrad fields are the converted mirror-angle readout. "
                 "For horizontal strips, M1 span is the strip width and M2 span is the spacing range between strip centers."
             ),
             wraplength=340,
@@ -665,7 +666,7 @@ class LaserMirrorApp:
         self._attach_tooltip(
             self.overlap_canvas,
             "Two-mirror overlap map: x and y are the two mirror deflection angles in the chosen plane. "
-            "Dashed blue is the requested diagonal; red is the measured signal-weighted fit after data exists. The star marks the start point before the scan; the cross marks the recommended optimum.",
+            "Dashed blue is the requested diagonal; red is the strip-optimum fit after data exists. The star marks the start point before the scan; the cross marks the recommended optimum.",
         )
         self.overlap_canvas.bind("<Button-1>", lambda event: self._inspect_canvas_point("overlap", event))
         self.overlap_progress_canvas.bind("<Button-1>", lambda event: self._inspect_canvas_point("overlap_progress", event))
@@ -934,16 +935,16 @@ class LaserMirrorApp:
         for variable in self.overlap_start_vars.values():
             variable.trace_add("write", lambda *_args: self._on_live_setting_changed())
         self.overlap_axis_var.trace_add("write", lambda *_args: self._overlap_plane_changed())
-        self._sync_overlap_span_units("m1", "urad")
-        self._sync_overlap_span_units("m2", "urad")
+        self._sync_overlap_span_units("m1", "steps")
+        self._sync_overlap_span_units("m2", "steps")
 
     def _on_live_setting_changed(self) -> None:
         self._refresh_overlap_estimate()
         self._refresh_plots()
 
     def _overlap_plane_changed(self) -> None:
-        self._sync_overlap_span_units("m1", "urad")
-        self._sync_overlap_span_units("m2", "urad")
+        self._sync_overlap_span_units("m1", "steps")
+        self._sync_overlap_span_units("m2", "steps")
         self._refresh_overlap_estimate()
         self._refresh_plots()
 
@@ -966,9 +967,11 @@ class LaserMirrorApp:
             urad_var = self.overlap_m1_span_urad_var if mirror == "m1" else self.overlap_m2_span_urad_var
             steps_var = self.overlap_m1_span_steps_var if mirror == "m1" else self.overlap_m2_span_steps_var
             if source == "urad":
-                steps_var.set(round(self.geometry.urad_to_steps(float(urad_var.get()), axis_code, mirror_index), 3))
+                rounded_steps = float(round(self.geometry.urad_to_steps(float(urad_var.get()), axis_code, mirror_index)))
             else:
-                urad_var.set(round(self.geometry.steps_to_urad(float(steps_var.get()), axis_code, mirror_index), 3))
+                rounded_steps = float(round(float(steps_var.get())))
+            steps_var.set(rounded_steps)
+            urad_var.set(round(self.geometry.steps_to_urad(rounded_steps, axis_code, mirror_index), 3))
             self._update_overlap_slope_from_spans()
         except (tk.TclError, ValueError):
             pass
@@ -1141,6 +1144,8 @@ class LaserMirrorApp:
         self.config.scan.spiral_strategy = self.spiral_strategy_var.get()
         self.config.scan.overlap_m1_span_urad = max(0.0, float(self.overlap_m1_span_urad_var.get()))
         self.config.scan.overlap_m2_span_urad = max(0.0, float(self.overlap_m2_span_urad_var.get()))
+        self.config.scan.overlap_m1_span_steps = max(0.0, round(float(self.overlap_m1_span_steps_var.get())))
+        self.config.scan.overlap_m2_span_steps = max(0.0, round(float(self.overlap_m2_span_steps_var.get())))
         self.config.scan.overlap_angle_span_urad = self.config.scan.overlap_m1_span_urad
         self.config.scan.overlap_line_span_urad = self.config.scan.overlap_m1_span_urad
         self.config.scan.overlap_diagonal_slope = float(self.overlap_slope_var.get())
@@ -1177,11 +1182,13 @@ class LaserMirrorApp:
         self.manual_delta_var.set(100.0)
         self.overlap_m1_span_urad_var.set(600.0)
         self.overlap_m2_span_urad_var.set(300.0)
+        self.overlap_m1_span_steps_var.set(300.0)
+        self.overlap_m2_span_steps_var.set(150.0)
         self.overlap_diagonal_var.set("right_to_left")
         self.overlap_pattern_var.set("horizontal_strips")
         self.plot_dot_radius_var.set(7.0)
-        self._sync_overlap_span_units("m1", "urad")
-        self._sync_overlap_span_units("m2", "urad")
+        self._sync_overlap_span_units("m1", "steps")
+        self._sync_overlap_span_units("m2", "steps")
         self._pull_ui_into_config()
         self._log("Applied coarse recovery defaults for visual laser search.")
         self.status_var.set("Coarse recovery defaults applied. Reconnect if backend settings changed.")
@@ -1762,9 +1769,7 @@ class LaserMirrorApp:
         points = max(1, int(self.overlap_angle_points_var.get()))
         if points <= 1:
             return 0.0
-        axis_code = "x" if axis == "horizontal" else "y"
-        per_gap_urad = abs(float(self.overlap_m1_span_urad_var.get())) / (points - 1)
-        return abs(self.geometry.urad_to_steps(per_gap_urad, axis_code, 1))
+        return abs(float(self.overlap_m1_span_steps_var.get())) / (points - 1)
 
     def _start_scan_common(self, mode: str) -> None:
         self._refresh_active_signal_backend()

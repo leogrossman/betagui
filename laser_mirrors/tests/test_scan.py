@@ -243,10 +243,34 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(len(strips), 3)
         centers = [strip_points[len(strip_points) // 2] for strip_points in strips.values()]
         for point in centers:
-            self.assertAlmostEqual(point.angle_y_urad, slope * point.angle_x_urad, places=6)
+            self.assertLessEqual(abs(point.angle_y_urad - slope * point.angle_x_urad), config.geometry.vertical_step_urad)
         for strip_points in strips.values():
             self.assertGreater(len({round(point.angle_x_urad, 8) for point in strip_points}), 1)
             self.assertGreater(len({round(point.angle_y_urad, 8) for point in strip_points}), 1)
+
+    def test_overlap_scan_targets_use_whole_step_deltas(self) -> None:
+        config = AppConfig()
+        geometry = LaserMirrorGeometry(config.geometry)
+        factory = PVFactory(True)
+        controller = MirrorController(config.controller, factory)
+        reference = controller.capture_reference()
+        points = build_overlap_scan_points(
+            geometry,
+            reference,
+            'vertical',
+            'mirror2',
+            4,
+            7.5,
+            4,
+            37.0,
+            'mirror1_primary',
+            diagonal_slope=-1.37,
+            pattern='perpendicular_cross',
+        )
+        for point in points:
+            deltas = point.targets.as_dict()
+            self.assertEqual(deltas["m1_vertical"] - reference["m1_vertical"], round(deltas["m1_vertical"] - reference["m1_vertical"]))
+            self.assertEqual(deltas["m2_vertical"] - reference["m2_vertical"], round(deltas["m2_vertical"] - reference["m2_vertical"]))
 
     def test_build_overlap_scan_points_can_make_horizontal_strips(self) -> None:
         config = AppConfig()

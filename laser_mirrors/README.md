@@ -56,12 +56,12 @@ The tool is organized around two standard jobs:
    - use the `Two-mirror scan` tab
    - choose `vertical` or `horizontal`
    - choose the pattern: perpendicular cross-lines, horizontal strips, or vertical strips
-   - set the M1 and M2 plot spans in either µrad or steps; the paired fields update each other
+   - set the M1 and M2 spans as whole motor steps; the µrad fields show the converted physical mirror-angle span
    - use the span-derived negative diagonal slope, invert the slope, or type a custom slope
    - leave serpentine strip order on for the shortest motor path
    - load the scan start from current RBV, captured reference, or the current optimum
    - use the live estimate to check approximate scan time, motor range, beam-position offset, and angle range before starting
-   - inspect the mirror-1 vs mirror-2 deflection-angle map, the marked start point, the requested diagonal, the fitted measured diagonal, and the recommended optimum
+   - inspect the mirror-1 vs mirror-2 deflection-angle map, the marked start point, the requested diagonal, the fitted strip-optimum diagonal, and the recommended optimum
 
 The tool also includes:
 

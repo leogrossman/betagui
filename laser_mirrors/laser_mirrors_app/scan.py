@@ -167,9 +167,13 @@ def build_overlap_scan_points(
                 mirror1_angle_urad = center_m1_urad + cross_urad * normal_m1
                 mirror2_angle_urad = center_m2_urad + cross_urad * normal_m2
                 group_label = f"cross-line {group_index + 1}"
+            mirror1_steps = round(geometry.urad_to_steps(mirror1_angle_urad, axis_code, 1))
+            mirror2_steps = round(geometry.urad_to_steps(mirror2_angle_urad, axis_code, 2))
+            mirror1_angle_urad = geometry.steps_to_urad(mirror1_steps, axis_code, 1)
+            mirror2_angle_urad = geometry.steps_to_urad(mirror2_steps, axis_code, 2)
             targets = dict(reference_steps)
-            targets[m1_key] = reference_steps[m1_key] + geometry.urad_to_steps(mirror1_angle_urad, axis_code, 1)
-            targets[m2_key] = reference_steps[m2_key] + geometry.urad_to_steps(mirror2_angle_urad, axis_code, 2)
+            targets[m1_key] = reference_steps[m1_key] + mirror1_steps
+            targets[m2_key] = reference_steps[m2_key] + mirror2_steps
             points.append(
                 ScanPoint(
                     index=index,

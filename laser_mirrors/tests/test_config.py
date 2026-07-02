@@ -25,6 +25,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(loaded.scan.overlap_line_span_urad, 300.0)
         self.assertEqual(loaded.scan.overlap_m1_span_urad, 600.0)
         self.assertEqual(loaded.scan.overlap_m2_span_urad, 300.0)
+        self.assertEqual(loaded.scan.overlap_m1_span_steps, 300.0)
+        self.assertEqual(loaded.scan.overlap_m2_span_steps, 150.0)
         self.assertLess(loaded.scan.overlap_diagonal_slope, 0.0)
         self.assertEqual(loaded.scan.overlap_pattern, "horizontal_strips")
         self.assertTrue(loaded.scan.overlap_serpentine)
